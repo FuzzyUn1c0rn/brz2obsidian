@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -13,6 +14,7 @@ from brz2obsidian.application.review_choices import (
     review_plan_attachment_references,
     review_plan_choice_action,
 )
+from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
@@ -31,6 +33,7 @@ from brz2obsidian.core import (
 from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
+from tests.application.test_update_context import worker_context_call
 from tests.application.test_vault_apply import _apply, _ready_case
 from tests.application.test_vault_checkpoints import git, user_state
 from tests.application.test_vault_recovery_process import (
@@ -162,7 +165,10 @@ def _with_unassociated_manual(facts, raw):
 
 
 def test_small_latest_undo_reverses_one_note_and_refuses_reuse():
+    from tests.application.test_owned_update_preparation import _tree
+
     vault, source, operations, reviewed, before = _ready_case()
+    source_before = _tree(source)
     opening = vault / "Notes/Opening.md"
     local = vault / "Notes/Local.md"
 
@@ -230,7 +236,103 @@ def test_small_latest_undo_reverses_one_note_and_refuses_reuse():
     assert_user_git_unchanged()
     resolved = operations.resolve_undo(vault, prepared, choice)
     assert resolved.status == "offered" and resolved.review.ready, resolved.code
-    undone = operations.execute_undo(vault, resolved)
+
+    # Exercise the current owned History consumer against the same native Apply.
+    # Inspection, preparation, paging and choosing must not publish a checkpoint.
+    before_history = user_state(vault)
+    vault_before_history = _tree(vault)
+    context = UpdateContext(operations=Operations())
+    inspected = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "22222222-2222-4222-8222-222222222222",
+        },
+    )
+    assert (
+        inspected.status == "available" and "review_undo" in inspected.next_actions
+    ), inspected.model_dump_json()
+    assert inspected.history is not None and inspected.binding is not None
+    latest = inspected.history.operation
+    assert (latest.operation_id, latest.generation, latest.receipt_commit) == (
+        applied.operation_id,
+        applied.generation,
+        applied.receipt_commit,
+    )
+    assert latest.result_commit == applied.result_commit
+    assert inspected.binding.checkpoint_commit == applied.result_commit
+    owned = worker_context_call(
+        context,
+        {"command": "prepare_history", "binding": inspected.binding, "kind": "undo"},
+    )
+    assert owned.status == "prepared_review" and owned.binding is not None, (
+        owned.model_dump_json()
+    )
+    assert not owned.ready and owned.unresolved > 0
+    assert owned.binding.target_receipt_commit == applied.receipt_commit
+    assert owned.binding.checkpoint_commit == inspected.binding.checkpoint_commit
+    assert (
+        owned.binding.checkpoint_generation == inspected.binding.checkpoint_generation
+    )
+    assert owned.binding.proposal_id and owned.binding.review_generation is not None
+    page = worker_context_call(
+        context,
+        {"command": "page", "binding": owned.binding, "limit": 100, "byte_limit": 256},
+    )
+    assert page.status == "available" and page.page is not None, page.model_dump_json()
+    assert page.binding == owned.binding and not page.ready
+    assert (page.page.proposal_id, page.page.generation) == (
+        owned.binding.proposal_id,
+        owned.binding.review_generation,
+    )
+    assert page.page.next_offset is None
+    (opening_review,) = [
+        row for row in page.page.items if row.current_path == "Notes/Opening.md"
+    ]
+    assert opening_review.original == b"incoming opening\n"
+    assert opening_review.current == b"incoming opening\n"
+    assert opening_review.incoming == b"authored opening\r\n"
+    assert not opening_review.omitted
+    choices = worker_context_call(
+        context, {"command": "history_choices", "binding": owned.binding}
+    )
+    assert choices.status == "available" and choices.next_choice_offset is None, (
+        choices.model_dump_json()
+    )
+    (offer,) = [
+        row
+        for row in choices.offers
+        if row.change_id == opening_review.change_id and row.domain == "text"
+    ]
+    assert "incoming" in offer.choices
+    selected = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": owned.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "incoming",
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
+    assert selected.status == "prepared_review" and selected.binding is not None, (
+        selected.model_dump_json()
+    )
+    assert selected.ready and selected.unresolved == 0
+    assert selected.binding.target_receipt_commit == applied.receipt_commit
+    assert user_state(vault) == before_history and _tree(vault) == vault_before_history
+    assert _tree(source) == source_before
+    completed = worker_context_call(
+        context, {"command": "execute_history", "binding": selected.binding}
+    )
+    assert completed.status == "undone" and completed.history_action is not None, (
+        completed.model_dump_json()
+    )
+    undone = completed.history_action.operation
+    assert undone is not None and completed.binding is None and not completed.ready
+    closed = worker_context_call(context, {"command": "close", "choice": "discard"})
+    assert closed.code == "context_closed" and closed.binding is None
     assert (undone.status, undone.kind, undone.publication) == (
         "undone",
         "undo",
@@ -267,6 +369,7 @@ def test_small_latest_undo_reverses_one_note_and_refuses_reuse():
     assert opening.read_bytes() == b"authored opening\r\n"
     assert local.read_bytes() == b"local \xff\r\n"
     assert_user_git_unchanged()
+    assert _tree(source) == source_before
 
 
 def test_latest_undo_retains_created_definition_identities_and_later_home():
@@ -1441,7 +1544,9 @@ def test_latest_undo_keeps_reviewed_imported_and_later_writing_while_reversing_o
     )
 
 
-def test_production_undo_child_stops_partially_and_fresh_review_restores_same_target():
+def test_production_undo_child_stops_partially_and_fresh_review_restores_same_target(
+    capsys,
+):
     vault, source, review_path, user_before, checkpoint_ref = _two_note_case()
     operations = Operations()
     applied = _apply(
@@ -1489,6 +1594,38 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
     assert repeat.status == "offered", repeat.code
     assert repeat.target_receipt_commit == applied.receipt_commit
     assert repeat.checkpoint_commit != prepared.checkpoint_commit
+    public = UpdateContext()
+    inspected = worker_context_call(
+        public,
+        {"command": "history", "vault": str(vault), "selection_id": str(uuid4())},
+    )
+    assert (
+        inspected.status == "available" and "review_undo" in inspected.next_actions
+    ), inspected.model_dump_json()
+    from brz2obsidian.cli import main
+
+    before_status = user_state(vault)
+    locator_before_status = (vault / ".brz2obsidian/locator.json").read_bytes()
+    assert main(["review", "status", str(vault), "--json"]) == 0
+    cli_status = json.loads(capsys.readouterr().out)
+    assert cli_status["status"] == "available"
+    assert cli_status["next_actions"] == ["review_update", "review_undo"]
+    assert cli_status["operation"]["operation_id"] == restored.operation_id
+    assert cli_status["checkpoint"]["commit"] == restored.result_commit
+    assert user_state(vault) == before_status
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_status
+    public_prepared = worker_context_call(
+        public,
+        {"command": "prepare_history", "binding": inspected.binding, "kind": "undo"},
+    )
+    assert public_prepared.status == "prepared_review", (
+        public_prepared.model_dump_json()
+    )
+    assert public_prepared.binding.target_receipt_commit == applied.receipt_commit
+    assert public_prepared.binding.checkpoint_commit == repeat.checkpoint_commit
+    assert (
+        public.close(public_prepared.binding, choice="discard").code == "context_closed"
+    )
     assert operations.execute_undo(vault, prepared).status == "refused"
     opposite = operations.prepare_recovery(vault, direction="finish")
     assert opposite.status == "refused"
@@ -1498,6 +1635,52 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
         retained_path="Notes/Opening.md",
         prefix="undo:fresh-second",
     )
+    cancelled = operations.execute_undo(vault, second, cancel=lambda: True)
+    assert (
+        cancelled.status == "cancelled" and cancelled.code == "cancelled_before_intent"
+    ), cancelled.model_dump_json()
+    assert cancelled.intent_commit is None and cancelled.publication == "not_started"
+    retained = json.loads(
+        git(vault, "cat-file", "blob", cancelled.checkpoint_commit + ":manifest.json")
+    )
+    assert retained["undo_of_receipt_commit"] == applied.receipt_commit
+    assert retained["operation_intent_commit"] is None
+    assert (vault / "Notes/Closing.md").read_bytes() == b"closing incoming\n"
+    assert (vault / "Notes/Opening.md").read_bytes() == later
+    user_after_cancel = user_state(vault)
+    cold = UpdateContext()
+    pending = worker_context_call(
+        cold, {"command": "history", "vault": str(vault), "selection_id": str(uuid4())}
+    )
+    assert pending.status == "recovery_required" and pending.next_actions == (
+        "review_undo",
+    ), pending.model_dump_json()
+    assert (
+        pending.history.operation.kind == "undo"
+        and pending.history.operation.direction == "restore"
+    )
+    locator_before_status = (vault / ".brz2obsidian/locator.json").read_bytes()
+    assert main(["review", "status", str(vault), "--json"]) == 2
+    cli_status = json.loads(capsys.readouterr().out)
+    assert cli_status["status"] == "recovery_required"
+    assert cli_status["next_actions"] == ["review_undo"]
+    assert cli_status["operation"]["operation_id"] == restored.operation_id
+    assert cli_status["checkpoint"]["commit"] == cancelled.checkpoint_commit
+    assert user_state(vault) == user_after_cancel
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_status
+    retry = worker_context_call(
+        cold, {"command": "prepare_history", "binding": pending.binding, "kind": "undo"}
+    )
+    assert retry.status == "prepared_review", retry.model_dump_json()
+    assert retry.binding.target_receipt_commit == applied.receipt_commit
+    assert retry.binding.checkpoint_commit == cancelled.checkpoint_commit
+    assert retry.binding.checkpoint_generation == cancelled.generation
+    assert cold.close(retry.binding, choice="discard").code == "context_closed"
+    assert user_state(vault) == user_after_cancel
+    second = operations.prepare_undo(vault, previous=second)
+    assert second.status == "offered" and second.review.ready, second.model_dump_json()
+    assert second.target_receipt_commit == applied.receipt_commit
+    assert second.checkpoint_commit == cancelled.checkpoint_commit
     undo_path.write_text(second.model_dump_json(), encoding="utf-8")
     _child(_UNDO_CHILD, vault, undo_path, expected=81)
     assert (vault / "Notes/Closing.md").read_bytes() == b"closing authored\r\n"

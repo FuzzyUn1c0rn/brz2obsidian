@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from functools import partial
 from pathlib import Path
 from typing import NamedTuple
@@ -24,8 +24,11 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultRecoveryIntent,
     VaultUpdateDetailPage,
 )
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.core import review_owned_targets, select_review_effects
 from brz2obsidian.core.reversals import (
+    _owned_documents,
+    _owned_targets,
     reversal_document_target,
     review_owned_documents,
 )
@@ -36,6 +39,8 @@ from brz2obsidian.publication.vault_history import (
     _Git,
     _inspect_history,
     _inspect_retained_history,
+    _MetadataCheckpoint,
+    _MetadataHistory,
     _read,
     capture_checkpoint,
     inspect_history,
@@ -469,6 +474,7 @@ def _prepared_for_intent(
     origin_plan=None,
     undo_target=None,
     origin_undo_target=None,
+    origin_effects=None,
 ):
     """A retained prepared review authorizes exactly its selected transition."""
     if loaded is None:
@@ -554,9 +560,8 @@ def _prepared_for_intent(
                         (expected is None) != (source_row is None)
                         or expected is not None
                         and (
-                            len(expected.data) != source_row.size
-                            or hashlib.sha256(expected.data).hexdigest()
-                            != source_row.sha256
+                            content_size(expected) != source_row.size
+                            or content_sha(expected) != source_row.sha256
                         )
                     ):
                         return False
@@ -570,8 +575,8 @@ def _prepared_for_intent(
     def matches(row, content):
         return (
             row is not None
-            and row.size == len(content.data)
-            and row.sha256 == hashlib.sha256(content.data).hexdigest()
+            and row.size == content_size(content)
+            and row.sha256 == content_sha(content)
         )
 
     def saved_current(path, expected):
@@ -607,6 +612,7 @@ def _prepared_for_intent(
                 if isinstance(intent, (VaultRecoveryIntent, _UnpublishedRecovery))
                 else None
             ),
+            effects=origin_effects,
         )
     except OSError, ValueError, KeyError:
         return False
@@ -644,6 +650,7 @@ def _recovery_prepared_matches(
     *,
     direction=None,
     undo_target=None,
+    origin_loaded=None,
 ):
     """Bind reviewed operation targets separately from truthful source lineage."""
     direction = direction or intent.direction
@@ -670,7 +677,14 @@ def _recovery_prepared_matches(
         (subject.item_id, subject.facet): subject
         for subject in origin_plan.producer_facts.subjects
     }
-    origin_effects = select_review_effects(origin_plan)
+    if origin_loaded is not None:
+        if origin_loaded.saved.plan is not origin_plan:
+            return False
+        origin_effects = origin_loaded.historical_effects
+    else:
+        origin_effects = select_review_effects(origin_plan)
+    if origin_effects is None or origin_effects.status != "selected":
+        return False
     origin_files = {row.path: row.content for row in origin_effects.files}
     origin_removals = set(origin_effects.remove_paths)
     from .attachment_ownership import (
@@ -701,13 +715,22 @@ def _recovery_prepared_matches(
     covered = set()
     owned_documents = None
 
+    def owned_targets(change_id, decision_id):
+        return (
+            review_owned_targets(origin_plan, change_id, decision_id)
+            if origin_loaded is None
+            else _owned_targets(
+                origin_plan, change_id, decision_id, lambda: origin_effects
+            )
+        )
+
     def matches(row, content):
         if row is None:
             return content is None
         return (
             content is not None
-            and row.size == len(content.data)
-            and row.sha256 == hashlib.sha256(content.data).hexdigest()
+            and row.size == content_size(content)
+            and row.sha256 == content_sha(content)
         )
 
     for subject in loaded.saved.plan.producer_facts.subjects:
@@ -855,7 +878,11 @@ def _recovery_prepared_matches(
         ):
             return False
         if document is not None and owned_documents is None:
-            owned_documents = review_owned_documents(origin_plan)
+            owned_documents = (
+                review_owned_documents(origin_plan)
+                if origin_loaded is None
+                else _owned_documents(origin_plan, lambda: origin_effects)
+            )
         owned = (
             tuple(
                 t
@@ -865,9 +892,7 @@ def _recovery_prepared_matches(
                 and t == document
             )
             if document is not None
-            else review_owned_targets(
-                origin_plan, proof.origin_change_id, proof.origin_decision_id
-            )
+            else owned_targets(proof.origin_change_id, proof.origin_decision_id)
         )
         if proof.owned_targets != owned:
             return False
@@ -882,7 +907,11 @@ def _recovery_prepared_matches(
                 return False
             covered.add(row.path)
     if direction == "finish":
-        selected = select_review_effects(loaded.saved.plan)
+        selected = loaded.historical_effects
+        if selected is None:
+            selected = select_review_effects(loaded.saved.plan)
+        if selected.status != "selected":
+            return False
         selected_files = {row.path: row for row in selected.files}
         proposed = {row.path: row for row in intent.proposed}
         observed_documents = {
@@ -911,9 +940,7 @@ def _recovery_prepared_matches(
             )
             if subject is None or subject.operation_reversal is not None:
                 continue
-            owned = review_owned_targets(
-                origin_plan, approval.change_id, approval.decision_id
-            )
+            owned = owned_targets(approval.change_id, approval.decision_id)
             for path in set(origin.affected_paths) - covered:
                 original_file = next(
                     (
@@ -1134,7 +1161,8 @@ def _unpublished_recovery_matches(
             )
         ),
     )
-    original_plan = owned[origin.prepared_commit][1].saved.plan
+    original_loaded = owned[origin.prepared_commit][1]
+    original_plan = original_loaded.saved.plan
     lineage_commit = (
         origin.prepared_commit
         if transition.direction == "finish"
@@ -1148,6 +1176,7 @@ def _unpublished_recovery_matches(
         origin_commit=graph.origin_intent_commit,
         origin_plan=original_plan,
         origin_undo_target=origin_undo_target,
+        origin_effects=original_loaded.historical_effects,
     ) and _recovery_prepared_matches(
         transition,
         origin,
@@ -1156,6 +1185,7 @@ def _unpublished_recovery_matches(
         loaded,
         owned[lineage_commit][0],
         original_plan,
+        origin_loaded=original_loaded,
     )
 
 
@@ -1179,10 +1209,10 @@ class _OperationObservation(NamedTuple):
     origin_undo_target: object = None
 
 
-def _inspect_update_observation(vault):
+def _inspect_update_observation(vault, *, _owners=None):
     """Return fresh status and validated graph facts for this one public call."""
     observations = []
-    status = _inspect_update_status(vault, observations=observations)
+    status = _inspect_update_status(vault, observations=observations, _owners=_owners)
     observation = observations[0] if observations else None
     if observation is not None and (
         status.operation_id,
@@ -1205,10 +1235,13 @@ def _inspect_update_observation(vault):
 
 
 def inspect_update_status(vault):
-    return _inspect_update_observation(vault)[0]
+    with ExitStack() as owners:
+        return _inspect_update_observation(vault, _owners=owners)[0]
 
 
-def _inspect_update_status(vault, *, observations, trusted_association=None):
+def _inspect_update_status(
+    vault, *, observations, trusted_association=None, _owners=None
+):
     """Discover the latest owned intent independently of the current locator."""
     start = time.monotonic()
     root = Path(vault).absolute()
@@ -1239,6 +1272,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                 linked_intents=linked_intents,
                 trusted_association=trusted_association,
                 ownership_demands_out=[],
+                _owners=_owners,
             )
             if linked_intents:
                 return _outcome(
@@ -1296,6 +1330,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             checkpoint_roles=checkpoint_roles,
             trusted_association=trusted_association,
             ownership_demands_out=ownership_demands,
+            _owners=_owners,
         )
         rooted_intents = {commit for graph in graphs for commit, _ in graph.authorities}
         if len(linked_intents) != len(set(linked_intents)) or not set(
@@ -1366,6 +1401,13 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             for _, authority in reversed(graph.authorities):
                 prepared, saved = owned[authority.prepared_commit]
                 initial_undo = undo_target if authority is origin else None
+                validation_origin = (
+                    initial_undo.observation.owned[initial_undo.intent.prepared_commit][
+                        1
+                    ]
+                    if initial_undo is not None
+                    else origin_saved
+                )
                 if not _prepared_for_intent(
                     authority,
                     prepared,
@@ -1379,6 +1421,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                     origin_plan=initial_undo.plan if initial_undo else origin_plan,
                     undo_target=initial_undo,
                     origin_undo_target=undo_target,
+                    origin_effects=validation_origin.historical_effects,
                 ):
                     raise OSError("Operation intent lacks a selected prepared review")
                 if initial_undo is not None and not _recovery_prepared_matches(
@@ -1391,6 +1434,9 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                     undo_target.plan,
                     direction="restore",
                     undo_target=undo_target,
+                    origin_loaded=undo_target.observation.owned[
+                        undo_target.intent.prepared_commit
+                    ][1],
                 ):
                     raise OSError("Undo target or source lineage changed")
                 if isinstance(authority, VaultRecoveryIntent):
@@ -1412,6 +1458,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                         saved,
                         owned[lineage_commit][0],
                         origin_plan,
+                        origin_loaded=origin_saved,
                     ):
                         raise OSError("Recovery target or source lineage changed")
             candidate, terminal = graph.intent, graph.receipt
@@ -1749,6 +1796,13 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
 
 def read_update_details(vault, *, offset=0, limit=100, expected=None):
     """Page only validated owned before/result comparison facts, never bytes."""
+    with ExitStack() as owners:
+        return _read_update_details(
+            vault, offset=offset, limit=limit, expected=expected, _owners=owners
+        )
+
+
+def _read_update_details(vault, *, offset, limit, expected, _owners):
     if (
         type(offset) is not int
         or offset < 0
@@ -1777,7 +1831,7 @@ def read_update_details(vault, *, offset=0, limit=100, expected=None):
             next_offset=next_offset,
         )
 
-    observed, observation = _inspect_update_observation(vault)
+    observed, observation = _inspect_update_observation(vault, _owners=_owners)
     if observed.status in ("unknown", "refused") or observed.intent_commit is None:
         return page("unavailable", "operation_authority_unavailable")
     if expected is not None:
@@ -1893,8 +1947,8 @@ def _review_inputs_match(review, admission, source):
             return row is None
         return (
             row is not None
-            and row.size == len(expected.data)
-            and row.sha256 == hashlib.sha256(expected.data).hexdigest()
+            and row.size == content_size(expected)
+            and row.sha256 == content_sha(expected)
         )
 
     def incoming(path, expected):
@@ -1906,10 +1960,7 @@ def _review_inputs_match(review, admission, source):
         if not os.path.lexists(target):
             return False
         info, sha, _, _ = observe_file(source, target, prefix_limit=0)
-        return (
-            info.st_size == len(expected.data)
-            and sha == hashlib.sha256(expected.data).hexdigest()
-        )
+        return info.st_size == content_size(expected) and sha == content_sha(expected)
 
     return _review_fact_paths_match(review.producer_facts, current, incoming)
 
@@ -2077,6 +2128,8 @@ def _apply_reviewed_update(
     progress=None,
     executor=None,
     undo_target=None,
+    _owned_export=None,
+    _owners=None,
 ):
     """Retain intent before exact selected publication and verify terminal history."""
     start = time.monotonic()
@@ -2085,9 +2138,25 @@ def _apply_reviewed_update(
     report_progress(progress, "review_validation")
     kind = "undo" if undo_target is not None else "apply"
     outcome = partial(_outcome, kind=kind, direction="finish" if undo_target else None)
-    selected = select_review_effects(review)
+    if _owned_export is not None:
+        from brz2obsidian.application.review_session import _OwnedReviewExport
+
+        if type(_owned_export) is not _OwnedReviewExport:
+            raise OSError("Canonical publication owner required")
+        _owned_export.check(review)
+        selected = _owned_export.effects
+        if _owned_export.session._selected is not selected:
+            raise OSError("Current canonical selected effects required")
+    else:
+        selected = select_review_effects(review)
     if selected.status != "selected":
         return outcome("refused", selected.code, start=start)
+    purpose = (
+        {"new_operation": "format_transition"}
+        if undo_target is None
+        and review.facts.format_operation.kind == "format_transition"
+        else {}
+    )
     root, source = Path(vault).absolute(), Path(source).absolute()
     if not supported_durable_volume(root):
         return outcome("refused", "unsupported_durable_volume", start=start)
@@ -2137,7 +2206,10 @@ def _apply_reviewed_update(
             inspections = []
             reviewed_observation = _inspect_history(
                 root,
+                **purpose,
                 _capture=lambda inspection, admission: inspections.append(inspection),
+                _metadata_only=_owned_export is not None,
+                _owners=_owners,
             )
             inspected = inspections[0] if inspections else None
             if (
@@ -2152,7 +2224,10 @@ def _apply_reviewed_update(
             first = _inspect_history(
                 root,
                 subjects=subjects,
+                **purpose,
                 recovery_observation=retained_history[1] if retained_history else None,
+                _metadata_only=_owned_export is not None,
+                _owners=_owners,
             )
         else:
             from brz2obsidian.application.checkpoint_contracts import (
@@ -2165,16 +2240,20 @@ def _apply_reviewed_update(
             # execute_undo has validated this graph and the current review in
             # this same public call. Reobserve policy/inventory, then check it
             # again under our new lease; do not repeat the full history walk.
-            first = VaultHistoryInspection(
-                schema_id="brz2obsidian.vault-history-inspection",
-                schema_version=1,
-                status="intact",
-                checkpoint=undo_target.observation.checkpoint,
-                admission=_inspect_vault_for_recovery(
-                    root,
-                    undo_target.observation,
-                    subjects=subjects,
-                ),
+            checkpoint = undo_target.observation.checkpoint
+            admission = _inspect_vault_for_recovery(
+                root, undo_target.observation, subjects=subjects
+            )
+            first = (
+                _MetadataHistory(admission, checkpoint)
+                if type(checkpoint) is _MetadataCheckpoint
+                else VaultHistoryInspection(
+                    schema_id="brz2obsidian.vault-history-inspection",
+                    schema_version=1,
+                    status="intact",
+                    checkpoint=checkpoint,
+                    admission=admission,
+                )
             )
             reviewed_observation = first
         scoped_preflight = first.admission.preflight
@@ -2220,7 +2299,20 @@ def _apply_reviewed_update(
         _acquire(root, operation_id)
         acquired = True
         observed = (
-            inspect_history(root, subjects=subjects, active_operation=operation_id)
+            (
+                inspect_history(
+                    root, subjects=subjects, active_operation=operation_id, **purpose
+                )
+                if _owned_export is None
+                else _inspect_history(
+                    root,
+                    subjects=subjects,
+                    active_operation=operation_id,
+                    **purpose,
+                    _metadata_only=True,
+                    _owners=_owners,
+                )
+            )
             if retained_history is None
             else _inspect_retained_history(
                 root,
@@ -2261,7 +2353,8 @@ def _apply_reviewed_update(
             for row in observed.admission.inventory
             if not row.excluded or row.path in included_paths
         }
-        selected_files = {row.path: row.content.data for row in selected.files}
+        selected_files = {row.path: row.content for row in selected.files}
+        selected_rows = {row.path: row for row in selected.files}
         removals = set(selected.remove_paths)
         if any(not _safe_relative(path) for path in (*selected_files, *removals)):
             return outcome("refused", "unsafe_selected_path", start=start)
@@ -2271,9 +2364,13 @@ def _apply_reviewed_update(
             path
             for path, data in selected_files.items()
             if path not in before
-            or before[path].size != len(data)
-            or before[path].sha256 != hashlib.sha256(data).hexdigest()
+            or before[path].size != content_size(data)
+            or before[path].sha256 != content_sha(data)
         } | removals
+        if undo_target is not None and not changed.issubset(
+            undo_target.intent.affected_paths
+        ):
+            return outcome("refused", "undo_effect_outside_origin", start=start)
         planned = len(changed)
         before_metadata = {}
         result_metadata = {}
@@ -2281,7 +2378,7 @@ def _apply_reviewed_update(
         # Checkpoint capture performs its separate spool and Git check afterward.
         stage_need = (
             sum(row.size for path, row in before.items() if path not in removals)
-            + sum(len(data) for data in selected_files.values())
+            + sum(content_size(data) for data in selected_files.values())
             + 64 * 1024 * 1024
             + 4096 * (len(before) + len(selected_files))
         )
@@ -2309,9 +2406,20 @@ def _apply_reviewed_update(
                 target = proposed_root / path
                 stage_parent_security(root, proposed_root, Path(path).parent)
                 with target.open("wb") as stream:
-                    stream.write(data)
+                    if _owned_export is None:
+                        stream.write(data.data)
+                    else:
+                        _owned_export.stage(selected_rows[path], stream)
                     stream.flush()
                     os.fsync(stream.fileno())
+                if _owned_export is not None:
+                    info, digest, _, _ = observe_file(
+                        proposed_root, target, prefix_limit=0
+                    )
+                    if info.st_size != content_size(data) or digest != content_sha(
+                        data
+                    ):
+                        raise OSError("Selected staged bytes changed")
                 if path in before:
                     shutil.copymode(root / path, target)
                 if path in changed:
@@ -2349,6 +2457,8 @@ def _apply_reviewed_update(
                     undo_target.receipt_commit if undo_target else None
                 ),
                 _observation=retained_history,
+                _owned_export=_owned_export,
+                _owners=_owners,
                 progress=progress,
             )
             reused_undo_prepared = (
@@ -2389,12 +2499,24 @@ def _apply_reviewed_update(
                     recovery=False,
                     message="Cancellation retained preparation without publishing files.",
                 )
-            tip = inspect_history(
-                root, subjects=subjects, active_operation=operation_id
+            tip = (
+                inspect_history(root, subjects=subjects, active_operation=operation_id)
+                if _owned_export is None
+                else _inspect_history(
+                    root,
+                    subjects=subjects,
+                    active_operation=operation_id,
+                    _metadata_only=True,
+                    _owners=_owners,
+                )
             )
-            manifest = tip.checkpoint.manifest
-            if tip.status != "intact" or manifest.boundary != "prepared":
+            if (
+                tip.status != "intact"
+                or tip.checkpoint is None
+                or tip.checkpoint.manifest.boundary != "prepared"
+            ):
                 raise OSError("Prepared checkpoint could not be rediscovered")
+            manifest = tip.checkpoint.manifest
             operation_generation = manifest.generation
             intent = VaultOperationIntent(
                 schema_id="brz2obsidian.vault-operation-intent",
@@ -2562,7 +2684,7 @@ def _apply_reviewed_update(
                 operation_generation=operation_generation,
                 intent_commit=intent_commit,
             )
-            result_observation = _inspect_update_observation(root)
+            result_observation = _inspect_update_observation(root, _owners=_owners)
             authority = result_observation[1]
             if (
                 authority is None
@@ -2590,6 +2712,8 @@ def _apply_reviewed_update(
                 operation_intent_commit=intent_commit,
                 subjects=subjects,
                 _observation=result_observation,
+                _owned_export=_owned_export,
+                _owners=_owners,
                 progress=progress,
             )
             if result_checkpoint.status != "captured":
@@ -2797,20 +2921,24 @@ def apply_reviewed_update(
     cancel=None,
     progress=None,
     executor=None,
+    _owned_export=None,
 ):
     """Retain intent before exact selected publication and verify terminal history."""
     try:
-        return _apply_reviewed_update(
-            vault,
-            source,
-            review=review,
-            vault_id=vault_id,
-            import_id=import_id,
-            source_binding=source_binding,
-            observed_source=observed_source,
-            cancel=cancel,
-            progress=progress,
-            executor=executor,
-        )
+        with ExitStack() as owners:
+            return _apply_reviewed_update(
+                vault,
+                source,
+                review=review,
+                vault_id=vault_id,
+                import_id=import_id,
+                source_binding=source_binding,
+                observed_source=observed_source,
+                cancel=cancel,
+                progress=progress,
+                executor=executor,
+                _owned_export=_owned_export,
+                _owners=owners if _owned_export is not None else None,
+            )
     except _OwnedCleanupFailure as failure:
         return failure.result

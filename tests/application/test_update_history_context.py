@@ -1372,7 +1372,9 @@ def test_worker_history_refresh_counts_the_new_review_scope(tmp_path):
     assert list(vault.iterdir()) == [], "Counting and refreshing publish no files"
 
 
-@pytest.mark.parametrize("target", ("matching", "new_checkpoint", "other_receipt"))
+@pytest.mark.parametrize(
+    "target", ("matching", "new_checkpoint", "other_receipt", "unverified_links")
+)
 def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_operation(
     tmp_path, target
 ):
@@ -1423,6 +1425,25 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
         }
     )
     review = ready_native_recovery().native.review
+    if target == "unverified_links":
+        from brz2obsidian.core import prepare_review
+        from tests.application.test_approved_update_flow import (
+            reference_recertification_facts,
+        )
+
+        facts = reference_recertification_facts(
+            divergent=False, current_payload=b"abc", incoming_payload=b"abc"
+        )
+        review = prepare_review(
+            facts.model_copy(
+                update={
+                    "subjects": tuple(s for s in facts.subjects if not s.attachment)
+                }
+            ),
+            preflight=review.preflight,
+        )
+        assert not review.ready and not review.requirements
+        assert "current_link_coverage_unavailable" in review.blockers
     native = VaultUndoPreparation(
         schema_id="brz2obsidian.vault-undo-preparation",
         schema_version=1,
@@ -1569,6 +1590,25 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
         context,
         {"command": "prepare_history", "binding": offered.binding, "kind": "undo"},
     )
+    if target == "unverified_links":
+        expected = "Some links in the current vault could not be verified."
+        for reply in (
+            prepared,
+            worker_context_call(
+                context, {"command": "page", "binding": prepared.binding}
+            ),
+            worker_context_call(
+                context, {"command": "history_choices", "binding": prepared.binding}
+            ),
+        ):
+            assert not reply.ready and not reply.history_action.ready
+            assert reply.unresolved == 0 and "execute_history" not in reply.next_actions
+            assert reply.summary == reply.history_action.summary == expected
+            assert "current_link_coverage_unavailable" in reply.findings
+            assert "All changes" in reply.guidance
+        assert not entered
+        assert (vault / "Personal.md").read_bytes() == b"Keep authored bytes\r\n"
+        return
     if target != "matching":
         assert (
             prepared.status == "refused" and prepared.code == "history_target_changed"

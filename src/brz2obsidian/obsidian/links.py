@@ -6,6 +6,7 @@ from urllib.parse import unquote_to_bytes
 import yaml
 
 from brz2obsidian.contracts import (
+    ExactContent,
     LinkAnchor,
     LinkDocument,
     LinkFragment,
@@ -15,6 +16,11 @@ from brz2obsidian.contracts import (
     StructureSpan,
 )
 from brz2obsidian.core.link_meanings import resolve_link_meaning
+from brz2obsidian.obsidian_dialect import (
+    canonical_player_ranges,
+    file_roles,
+    migration_record_data,
+)
 
 from .base_views import view_anchors
 
@@ -91,8 +97,37 @@ def interpret_link_target(
     memberships,
     membership_targets=(),
     source_path=None,
+    output_format=7,
+    qualify_roles=False,
 ):
     from .interpretation import interpret_structure
+
+    def reference_query(value):
+        if not value[2:-2].split("|", 1)[0].split("#", 1)[0]:
+            return None
+        document = interpret_links(
+            ExactContent(data=value.encode("utf-8")),
+            document_id="native-reference",
+            source_path=source_path,
+            path_mode="shortened",
+            targets=(),
+            target_facts=(),
+            inventory="complete",
+        )
+        if document.status != "supported" or len(document.occurrences) != 1:
+            return None
+        return document.occurrences[0].query
+
+    roles = (
+        file_roles(
+            content,
+            path=source_path,
+            existence=existence,
+            reference_query=reference_query,
+        )
+        if (output_format == 8 or qualify_roles) and source_path is not None
+        else None
+    )
 
     fragments, anchors, status, structure = (
         [],
@@ -102,7 +137,7 @@ def interpret_link_target(
     )
     if content is not None:
         structure = interpret_structure(
-            content, output_format=7, membership_targets=membership_targets
+            content, output_format=output_format, membership_targets=membership_targets
         )
         try:
             text = content.data.decode("utf-8")
@@ -126,6 +161,7 @@ def interpret_link_target(
                     structure=structure,
                     memberships=memberships,
                     interpretation=status,
+                    file_roles=roles,
                 )
             ranges, issues = _code_ranges(text)
             if issues:
@@ -186,19 +222,50 @@ def interpret_link_target(
         structure=structure,
         memberships=memberships,
         interpretation=status,
+        file_roles=roles,
     )
 
 
 def interpret_links(
-    content, *, document_id, source_path, path_mode, targets, target_facts, inventory
+    content,
+    *,
+    document_id,
+    source_path,
+    path_mode,
+    targets,
+    target_facts,
+    inventory,
+    output_format=7,
+    record_format=8,
 ):
     occurrences, issues, consumed = [], [], []
+
+    def document():
+        return LinkDocument(
+            schema_id="brz2obsidian.link-document",
+            schema_version=1,
+            document_id=document_id,
+            source_path=source_path,
+            content=content,
+            path_mode=path_mode,
+            inventory=inventory,
+            status="unsupported" if issues else "supported",
+            issues=tuple(issues),
+            occurrences=tuple(occurrences),
+        )
+
     try:
         text = content.data.decode("utf-8")
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
+    if output_format == 8 and source_path == "migration-record.json":
+        if not migration_record_data(text, source_path, record_format=record_format):
+            issues.append("record_data_unsupported")
+        return document()
     masked, code_issues = _code_ranges(text)
+    if output_format == 8:
+        masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
@@ -229,40 +296,59 @@ def interpret_links(
             ):
                 raise ValueError("Unsupported destination")
             semantic_destination = raw_destination[1:-1] if angled else raw_destination
+            # A literal drive-rooted path is outside managed-vault resolution.
+            # Preserve its spelling; percent signs and fragments are opaque here.
+            external = (
+                output_format == 8
+                and not wiki
+                and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
+                and not any(ord(c) < 32 for c in semantic_destination)
+            )
             target_text, marker, fragment_text = semantic_destination.partition("#")
-            if not wiki:
+            if not wiki and not external:
                 target_text, fragment_text = (
                     _decode(target_text),
                     _decode(fragment_text),
                 )
-            if marker and (
-                not fragment_text
-                or (
-                    fragment_text.startswith("^")
-                    and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
-                )
-                or any(
-                    not part or any(c in "[]|^" for c in part)
-                    for part in fragment_text.removeprefix("^").split("#")
+            if (
+                not external
+                and marker
+                and (
+                    not fragment_text
+                    or (
+                        fragment_text.startswith("^")
+                        and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
+                    )
+                    or any(
+                        not part or any(c in "[]|^" for c in part)
+                        for part in fragment_text.removeprefix("^").split("#")
+                    )
                 )
             ):
                 raise ValueError("Unsupported fragment")
             fragment = (
                 None
-                if not fragment_text
+                if external or not fragment_text
                 else LinkFragment(
                     kind="block" if fragment_text.startswith("^") else "heading",
                     value=fragment_text.removeprefix("^"),
                 )
             )
-            external = not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
+            external = external or (
+                not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
+            )
             query = (
                 None
                 if external
                 else _query(
                     target_text,
                     source_path,
-                    path_mode,
+                    "relative"
+                    if output_format == 8
+                    and path_mode == "vault"
+                    and not wiki
+                    and target_text.startswith(("./", "../"))
+                    else path_mode,
                     (f"[[{target_text}]]", f"[[{target_text}|{display}]]")
                     if wiki
                     else (),
@@ -317,15 +403,4 @@ def interpret_links(
         or re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:", residue)
     ):
         issues.append("link_syntax_unsupported")
-    return LinkDocument(
-        schema_id="brz2obsidian.link-document",
-        schema_version=1,
-        document_id=document_id,
-        source_path=source_path,
-        content=content,
-        path_mode=path_mode,
-        inventory=inventory,
-        status="unsupported" if issues else "supported",
-        issues=tuple(issues),
-        occurrences=tuple(occurrences),
-    )
+    return document()

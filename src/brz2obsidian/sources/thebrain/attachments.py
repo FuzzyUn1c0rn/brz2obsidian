@@ -17,6 +17,7 @@ from brz2obsidian.contracts import (
 from .external_files import external_file_uri
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_DECLARATION_RULE,
     ABSENT_TXT_RULE,
     ABSENT_TYPE_ICON_RULE,
     ABSENT_TYPE_NOTE_RULE,
@@ -342,6 +343,9 @@ def normalize_attachments(
                 )
             )
             continue
+        if kind == 12 and states.get(asset_id) == 3 and member not in names:
+            assets.append(Asset(**common, role="image", availability="absent"))
+            continue
         if states.get(asset_id) != 1 or member not in names:
             refuse(
                 "missing_required_payload",
@@ -408,6 +412,9 @@ def normalize_attachments(
                 excluded=excluded,
                 scope_tokens=scope_tokens,
                 source_refuse=source_refuse,
+                brain_id=meta["BrainId"],
+                allow_qualified=True,
+                allow_literal_tokens=True,
             )
             documents.append(document)
             findings.extend(note_findings)
@@ -526,11 +533,28 @@ def normalize_attachments(
             )
         )
         if not pdfs:
-            refuse(
-                "missing_required_payload",
-                "Absent TXT lacks an intact archived PDF under the same owner",
-                (asset_id,),
+            findings.append(
+                SourceFinding(
+                    kind="known_absent_payload",
+                    rule_id=ABSENT_TXT_DECLARATION_RULE,
+                    affected=(asset_id,),
+                    evidence=(pointer, "meta.json"),
+                    observed_json=json.dumps(
+                        {
+                            "owner": owner,
+                            "filename": location,
+                            "member": owner + "/" + location,
+                            "source_type": 2,
+                            "type": 15,
+                            "note_type": 0,
+                            "declared_length": declared,
+                            "state": 2,
+                            "present": False,
+                        }
+                    ),
+                )
             )
+            continue
         findings.append(
             SourceFinding(
                 kind="known_absent_payload",
@@ -562,6 +586,15 @@ def normalize_attachments(
                 "missing_required_payload",
                 "Absent ordinary note lacks usable owned note images",
                 (asset_id,),
+            )
+        unavailable = tuple(
+            image.asset_id for image in images if image.availability != "present"
+        )
+        if unavailable:
+            refuse(
+                "missing_required_payload",
+                "Absent ordinary note has an unavailable unreferenced owned image",
+                (asset_id, *unavailable),
             )
         image_facts = []
         for image in images:
@@ -625,7 +658,43 @@ def normalize_attachments(
                 image_asset_ids=tuple(a.asset_id for a in images),
             )
         )
-    documents = bind_prepared_notes(documents, assets, thoughts, source_refuse)
+    documents = bind_prepared_notes(
+        documents,
+        assets,
+        thoughts,
+        source_refuse,
+        brain_id=meta["BrainId"],
+        allow_qualified=True,
+        image_context={
+            "basis": "archive_undeclared_no_payload",
+            "members": names,
+            "declared_absence": {
+                asset.asset_id: {
+                    "basis": "archive_declared_state3_no_payload",
+                    "state": 3,
+                }
+                for asset in assets
+                if asset.role == "image" and asset.availability == "absent"
+            },
+        },
+        findings=findings,
+    )
+    admitted_images = {
+        key
+        for finding in findings
+        if finding.rule_id == "thebrain.unavailable-declared-image.v1"
+        for key in finding.affected
+    }
+    if any(
+        asset.role == "image"
+        and asset.availability == "absent"
+        and asset.asset_id not in admitted_images
+        for asset in assets
+    ):
+        source_refuse(
+            "missing_required_payload",
+            "An unavailable declared image has no admitted active reference",
+        )
     accounting.extend(
         AccountingEntry(
             identity=f"reference:{document.key}:{index}",

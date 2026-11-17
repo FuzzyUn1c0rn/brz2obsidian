@@ -1,6 +1,7 @@
 """Private owned capture and pinned integrity behind SourceSession."""
 
 import hashlib
+import os
 import re
 import shutil
 import stat
@@ -8,22 +9,23 @@ import tempfile
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 from brz2obsidian.contracts import SourceSnapshot
 
 from .capture import (
-    DESKTOP_BUILD,
     IDENTIFIERS,
-    SCHEMA_SHA256,
     canonical,
     identifiers,
     parse_json,
+    qualification_baseline,
     snapshot_projection,
     source_projection,
     validate_binding,
 )
-from .errors import failure, refuse
+from .errors import check_cancel, failure, refuse
 from .metadata import AcquisitionAudit, SourceAcquisition
+from .read_view import CaptureReadView
 from .storage import StagedPayload
 
 
@@ -69,6 +71,8 @@ class LocalApiSession:
     Use SourceModule.open for live acquisition. Direct construction takes already
     qualified scoped facts, normalized snapshot and measured payload bytes. Close
     revokes streams and releases only session-owned storage.
+    Optional exact-bool cancellation controls freezing only; it is not retained
+    in the capture or a claim that a decoder can be preempted.
     """
 
     def __init__(
@@ -81,13 +85,17 @@ class LocalApiSession:
         capture_parent=None,
         storage_keys=None,
         profile_version="1",
+        cancel=None,
     ):
         self._identifiers = identifiers(profile_version)
         self._directory = None
         self._closed = False
         self._streams = []
         self._metadata_proof = None
+        self._read_lock = Lock()
+        self._read_view = None
         try:
+            check_cancel(cancel)
             self._audit = AcquisitionAudit.model_validate_json(canonical(audit))
             source = source_projection(source)
             if source["identifiers"] != self._identifiers:
@@ -142,8 +150,7 @@ class LocalApiSession:
                     {
                         "identifiers": source["identifiers"],
                         "identity": projected["identity"],
-                        "schema_sha256": SCHEMA_SHA256,
-                        "desktop_build": DESKTOP_BUILD,
+                        **qualification_baseline(profile_version),
                     }
                 ),
                 "audit.json": canonical(audit),
@@ -167,18 +174,61 @@ class LocalApiSession:
                 target = self._directory / key
                 target.parent.mkdir(exist_ok=True)
                 supplied = payloads[asset_id]
-                stream = (
-                    supplied.open("rb")
-                    if isinstance(supplied, (Path, StagedPayload))
-                    else BytesIO(bytes(supplied))
+                cap = audit["limits"]["max_payload_bytes"]
+                bounded_icon = (
+                    profile_version == "5" and attachment_values[asset_id]["type"] == 5
                 )
-                length, measured = 0, hashlib.sha256()
-                with stream, target.open("wb") as destination:
-                    while chunk := stream.read(65536):
-                        length += len(chunk)
-                        if length > audit["limits"]["max_payload_bytes"]:
+                if bounded_icon and not isinstance(supplied, (Path, StagedPayload)):
+                    from .icons import encoded_limit
+
+                    # Bound the actual buffer before allocating and bypass
+                    # custom whole-value coercion. Older profiles keep theirs.
+                    with memoryview(supplied).cast("B") as view:
+                        cap = encoded_limit(bytes(view[:4]), cap)
+                        if view.nbytes > cap:
                             refuse(
-                                "max_payload_bytes storage limit exhausted",
+                                "icon_family storage limit exhausted",
+                                "incomplete_source",
+                            )
+                        stream = BytesIO(view)
+                else:
+                    stream = (
+                        supplied.open("rb")
+                        if isinstance(supplied, (Path, StagedPayload))
+                        else BytesIO(bytes(supplied))
+                    )
+                length, measured = 0, hashlib.sha256()
+                icon_prefix = b""
+                with stream, target.open("wb") as destination:
+                    while True:
+                        check_cancel(cancel)
+                        read_limit = min(65536, cap - length + 1)
+                        if bounded_icon and len(icon_prefix) < 4:
+                            read_limit = min(read_limit, 4 - len(icon_prefix))
+                        chunk = stream.read(read_limit)
+                        check_cancel(cancel)
+                        if not chunk:
+                            break
+                        if bounded_icon and len(icon_prefix) < 4:
+                            from .icons import encoded_limit
+
+                            icon_prefix += chunk[: 4 - len(icon_prefix)]
+                            if len(icon_prefix) == 4:
+                                cap = encoded_limit(icon_prefix, cap)
+                                if (
+                                    isinstance(supplied, (Path, StagedPayload))
+                                    and os.fstat(stream.fileno()).st_size > cap
+                                ):
+                                    refuse(
+                                        "icon_family storage limit exhausted",
+                                        "incomplete_source",
+                                    )
+                        length += len(chunk)
+                        if length > cap:
+                            refuse(
+                                "icon_family storage limit exhausted"
+                                if cap < audit["limits"]["max_payload_bytes"]
+                                else "max_payload_bytes storage limit exhausted",
                                 "incomplete_source",
                             )
                         if (
@@ -193,6 +243,7 @@ class LocalApiSession:
                             )
                         measured.update(chunk)
                         destination.write(chunk)
+                        check_cancel(cancel)
                 if (
                     length != asset.actual_length
                     or measured.hexdigest() != asset.actual_sha256
@@ -202,7 +253,9 @@ class LocalApiSession:
                     )
                 from .resources import validate_bytes
 
-                validate_bytes(attachment_values[asset_id], target, profile_version)
+                validate_bytes(
+                    attachment_values[asset_id], target, profile_version, cancel=cancel
+                )
                 payload_entries.append(
                     {
                         "role": "payload",
@@ -257,6 +310,7 @@ class LocalApiSession:
                 target.parent.mkdir(exist_ok=True)
                 target.write_bytes(raw)
             self.verify_consistency()
+            check_cancel(cancel)
         except OSError, ValueError, KeyError, TypeError:
             self.close()
             raise failure(
@@ -294,6 +348,14 @@ class LocalApiSession:
         return info.st_dev, info.st_ino
 
     def verify_consistency(self):
+        try:
+            self._verify_consistency()
+        except BaseException:
+            if self._read_view is not None:
+                self._read_view.failed = True
+            raise
+
+    def _verify_consistency(self):
         if self.closed:
             refuse("The captured source session is closed")
         try:
@@ -402,8 +464,7 @@ class LocalApiSession:
             metadata = {
                 "identifiers": self._identifiers,
                 "identity": self.source_identity.model_dump(mode="json"),
-                "schema_sha256": SCHEMA_SHA256,
-                "desktop_build": DESKTOP_BUILD,
+                **qualification_baseline(self._identifiers["profile_version"]),
             }
             if parsed["metadata.json"] != metadata:
                 refuse("Captured metadata compatibility or identity changed")
@@ -452,6 +513,9 @@ class LocalApiSession:
         finally:
             stream.close()
             self._streams.remove(stream)
+
+    def payload_read_view(self):
+        return CaptureReadView(self)
 
     def close(self):
         if self.closed:

@@ -1,0 +1,552 @@
+{
+  "producer_commit": "0b274df0e1ac35110167202d82bd251ee621b484",
+  "intent": "Synthetic invalid profile4 captures accepted by the pre-repair privacy bug; current replay must refuse. Not valid historical capture qualification.",
+  "cases": [
+    {
+      "case": "brain",
+      "source": {
+        "brain": {
+          "homeThoughtId": "22222222-2222-4222-8222-222222222222",
+          "id": "11111111-1111-4111-8111-111111111111",
+          "name": "Synthetic collection"
+        },
+        "identifiers": {
+          "contract_version": 7,
+          "format_id": "thebrain-local-api-capture",
+          "format_version": "1",
+          "module_id": "thebrain-local-api",
+          "module_version": "1",
+          "profile_id": "thebrain-local-api-reviewed",
+          "profile_version": "4"
+        },
+        "inventories": {
+          "ordinary_ids": [
+            "22222222-2222-4222-8222-222222222222"
+          ],
+          "tag_ids": [],
+          "type_ids": []
+        },
+        "payloads": [
+          {
+            "actual_length": 85,
+            "actual_sha256": "1d6c27a7145baba697e1ac96dc29f303c948740e655e7f62bac0bbb58470008e",
+            "asset_id": "a1111111-1111-4111-8111-111111111111",
+            "availability": "present",
+            "external_uri": null,
+            "owner_id": "22222222-2222-4222-8222-222222222222"
+          }
+        ],
+        "records": [
+          {
+            "domain": "attachment",
+            "key": "attachment:a1111111-1111-4111-8111-111111111111",
+            "owner_id": "22222222-2222-4222-8222-222222222222",
+            "value": {
+              "brainId": "11111111-1111-4111-8111-111111111111",
+              "dataLength": 85,
+              "id": "a1111111-1111-4111-8111-111111111111",
+              "isNotes": true,
+              "location": "Notes.md",
+              "name": null,
+              "position": {
+                "decimal": "0"
+              },
+              "sourceId": "22222222-2222-4222-8222-222222222222",
+              "sourceType": 2,
+              "type": 1
+            }
+          },
+          {
+            "domain": "brain",
+            "key": "brain:11111111-1111-4111-8111-111111111111",
+            "owner_id": "11111111-1111-4111-8111-111111111111",
+            "value": {
+              "homeThoughtId": "22222222-2222-4222-8222-222222222222",
+              "id": "11111111-1111-4111-8111-111111111111",
+              "name": "Synthetic collection"
+            }
+          },
+          {
+            "domain": "exclusion",
+            "key": "exclusion:33333333-3333-4333-8333-333333333333",
+            "owner_id": "11111111-1111-4111-8111-111111111111",
+            "value": {
+              "acType": 0,
+              "brainId": "11111111-1111-4111-8111-111111111111",
+              "forgottenDateTime": "2026-10-15T10:00:00",
+              "id": "33333333-3333-4333-8333-333333333333",
+              "kind": 1
+            }
+          },
+          {
+            "domain": "graph",
+            "key": "graph:22222222-2222-4222-8222-222222222222",
+            "owner_id": "22222222-2222-4222-8222-222222222222",
+            "value": {
+              "attachment_ids": [
+                "a1111111-1111-4111-8111-111111111111"
+              ],
+              "children_ids": [],
+              "jump_ids": [],
+              "link_ids": [],
+              "parents_ids": [],
+              "sibling_ids": [],
+              "tag_ids": [],
+              "type_ids": []
+            }
+          },
+          {
+            "domain": "note_text",
+            "key": "note_text:22222222-2222-4222-8222-222222222222",
+            "owner_id": "22222222-2222-4222-8222-222222222222",
+            "value": {
+              "text": "[Foreign](brain://api.thebrain.com/&#77;zMzMzMzM0ODMzMzMzMzMw/EREREREREUGBEREREREREQ)"
+            }
+          },
+          {
+            "domain": "statistics",
+            "key": "statistics:end",
+            "owner_id": "11111111-1111-4111-8111-111111111111",
+            "value": {
+              "forgottenThoughts": 1,
+              "links": 0,
+              "tags": 0,
+              "thoughtTypes": 0,
+              "thoughts": 1
+            }
+          },
+          {
+            "domain": "statistics",
+            "key": "statistics:start",
+            "owner_id": "11111111-1111-4111-8111-111111111111",
+            "value": {
+              "forgottenThoughts": 1,
+              "links": 0,
+              "tags": 0,
+              "thoughtTypes": 0,
+              "thoughts": 1
+            }
+          },
+          {
+            "domain": "thought",
+            "key": "thought:22222222-2222-4222-8222-222222222222",
+            "owner_id": "11111111-1111-4111-8111-111111111111",
+            "value": {
+              "acType": 0,
+              "aliases": [],
+              "backgroundColor": null,
+              "brainId": "11111111-1111-4111-8111-111111111111",
+              "creationDateTime": "2026-10-14T10:00:00",
+              "foregroundColor": null,
+              "forgottenDateTime": null,
+              "id": "22222222-2222-4222-8222-222222222222",
+              "kind": 1,
+              "label": null,
+              "modificationDateTime": "2026-10-14T10:00:00",
+              "name": "Entry",
+              "typeId": null
+            }
+          }
+        ],
+        "scope": {
+          "decisions": [
+            {
+              "evidence": [
+                "exclusion:33333333-3333-4333-8333-333333333333"
+              ],
+              "key": "scope:excluded:33333333-3333-4333-8333-333333333333",
+              "outcome": "excluded_forgotten",
+              "rule_id": "local-api.forgotten.v1",
+              "subjects": [
+                "thought:33333333-3333-4333-8333-333333333333"
+              ]
+            },
+            {
+              "evidence": [
+                "thought:22222222-2222-4222-8222-222222222222"
+              ],
+              "key": "scope:included:22222222-2222-4222-8222-222222222222",
+              "outcome": "included",
+              "rule_id": "local-api.roles-access.v1",
+              "subjects": [
+                "thought:22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          ],
+          "policy": "public-live-ordinary-type-tag-v1"
+        }
+      },
+      "audit": {
+        "atomic": false,
+        "consistency_limits": [
+          "non-atomic-multi-request",
+          "captured-copy-integrity-only",
+          "empirical-discovery-no-completeness-guarantee"
+        ],
+        "finished_at": "2026-11-05T17:35:36.138090Z",
+        "limits": {
+          "initial_search_results": 5000,
+          "max_payload_bytes": 256000000,
+          "max_requests": 100000,
+          "max_response_bytes": 16000000,
+          "max_search_results": null,
+          "max_total_capture_bytes": 1000000000,
+          "max_traversal_items": 100000,
+          "request_timeout_ms": 30000,
+          "search_budget_ms": 300000,
+          "search_max_response_bytes": 128000000
+        },
+        "method": "bounded-read-only-local-api",
+        "requests": [
+          {
+            "actual_length": 135,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.013588Z",
+            "operation": "brain",
+            "outcome": "success",
+            "sequence": 1,
+            "started_at": "2026-11-05T17:35:36.003797Z",
+            "status": 200,
+            "subject_id": "11111111-1111-4111-8111-111111111111"
+          },
+          {
+            "actual_length": 137,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.020727Z",
+            "operation": "brain",
+            "outcome": "success",
+            "sequence": 2,
+            "started_at": "2026-11-05T17:35:36.014434Z",
+            "status": 200,
+            "subject_id": null
+          },
+          {
+            "actual_length": 132,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.026008Z",
+            "operation": "statistics",
+            "outcome": "success",
+            "sequence": 3,
+            "started_at": "2026-11-05T17:35:36.021119Z",
+            "status": 200,
+            "subject_id": null
+          },
+          {
+            "actual_length": 2,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.031509Z",
+            "operation": "types",
+            "outcome": "success",
+            "sequence": 4,
+            "started_at": "2026-11-05T17:35:36.026293Z",
+            "status": 200,
+            "subject_id": null
+          },
+          {
+            "actual_length": 2,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.047968Z",
+            "operation": "tags",
+            "outcome": "success",
+            "sequence": 5,
+            "started_at": "2026-11-05T17:35:36.031763Z",
+            "status": 200,
+            "subject_id": null
+          },
+          {
+            "actual_length": 454,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.054272Z",
+            "operation": "search",
+            "outcome": "success",
+            "sequence": 6,
+            "started_at": "2026-11-05T17:35:36.048376Z",
+            "status": 200,
+            "subject_id": null
+          },
+          {
+            "actual_length": 351,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.059222Z",
+            "operation": "thought",
+            "outcome": "success",
+            "sequence": 7,
+            "started_at": "2026-11-05T17:35:36.054754Z",
+            "status": 200,
+            "subject_id": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "actual_length": 753,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.066485Z",
+            "operation": "graph",
+            "outcome": "success",
+            "sequence": 8,
+            "started_at": "2026-11-05T17:35:36.061509Z",
+            "status": 200,
+            "subject_id": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "actual_length": 368,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.071829Z",
+            "operation": "thought",
+            "outcome": "success",
+            "sequence": 9,
+            "started_at": "2026-11-05T17:35:36.066971Z",
+            "status": 200,
+            "subject_id": "33333333-3333-4333-8333-333333333333"
+          },
+          {
+            "actual_length": 267,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.077116Z",
+            "operation": "attachments",
+            "outcome": "success",
+            "sequence": 10,
+            "started_at": "2026-11-05T17:35:36.072389Z",
+            "status": 200,
+            "subject_id": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "actual_length": 265,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.082519Z",
+            "operation": "attachments",
+            "outcome": "success",
+            "sequence": 11,
+            "started_at": "2026-11-05T17:35:36.077566Z",
+            "status": 200,
+            "subject_id": "a1111111-1111-4111-8111-111111111111"
+          },
+          {
+            "actual_length": 85,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.086922Z",
+            "operation": "attachment-content",
+            "outcome": "success",
+            "sequence": 12,
+            "started_at": "2026-11-05T17:35:36.082879Z",
+            "status": 200,
+            "subject_id": "a1111111-1111-4111-8111-111111111111"
+          },
+          {
+            "actual_length": 132,
+            "brain_id": "11111111-1111-4111-8111-111111111111",
+            "finished_at": "2026-11-05T17:35:36.113092Z",
+            "operation": "statistics",
+            "outcome": "success",
+            "sequence": 13,
+            "started_at": "2026-11-05T17:35:36.107380Z",
+            "status": 200,
+            "subject_id": null
+          }
+        ],
+        "started_at": "2026-11-05T17:35:35.999544Z"
+      },
+      "snapshot": {
+        "contract_version": 7,
+        "identity": {
+          "source_id": "11111111-1111-4111-8111-111111111111",
+          "module_id": "thebrain-local-api",
+          "module_version": "1",
+          "format_version": "1",
+          "source_sha256": "52c6fe822585f4c771e0a3bef66a6c4927becf09f9cc6eff632b1421b375878e",
+          "snapshot_digest": "8b85feb1df00eff5fbf000530ff2c54a768e5e9eb9f032f39026c0a230cccb2e"
+        },
+        "collection_title": "Synthetic collection",
+        "entry_key": "22222222-2222-4222-8222-222222222222",
+        "items": [
+          {
+            "key": "22222222-2222-4222-8222-222222222222",
+            "original_identity": "22222222-2222-4222-8222-222222222222",
+            "naming_seed": "22222222222242228222222222222222",
+            "title": "Entry",
+            "label": null,
+            "role": "ordinary",
+            "live": true,
+            "document_ids": [
+              "a1111111-1111-4111-8111-111111111111"
+            ],
+            "resource_ids": [],
+            "declared_appearance": null,
+            "calendar_dates": {
+              "created": "2026-10-14",
+              "updated": "2026-10-14"
+            },
+            "evidence": [
+              "thought:22222222-2222-4222-8222-222222222222"
+            ]
+          }
+        ],
+        "relationships": [],
+        "classification_assignments": [],
+        "documents": [
+          {
+            "key": "a1111111-1111-4111-8111-111111111111",
+            "owner": "22222222-2222-4222-8222-222222222222",
+            "text": "[Foreign](brain://api.thebrain.com/&#77;zMzMzMzM0ODMzMzMzMzMw/EREREREREUGBEREREREREQ)",
+            "text_digest": "1d6c27a7145baba697e1ac96dc29f303c948740e655e7f62bac0bbb58470008e",
+            "original_asset_id": "a1111111-1111-4111-8111-111111111111",
+            "original_copy_omitted": false,
+            "references": [],
+            "text_adaptations": [],
+            "evidence": [
+              "attachment:a1111111-1111-4111-8111-111111111111"
+            ]
+          }
+        ],
+        "assets": [
+          {
+            "asset_id": "a1111111-1111-4111-8111-111111111111",
+            "owner": "22222222-2222-4222-8222-222222222222",
+            "naming_seed": "a1111111111141118111111111111111",
+            "original_name": "Notes.md",
+            "display_name": null,
+            "role": "note_original",
+            "availability": "present",
+            "actual_length": 85,
+            "actual_sha256": "1d6c27a7145baba697e1ac96dc29f303c948740e655e7f62bac0bbb58470008e",
+            "external_uri": null,
+            "video_presentation": null,
+            "evidence": [
+              "attachment:a1111111-1111-4111-8111-111111111111"
+            ]
+          }
+        ],
+        "original_evidence": [
+          {
+            "key": "attachment:a1111111-1111-4111-8111-111111111111",
+            "kind": "records",
+            "original_json": "{\"brainId\":\"11111111-1111-4111-8111-111111111111\",\"dataLength\":85,\"id\":\"a1111111-1111-4111-8111-111111111111\",\"isNotes\":true,\"location\":\"Notes.md\",\"name\":null,\"position\":{\"decimal\":\"0\"},\"sourceId\":\"22222222-2222-4222-8222-222222222222\",\"sourceType\":2,\"type\":1}"
+          },
+          {
+            "key": "brain:11111111-1111-4111-8111-111111111111",
+            "kind": "records",
+            "original_json": "{\"homeThoughtId\":\"22222222-2222-4222-8222-222222222222\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"name\":\"Synthetic collection\"}"
+          },
+          {
+            "key": "exclusion:33333333-3333-4333-8333-333333333333",
+            "kind": "records",
+            "original_json": "{\"acType\":0,\"brainId\":\"11111111-1111-4111-8111-111111111111\",\"forgottenDateTime\":\"2026-10-15T10:00:00\",\"id\":\"33333333-3333-4333-8333-333333333333\",\"kind\":1}"
+          },
+          {
+            "key": "graph:22222222-2222-4222-8222-222222222222",
+            "kind": "records",
+            "original_json": "{\"attachment_ids\":[\"a1111111-1111-4111-8111-111111111111\"],\"children_ids\":[],\"jump_ids\":[],\"link_ids\":[],\"parents_ids\":[],\"sibling_ids\":[],\"tag_ids\":[],\"type_ids\":[]}"
+          },
+          {
+            "key": "note_text:22222222-2222-4222-8222-222222222222",
+            "kind": "records",
+            "original_json": "{\"text\":\"[Foreign](brain://api.thebrain.com/&#77;zMzMzMzM0ODMzMzMzMzMw/EREREREREUGBEREREREREQ)\"}"
+          },
+          {
+            "key": "scope:excluded:33333333-3333-4333-8333-333333333333",
+            "kind": "records",
+            "original_json": "{\"evidence\":[\"exclusion:33333333-3333-4333-8333-333333333333\"],\"key\":\"scope:excluded:33333333-3333-4333-8333-333333333333\",\"outcome\":\"excluded_forgotten\",\"rule_id\":\"local-api.forgotten.v1\",\"subjects\":[\"thought:33333333-3333-4333-8333-333333333333\"]}"
+          },
+          {
+            "key": "scope:included:22222222-2222-4222-8222-222222222222",
+            "kind": "records",
+            "original_json": "{\"evidence\":[\"thought:22222222-2222-4222-8222-222222222222\"],\"key\":\"scope:included:22222222-2222-4222-8222-222222222222\",\"outcome\":\"included\",\"rule_id\":\"local-api.roles-access.v1\",\"subjects\":[\"thought:22222222-2222-4222-8222-222222222222\"]}"
+          },
+          {
+            "key": "statistics:end",
+            "kind": "records",
+            "original_json": "{\"forgottenThoughts\":1,\"links\":0,\"tags\":0,\"thoughtTypes\":0,\"thoughts\":1}"
+          },
+          {
+            "key": "statistics:start",
+            "kind": "records",
+            "original_json": "{\"forgottenThoughts\":1,\"links\":0,\"tags\":0,\"thoughtTypes\":0,\"thoughts\":1}"
+          },
+          {
+            "key": "thought:22222222-2222-4222-8222-222222222222",
+            "kind": "records",
+            "original_json": "{\"acType\":0,\"aliases\":[],\"backgroundColor\":null,\"brainId\":\"11111111-1111-4111-8111-111111111111\",\"creationDateTime\":\"2026-10-14T10:00:00\",\"foregroundColor\":null,\"forgottenDateTime\":null,\"id\":\"22222222-2222-4222-8222-222222222222\",\"kind\":1,\"label\":null,\"modificationDateTime\":\"2026-10-14T10:00:00\",\"name\":\"Entry\",\"typeId\":null}"
+          }
+        ],
+        "findings": [],
+        "source_gaps": [],
+        "generated_presentations": [],
+        "accounting": {
+          "entries": [
+            {
+              "identity": "attachment:a1111111-1111-4111-8111-111111111111",
+              "disposition": "normalized",
+              "references": [
+                "a1111111-1111-4111-8111-111111111111"
+              ]
+            },
+            {
+              "identity": "brain:11111111-1111-4111-8111-111111111111",
+              "disposition": "retained_only",
+              "references": [
+                "brain:11111111-1111-4111-8111-111111111111"
+              ]
+            },
+            {
+              "identity": "exclusion:33333333-3333-4333-8333-333333333333",
+              "disposition": "retained_only",
+              "references": [
+                "exclusion:33333333-3333-4333-8333-333333333333"
+              ]
+            },
+            {
+              "identity": "graph:22222222-2222-4222-8222-222222222222",
+              "disposition": "retained_only",
+              "references": [
+                "graph:22222222-2222-4222-8222-222222222222"
+              ]
+            },
+            {
+              "identity": "note_text:22222222-2222-4222-8222-222222222222",
+              "disposition": "normalized",
+              "references": [
+                "a1111111-1111-4111-8111-111111111111"
+              ]
+            },
+            {
+              "identity": "scope:excluded:33333333-3333-4333-8333-333333333333",
+              "disposition": "retained_only",
+              "references": [
+                "scope:excluded:33333333-3333-4333-8333-333333333333"
+              ]
+            },
+            {
+              "identity": "scope:included:22222222-2222-4222-8222-222222222222",
+              "disposition": "retained_only",
+              "references": [
+                "scope:included:22222222-2222-4222-8222-222222222222"
+              ]
+            },
+            {
+              "identity": "statistics:end",
+              "disposition": "retained_only",
+              "references": [
+                "statistics:end"
+              ]
+            },
+            {
+              "identity": "statistics:start",
+              "disposition": "retained_only",
+              "references": [
+                "statistics:start"
+              ]
+            },
+            {
+              "identity": "thought:22222222-2222-4222-8222-222222222222",
+              "disposition": "normalized",
+              "references": [
+                "22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          ]
+        }
+      },
+      "payloads_utf8": {
+        "a1111111-1111-4111-8111-111111111111": "[Foreign](brain://api.thebrain.com/&#77;zMzMzMzM0ODMzMzMzMzMw/EREREREREUGBEREREREREQ)"
+      }
+    }
+  ]
+}

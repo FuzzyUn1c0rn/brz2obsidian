@@ -1,8 +1,9 @@
 """Ordinary resource links backed by the one planned asset assignment."""
 
-import html
 import re
 from pathlib import PurePosixPath
+
+from brz2obsidian.obsidian_dialect import video_player_markup
 
 
 def resource_section(plan, owner):
@@ -35,12 +36,10 @@ def resource_section(plan, owner):
             label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
             lines.append(f"- [{label}](<{target.resource_link}>)")
             if asset.video_presentation:
-                uri = html.escape(asset.video_presentation.embed_uri, quote=True)
                 lines.append(
-                    '\n<iframe src="'
-                    + uri
-                    + '" width="560" height="315" title="YouTube video player" '
-                    'frameborder="0" allowfullscreen></iframe>\n'
+                    "\n"
+                    + video_player_markup(asset.video_presentation.embed_uri)
+                    + "\n"
                 )
         else:
             lines.append(f"- [[{target.resource_link}|{label}]]")

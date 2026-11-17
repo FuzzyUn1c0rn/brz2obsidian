@@ -90,6 +90,7 @@ class ChooseHistoryCommand(ReconciliationContract):
 
 class PageUpdateCommand(ReconciliationContract):
     command: Literal["page"]
+    queue: Literal["all", "unresolved"] = "all"
     binding: UpdateContextBinding | HistoryContextBinding
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=100)
@@ -107,6 +108,7 @@ class ReferenceUpdateCommand(ReconciliationContract):
 
 class ChoicePageUpdateCommand(ReconciliationContract):
     command: Literal["choices"]
+    queue: Literal["all", "unresolved"] = "all"
     binding: UpdateContextBinding
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=100)
@@ -159,6 +161,12 @@ class StageReferencesCommand(ReconciliationContract):
     binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     choices: tuple[UpdateReferenceChoice, ...] = Field(min_length=1, max_length=100)
+
+
+class KeepCurrentUnresolvedCommand(ReconciliationContract):
+    command: Literal["keep_current_unresolved"]
+    binding: UpdateContextBinding
+    group_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class ConfigurationChoiceCommand(ReconciliationContract):
@@ -259,6 +267,7 @@ UpdateCommand = Annotated[
     | ChoiceDetailUpdateCommand
     | ChooseUpdateCommand
     | StageReferencesCommand
+    | KeepCurrentUnresolvedCommand
     | ConfigurationChoiceCommand
     | BeginEditCommand
     | WriteEditCommand

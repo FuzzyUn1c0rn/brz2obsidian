@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import (
     AttachmentAlternative,
     AttachmentOutput,
@@ -15,7 +16,7 @@ from .link_meanings import associated_link_reviews
 
 
 def _hash(content):
-    return None if content is None else sha256(content.data).hexdigest()
+    return None if content is None else content_sha(content)
 
 
 def _allocation_path(subject, ordinal):
@@ -30,13 +31,13 @@ def _allocation_path(subject, ordinal):
     return f"{folder}/{name}" if folder else name
 
 
-def attachment_review(facts, subject, subject_id):
+def attachment_review(facts, subject, subject_id, *, _links=None):
     if subject.attachment is None:
         return None, ()
     if subject.operation_reversal is not None:
-        return _operation_attachment_review(facts, subject, subject_id)
+        return _operation_attachment_review(facts, subject, subject_id, _links=_links)
     if facts.format_operation.kind == "attachment_cleanup":
-        return _cleanup_attachment_review(facts, subject, subject_id)
+        return _cleanup_attachment_review(facts, subject, subject_id, _links=_links)
     association = subject.attachment.current_target_id
     prospective = []
     for other in facts.subjects:
@@ -171,7 +172,9 @@ def attachment_review(facts, subject, subject_id):
             unavailable_reasons=() if both else (reason,),
         )
     )
-    links, link_assumptions = associated_link_reviews(facts, subject, subject_id, both)
+    links, link_assumptions = associated_link_reviews(
+        facts, subject, subject_id, both, _links=_links
+    )
     assumptions = (assumption,) + link_assumptions
     return AttachmentReview(
         incoming_source_path=subject.path,
@@ -184,7 +187,7 @@ def attachment_review(facts, subject, subject_id):
     ), assumptions
 
 
-def _cleanup_attachment_review(facts, subject, subject_id):
+def _cleanup_attachment_review(facts, subject, subject_id, *, _links=None):
     """Offer removal only for a recorded owned facet with complete current proof."""
     from .formats import established_original
     from .reversals import cleanup_removal_continuation
@@ -278,7 +281,9 @@ def _cleanup_attachment_review(facts, subject, subject_id):
             f"identity-review:{subject_id}",
         ),
     )
-    links, link_assumptions = associated_link_reviews(facts, subject, subject_id, ())
+    links, link_assumptions = associated_link_reviews(
+        facts, subject, subject_id, (), _links=_links
+    )
     assumptions = (assumption,) + link_assumptions
     return AttachmentReview(
         incoming_source_path=subject.path,
@@ -291,7 +296,7 @@ def _cleanup_attachment_review(facts, subject, subject_id):
     ), assumptions
 
 
-def _operation_attachment_review(facts, subject, subject_id):
+def _operation_attachment_review(facts, subject, subject_id, *, _links=None):
     """Offer the proved complete present outputs; omission never implies removal."""
     from .reversals import content_bytes
 
@@ -360,7 +365,9 @@ def _operation_attachment_review(facts, subject, subject_id):
                 )
             }
         )
-        links, dependencies = associated_link_reviews(facts, view, subject_id, ())
+        links, dependencies = associated_link_reviews(
+            facts, view, subject_id, (), _links=_links
+        )
         scoped.extend(a.fingerprint for a in dependencies)
         reviews.update({(r.document_id, r.occurrence_id): r for r in links})
     link = ProposalAssumption(

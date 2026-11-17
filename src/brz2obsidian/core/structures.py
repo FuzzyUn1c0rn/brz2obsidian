@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_sha, same_content
 from brz2obsidian.contracts import (
     ExactContent,
     ProposalAssumption,
@@ -54,7 +55,7 @@ def validate_structure_facts(
 
     if any(
         content is None
-        or doc.content.data != content.data
+        or not same_content(doc.content, content)
         or doc.output_format != version
         for doc, content, version in zip(
             documents,
@@ -88,12 +89,32 @@ def validate_structure_facts(
     # separately; an unsafe unchosen incoming alternative cannot veto safe keep.
     try:
         if comparison.alignment == "supported":
-            bodies = tuple(d.content.data[d.body.start : d.body.end] for d in documents)
-            if (
-                _apply(bodies[0], comparison.local_edits) != bodies[1]
-                or _apply(bodies[0], comparison.source_edits) != bodies[2]
+            for document, edits in (
+                (documents[1], comparison.local_edits),
+                (documents[2], comparison.source_edits),
             ):
-                return "structure_unbound"
+                original = documents[0]
+                if isinstance(original.content, ExactContent) and isinstance(
+                    document.content, ExactContent
+                ):
+                    before = original.content.data[
+                        original.body.start : original.body.end
+                    ]
+                    after = document.content.data[
+                        document.body.start : document.body.end
+                    ]
+                    if _apply(before, edits) != after:
+                        return "structure_unbound"
+                elif (
+                    edits
+                    or original.body.start != 0
+                    or document.body.start != 0
+                    or not same_content(original.content, document.content)
+                ):
+                    # For a whole body, _apply(body, ()) is exactly the owned
+                    # whole-version byte correspondence. Edited operands still
+                    # require actual available bytes; no status shortcut.
+                    return "structure_unbound"
         for index, document in enumerate(documents):
             validate_memberships(
                 document, target_safety=current_target_safety and index == 1
@@ -110,7 +131,7 @@ def validate_structure_facts(
 
 
 def structure_proposal(
-    subject, baseline_identity, incoming_identity, *, source_version
+    subject, baseline_identity, incoming_identity, *, source_version, automatic=False
 ):
     comparison = subject.structure
     documents = comparison.original, comparison.current, comparison.incoming
@@ -123,14 +144,17 @@ def structure_proposal(
     )
     if problem is not None:
         return unresolved(problem)
-    if (
-        any(doc.status != "supported" for doc in documents)
-        or comparison.alignment == "unsupported"
-    ):
+    if any(doc.status != "supported" for doc in documents):
+        return unresolved("structure_unsupported")
+    original, current, incoming = documents
+    if automatic and same_content(current.content, original.content):
+        # No local delta needs hunk alignment. The outer automatic candidate and
+        # effect guards still validate this exact supported incoming document.
+        return ("compatible", incoming.content, "source_only", True), incoming
+    if comparison.alignment == "unsupported":
         return unresolved("structure_unsupported")
     if comparison.alignment != "supported":
         return unresolved("structure_ambiguous")
-    original, current, incoming = documents
     old_fields, current_fields, source_fields = (
         {f.key: f for f in doc.fields} for doc in documents
     )
@@ -318,7 +342,7 @@ def structure_assumption(comparison):
         doc = getattr(comparison, name)
         values[name] = _semantic(doc)
         values[name].pop("content")
-        values[name]["content_sha256"] = sha256(doc.content.data).hexdigest()
+        values[name]["content_sha256"] = content_sha(doc.content)
     return values
 
 

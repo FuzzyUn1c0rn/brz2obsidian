@@ -1,5 +1,6 @@
 """The maintained check command is tested only through its public processes."""
 
+import hashlib
 import json
 import os
 import re
@@ -392,3 +393,143 @@ def test_inherited_pytest_options_cannot_narrow_declared_selection(
     assert os.environ["PYTEST_PLUGINS"] == "missing_injected_plugin"
     assert "nonexistent_test" in os.environ["PYTEST_ADDOPTS"]
     assert not (checkout / "tmp" / "unsafe-shared").exists()
+
+
+def test_selector_file_receipt_preserves_scope_and_refuses_altered_evidence(checkout):
+    relative = "tests/é selected/test_transport.py"
+    target = checkout / relative
+    target.parent.mkdir()
+    target.write_text(
+        'import pytest\n\n\n@pytest.mark.parametrize("value", ["alpha", "beta"], '
+        'ids=["alpha " * 2900, "beta " * 3500])\n'
+        'def test_selected(value):\n    assert value in ("alpha", "beta")\n',
+        encoding="utf-8",
+    )
+    (checkout / "tests" / "test_excluded.py").write_text(
+        'def test_excluded():\n    raise AssertionError("excluded discovery ran")\n',
+        encoding="utf-8",
+    )
+    selectors = [
+        f"{relative}::test_selected[{'alpha ' * 2900}]",
+        f"{relative}::test_selected[{'beta ' * 3500}]",
+    ]
+    assert sum(len(node) for node in selectors) > 32767
+    assert all(len(node + " (teardown)") < 32767 for node in selectors)
+    source = checkout / "tmp" / "requested é selection.json"
+    source.parent.mkdir()
+    original_input = (
+        json.dumps(selectors, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    source.write_bytes(original_input)
+    keyword = "selected and not excluded"
+    marker = "parametrize and not skip"
+    result, path, receipt = run(
+        checkout,
+        "--check",
+        "pytest",
+        "--tests-file",
+        source,
+        "-k",
+        keyword,
+        "-m",
+        marker,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    selected = receipt["checks"][0]
+    assert selected["counts"]["passed"] == 2
+    assert selected["counts"]["executed_nodes"] == selectors
+    assert selected["selection"]["keyword"] == keyword
+    assert selected["selection"]["marker"] == marker
+    archived = path.parent / "selectors.json"
+    assert archived.read_bytes() == original_input
+    if os.name == "nt":
+        argument_path = path.parent / "pytest.args"
+        assert argument_path.read_bytes() == ("\n".join(selectors) + "\n").encode(
+            "utf-8"
+        )
+        assert "@" + str(argument_path) in selected["argv"]
+        assert all(node not in selected["argv"] for node in selectors)
+    else:
+        assert "pytest_args" not in selected
+        assert all(node in selected["argv"] for node in selectors)
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", selectors, keyword=keyword, marker=marker)],
+        receipt["environment"],
+    )
+    original_receipt = path.read_bytes()
+    originals = {archived: original_input}
+    if os.name == "nt":
+        originals[argument_path] = argument_path.read_bytes()
+
+    def restore():
+        path.write_bytes(original_receipt)
+        source.write_bytes(original_input)
+        for filename, raw in originals.items():
+            filename.write_bytes(raw)
+
+    def observe(label, exit_code):
+        observed = command(
+            "validate",
+            "--receipt",
+            path,
+            "--checkout",
+            checkout,
+            "--requirements",
+            expected,
+        )
+        output = observed.stdout + observed.stderr
+        (checkout / "tmp" / f"validate-{label}.log").write_text(
+            output, encoding="utf-8"
+        )
+        assert observed.returncode == exit_code, output
+
+    def replace_bytes(field, raw):
+        altered = json.loads(original_receipt)
+        row = altered["checks"][0]
+        facts = row[field]
+        (path.parent / facts["path"]).write_bytes(raw)
+        for item in (facts, *row["evidence"]):
+            if item["path"] == facts["path"]:
+                item.update(size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+        path.write_text(json.dumps(altered), encoding="utf-8")
+
+    try:
+        # Validation is self-contained even if the original external input changes.
+        source.write_bytes(b"changed after execution")
+        observe("accepted-archived-input", 0)
+        restore()
+
+        archived.unlink()
+        observe("missing-input", 2)
+        restore()
+
+        archived.write_bytes(original_input + b" ")
+        observe("changed-bytes", 2)
+        restore()
+
+        altered = json.loads(original_receipt)
+        altered["checks"][0]["selector_input"]["path"] = "copied-selectors.json"
+        path.write_text(json.dumps(altered), encoding="utf-8")
+        (path.parent / "copied-selectors.json").write_bytes(original_input)
+        observe("wrong-fixed-path", 2)
+        restore()
+
+        altered = json.loads(original_receipt)
+        altered["checks"][0]["selector_input"]["role"] = "pytest_args"
+        path.write_text(json.dumps(altered), encoding="utf-8")
+        observe("wrong-role", 2)
+        restore()
+
+        # Matching replacement hashes cannot hide a different complete selection.
+        other_selector = "tests/test_selected.py::test_selected"
+        replace_bytes("selector_input", json.dumps([other_selector]).encode("utf-8"))
+        observe("input-scope-disagreement", 2)
+        restore()
+
+        if os.name == "nt":
+            replace_bytes("pytest_args", (other_selector + "\n").encode("utf-8"))
+            observe("argument-scope-disagreement", 2)
+            restore()
+    finally:
+        restore()

@@ -150,6 +150,11 @@ class UpdateWorker:
         args = request.arguments
         with self._activity:
             cancel = self._cancel
+        request_owner = (
+            self.context._owner if isinstance(self.context, UpdateContext) else None
+        )
+        if request_owner is not None:
+            request_owner._cancel.probe = cancel.is_set
         try:
             values = args.model_dump(exclude={"command"})
             if args.command == "prepare":
@@ -194,6 +199,10 @@ class UpdateWorker:
                 result = self.context.choice_details(**values)
             elif args.command == "choose":
                 result = self.context.choose(**values)
+            elif args.command == "keep_current_unresolved":
+                result = self.context.keep_current_unresolved(
+                    **values, cancel=cancel.is_set
+                )
             elif args.command == "choose_configuration":
                 result = self.context.choose_configuration(**values)
             elif args.command == "stage_references":
@@ -242,6 +251,13 @@ class UpdateWorker:
                 ),
             )
         finally:
+            if request_owner is not None:
+                request_owner._cancel.probe = None
+                if (
+                    request_owner._session is not None
+                    and not request_owner._session._closed
+                ):
+                    request_owner._session._ledger.release_failed()
             with self._activity:
                 if (
                     self._active is not None
@@ -249,6 +265,9 @@ class UpdateWorker:
                     and self._active.sequence == request.sequence
                 ):
                     self._active = None
+
+            if self.closed and isinstance(self.context, UpdateContext):
+                self.context._retire_owner()
 
     def serve(self, incoming, *, first=None):
         self._output()
@@ -287,7 +306,11 @@ class UpdateWorker:
         # The sealed close reply lets the parent release stdin. Join before
         # interpreter shutdown so no thread still owns buffered standard I/O.
         reader.join()
-        self._delivery.close()
+        try:
+            if isinstance(self.context, UpdateContext):
+                self.context._retire_owner()
+        finally:
+            self._delivery.close()
         return 1 if bad_input.is_set() or self._output_lost or not self.closed else 0
 
 

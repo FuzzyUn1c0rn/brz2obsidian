@@ -5,6 +5,7 @@ in the selected virtual environment, without changing installations or sources.
 """
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -202,7 +203,31 @@ def selector_spelling(node):
     return Path(filename).as_posix() + separator + suffix
 
 
-def command_for(python, run_dir, check, chosen):
+def windows_command_too_long(argv):
+    return os.name == "nt" and (
+        len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 > 32767
+    )
+
+
+def selector_values(raw):
+    values = json.loads(raw.decode("utf-8"))
+    if (
+        not isinstance(values, list)
+        or not values
+        or any(not isinstance(node, str) or not node for node in values)
+    ):
+        raise Invalid("--tests-file requires a nonempty JSON array of selector strings")
+    return values
+
+
+def pytest_argument_bytes(selectors):
+    raw = ("\n".join(selectors) + "\n").encode("utf-8")
+    if raw.decode("utf-8").splitlines() != selectors:
+        raise Invalid("Pytest argument file cannot preserve these selector values")
+    return raw
+
+
+def command_for(python, run_dir, check, chosen, selector_file=None):
     argv = [str(python), "-m"]
     if check == "dependency":
         return argv + ["pip", "check"]
@@ -224,7 +249,7 @@ def command_for(python, run_dir, check, chosen):
         str(run_dir / "pytest"),
         "-o",
         f"cache_dir={run_dir / 'pytest-cache'}",
-        *chosen["selectors"],
+        *(["@" + str(selector_file)] if selector_file else chosen["selectors"]),
     ]
     if chosen["keyword"]:
         argv += ["-k", chosen["keyword"]]
@@ -241,14 +266,14 @@ def command_for(python, run_dir, check, chosen):
     return argv
 
 
-def parse():
+def parse(argv=None, checkout=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser(
         "run", help="Run all four checks, or explicitly selected checks"
     )
     run.add_argument(
-        "--checkout", type=Path, default=Path(__file__).resolve().parents[1]
+        "--checkout", type=Path, default=checkout or Path(__file__).resolve().parents[1]
     )
     run.add_argument(
         "--python",
@@ -257,11 +282,15 @@ def parse():
     )
     run.add_argument("--environment", choices=("auto", "base", "gui"), default="auto")
     run.add_argument("--check", action="append", choices=CHECKS)
-    run.add_argument(
+    tests = run.add_mutually_exclusive_group()
+    tests.add_argument(
         "--test",
         action="append",
         default=[],
         help="Pytest relative file/directory/node; repeatable",
+    )
+    tests.add_argument(
+        "--tests-file", type=Path, help="UTF-8 JSON array of pytest selectors"
     )
     run.add_argument("-k", dest="keyword")
     run.add_argument("-m", dest="marker")
@@ -284,7 +313,7 @@ def parse():
         "--ref",
         help="Bind evidence to this full tracked Git commit instead of present checkout files",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def child_environment(root, run_dir):
@@ -428,6 +457,12 @@ def execute(argv, root, env, run_dir, check):
 
 def run(args):
     root = args.checkout.resolve()
+    selector_source = (
+        Path(os.path.abspath(args.tests_file)) if args.tests_file else None
+    )
+    selector_raw = selector_source.read_bytes() if selector_source else None
+    if selector_raw is not None:
+        args.test = selector_values(selector_raw)
     checks = list(dict.fromkeys(args.check or CHECKS))
     if (
         args.test or args.keyword or args.marker or args.require_gui or args.workers > 1
@@ -446,6 +481,17 @@ def run(args):
     run_dir.mkdir(parents=True, exist_ok=False)
     if git(root, "check-ignore", str(run_dir)).strip() == b"":
         raise Invalid("tmp/checks must be Git-ignored development output")
+    selector_input = None
+    if selector_source:
+        with (run_dir / "selectors.json").open("xb") as handle:
+            handle.write(selector_raw)
+        selector_input = {
+            "role": "selector_input",
+            **evidence(run_dir / "selectors.json", run_dir),
+            "source": str(selector_source),
+            "invocation": sys.argv[1:],
+            "cwd": str(Path.cwd()),
+        }
     python = (
         args.python
         if args.python
@@ -496,6 +542,10 @@ def run(args):
         "aggregate": "incomplete",
         "error": None,
     }
+    if selector_input:
+        next(row for row in receipt["checks"] if row["id"] == "pytest")[
+            "selector_input"
+        ] = selector_input
     save(run_dir / "partial.json", receipt)
     env = child_environment(root, run_dir)
     code = 2
@@ -522,9 +572,33 @@ def run(args):
                     "Assessed repository source changed during execution; remaining checks not run"
                 )
             argv = command_for(python, run_dir, check, row["selection"])
+            if check == "pytest" and windows_command_too_long(argv):
+                argument_path = run_dir / "pytest.args"
+                with argument_path.open("xb") as handle:
+                    handle.write(pytest_argument_bytes(row["selection"]["selectors"]))
+                row["pytest_args"] = {
+                    "role": "pytest_args",
+                    **evidence(argument_path, run_dir),
+                }
+                argv = command_for(
+                    python, run_dir, check, row["selection"], argument_path
+                )
+                if windows_command_too_long(argv):
+                    raise Invalid(
+                        "Compacted pytest command exceeds Windows process limit"
+                    )
             row.update(argv=argv, status="running", started=now())
             save(run_dir / "partial.json", receipt)
+            if (
+                check == "pytest"
+                and selector_source
+                and selector_source.read_bytes() != selector_raw
+            ):
+                raise Invalid("Selector input changed before pytest launch")
             exit_code, interrupted, outputs = execute(argv, root, env, run_dir, check)
+            for field in ("selector_input", "pytest_args"):
+                if field in row:
+                    outputs.append(evidence(run_dir / row[field]["path"], run_dir))
             row.update(
                 exit_code=exit_code,
                 ended=now(),
@@ -761,8 +835,96 @@ def validate(args):
                 raise Invalid("Recorded pytest scope contradicts executed selection")
         elif chosen is not None or row["counts"] is not None:
             raise Invalid("Non-pytest check cannot declare pytest selection or counts")
+        transport_paths = set()
+        for field, filename in (
+            ("selector_input", "selectors.json"),
+            ("pytest_args", "pytest.args"),
+        ):
+            if field not in row:
+                continue
+            facts = row[field]
+            fields = {"role", "path", "size", "sha256"}
+            if field == "selector_input":
+                fields |= {"source", "invocation", "cwd"}
+            if (
+                row["id"] != "pytest"
+                or not isinstance(facts, dict)
+                or set(facts) != fields
+                or facts["role"] != field
+                or facts["path"] != filename
+                or type(facts["size"]) is not int
+                or facts["size"] < 0
+                or not isinstance(facts["sha256"], str)
+            ):
+                raise Invalid("Malformed fixed pytest transport evidence")
+            path = (args.receipt.parent / filename).resolve()
+            if (
+                not path.is_relative_to(args.receipt.parent.resolve())
+                or not path.is_file()
+                or path.stat().st_size != facts["size"]
+                or digest(path.read_bytes()) != facts["sha256"]
+            ):
+                raise Invalid("Missing or altered pytest transport evidence")
+            claim = {key: facts[key] for key in ("path", "size", "sha256")}
+            if [item for item in row["evidence"] if item["path"] == filename] != [
+                claim
+            ]:
+                raise Invalid("Pytest transport evidence disagrees with its fixed role")
+            raw = path.read_bytes()
+            transport_paths.add(filename)
+            if field == "pytest_args":
+                if raw != pytest_argument_bytes(chosen["selectors"]):
+                    raise Invalid(
+                        "Pytest argument file disagrees with declared selection"
+                    )
+                continue
+            values = selector_values(raw)
+            if [selector_spelling(node) for node in values] != chosen["selectors"]:
+                raise Invalid("Selector input disagrees with declared selection")
+            if (
+                not isinstance(facts["source"], str)
+                or not Path(facts["source"]).is_absolute()
+                or not isinstance(facts["cwd"], str)
+                or not Path(facts["cwd"]).is_absolute()
+                or not isinstance(facts["invocation"], list)
+                or any(not isinstance(value, str) for value in facts["invocation"])
+            ):
+                raise Invalid("Malformed original selector input provenance")
+            try:
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    incoming = parse(facts["invocation"], checkout=origin)
+            except SystemExit:
+                raise Invalid("Malformed original selector input invocation") from None
+            if incoming.command != "run" or incoming.tests_file is None:
+                raise Invalid("Original invocation does not use selector input")
+            incoming.test = values
+            incoming_python = incoming.python or origin / ".venv" / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            if (
+                str(Path(os.path.abspath(Path(facts["cwd"]) / incoming.tests_file)))
+                != facts["source"]
+                or (Path(facts["cwd"]) / incoming.checkout).resolve()
+                != origin.resolve()
+                or incoming_python.resolve()
+                != Path(interpreter["executable"]).resolve()
+                or incoming.environment != receipt["requested_environment"]
+                or list(dict.fromkeys(incoming.check or CHECKS))
+                != [check["id"] for check in rows]
+                or selection(incoming) != chosen
+            ):
+                raise Invalid(
+                    "Original selector invocation disagrees with receipt scope"
+                )
         if row["argv"] != command_for(
-            row["argv"][0], origin_run, row["id"], row["selection"]
+            row["argv"][0],
+            origin_run,
+            row["id"],
+            row["selection"],
+            origin_run / "pytest.args" if "pytest_args" in row else None,
         ):
             raise Invalid(
                 "Recorded check arguments disagree with declared execution selection"
@@ -801,6 +963,7 @@ def validate(args):
         }
         if row["id"] == "pytest":
             expected_paths.add("counts.json")
+        expected_paths |= transport_paths
         if {item["path"] for item in row["evidence"]} != expected_paths or len(
             row["evidence"]
         ) != len(expected_paths):

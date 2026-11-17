@@ -11,16 +11,32 @@ from brz2obsidian.obsidian import (
     render_link_replacement,
 )
 
+REFERENCE_CHOICES_GUIDANCE = "Review references and stage a choice for every occurrence before choosing this version."
 
-def selected_attachment_candidate(plan, change, alternative, references, offered_refs):
+
+class ReferenceChoicesRequired(ValueError):
+    """The current offer has valid but incomplete explicit reference decisions."""
+
+
+def validated_reference_choices(references, offered):
     from .update_context_contracts import UpdateReferenceChoice
 
     supplied = tuple(UpdateReferenceChoice.model_validate(row) for row in references)
     choices = {row.reference_id: row.choice for row in supplied}
-    if len(choices) != len(supplied) or set(choices) != {
-        row[0] for row in offered_refs
-    }:
+    if (
+        len(choices) != len(supplied)
+        or not choices.keys() <= offered.keys()
+        or any(choice not in offered[token] for token, choice in choices.items())
+    ):
         raise ValueError("Reference offer changed")
+    if choices.keys() != offered.keys():
+        raise ReferenceChoicesRequired
+    return choices
+
+
+def selected_attachment_candidate(
+    plan, change, alternative, references, offered_refs, *, _owner=None, _session=None
+):
     context = plan.facts.link_context
     subject = next(
         row
@@ -29,6 +45,10 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
     )
     targets = {row.target_id: row for row in context.current_targets}
     states = {row.target_id: row for row in context.current_target_facts}
+    session = _session if _session is not None else getattr(_owner, "_session", None)
+    observe_target = (
+        interpret_link_target if session is None else session._assembly_link_state
+    )
     for output in alternative.outputs:
         templates = tuple(
             row
@@ -66,17 +86,34 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 }
             )
         targets[output.target_id] = target
-        states[output.target_id] = interpret_link_target(
+        states[output.target_id] = observe_target(
             output.content,
             target_id=output.target_id,
             existence="present",
             memberships=(),
             source_path=output.path,
+            output_format=plan.facts.incoming_identity.output_format,
         )
     offered = {
         (row.document_id, row.occurrence_id): row
         for row in change.attachment_review.links
     }
+    output_ids = {row.target_id for row in alternative.outputs}
+    available = {}
+    for token, document, occurrence in offered_refs:
+        review = offered[(document.document_id, occurrence.occurrence_id)]
+        available[token] = tuple(
+            choice
+            for choice, meaning in (
+                ("keep_current", review.old),
+                ("use_incoming", review.incoming),
+                ("use_secondary", review.secondary),
+            )
+            if choice in review.choices
+            and meaning is not None
+            and meaning.target_id in output_ids
+        )
+    choices = validated_reference_choices(references, available)
     links, replacements = [], {}
     for token, document, occurrence in offered_refs:
         review = offered[(document.document_id, occurrence.occurrence_id)]
@@ -129,6 +166,8 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 targets=tuple(targets.values()),
                 target_facts=tuple(states.values()),
                 inventory=document.inventory,
+                output_format=plan.facts.incoming_identity.output_format,
+                record_format=plan.facts.baseline_identity.output_format,
             )
         )
     for target_id, state in tuple(states.items()):
@@ -140,13 +179,14 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
         if bound:
             if len(bound) != 1:
                 raise ValueError("Document target is ambiguous")
-            states[target_id] = interpret_link_target(
+            states[target_id] = observe_target(
                 bound[0].content,
                 target_id=target_id,
                 existence="present",
                 memberships=state.memberships,
                 membership_targets=tuple(targets.values()),
                 source_path=bound[0].source_path,
+                output_format=plan.facts.incoming_identity.output_format,
             )
     return tuple(links), AttachmentCandidate(
         schema_id="brz2obsidian.attachment-candidate",

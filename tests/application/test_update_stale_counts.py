@@ -149,6 +149,16 @@ def refresh_case(
         generation=1,
         current_inventory=rows,
     )
+    if bulk:
+        # Retained manual-policy groups must still invalidate each member slot
+        # when a fresh automatic-policy refresh observes later vault edits.
+        facts = facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={"automatic_merge": False}
+                )
+            }
+        )
     plan = prepare_review(facts, preflight=checks)
     prepared = preparation(facts).model_copy(
         update={"vault": str(vault), "payload_directory": str(source), "review": plan}
@@ -384,6 +394,7 @@ def test_refresh_counts_second_slot_and_preserves_guide_then_resets_for_next_ope
 
 def test_bulk_action_counts_each_invalidated_member_slot(tmp_path, request):
     case = refresh_case(tmp_path, request, bulk=True, flat=True)
+    assert not case.prepared.review.facts.format_operation.automatic_merge
     assert case.prepared.review.ready and len(case.prepared.review.approvals) == 2, (
         review_context(case.prepared.review)
     )
@@ -392,6 +403,7 @@ def test_bulk_action_counts_each_invalidated_member_slot(tmp_path, request):
     case.current[GUIDE] = b"Later Guide writing.\n"
     result = case.operations.refresh_update(case.prepared)
     assert result.preparation is not None and not result.ready
+    assert result.preparation.review.facts.format_operation.automatic_merge
     assert result.stale == result.unresolved == 2
     assert result.preparation.review.approvals == ()
 

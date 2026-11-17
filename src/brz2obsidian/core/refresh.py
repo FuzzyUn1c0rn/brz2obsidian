@@ -1,23 +1,29 @@
 """Dependency-scoped immutable refresh; no observation, parsing or new consent."""
 
+from dataclasses import dataclass, replace
+
+from brz2obsidian.content_fingerprints import ChildWork, CompletedWork, drive_inline
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     ReconciliationInput,
     ReviewAction,
     ReviewAttachmentApplicability,
+    ReviewKeepCurrentGroup,
     ReviewPreflight,
     ReviewProducerApplicability,
     ReviewRefreshEvent,
     ReviewRetention,
 )
 
-from .resolution import _plan, _transition, validate_review
+from .attachment_validation import CandidateWork
+from .resolution import PlanWork, _transition, validate_review
 from .reversals import (
     content_bytes,
     primary_reversal_content,
     reversal_subject,
     reversal_text_comparison,
 )
-from .review_attachments import retained_attachment_view
+from .review_attachments import retained_attachment_inputs
 from .review_dependencies import review_dependencies
 from .review_links import selected_current_links_safe
 from .review_preflight import consent_requirements
@@ -104,37 +110,85 @@ def _approval_safe(facts, change, approval, origin, attachment_applicability=())
     )
 
 
-def _attachment_views(plan, facts, approvals):
-    result = []
-    for approval in approvals:
+@dataclass(frozen=True)
+class AttachmentViewsWork:
+    plan: object
+    facts: object
+    approvals: tuple
+    index: int = 0
+    history_index: int = 0
+    original: object = None
+    phase: str = "approval"
+    view: object = None
+    results: tuple = ()
+
+
+def advance_attachment_views(work, returned=None):
+    if work.index == len(work.approvals):
+        return CompletedWork(work.results)
+    approval = work.approvals[work.index]
+    if work.phase == "approval":
         if approval.attachment_candidate is None:
-            continue
-        original_facts = plan.history.initial_facts
-        for event in plan.history.events:
-            if isinstance(event, ReviewRefreshEvent):
-                original_facts = event.facts
-            elif (
-                isinstance(event, ReviewAction)
-                and event.decision_id == approval.decision_id
-            ):
-                break
-        view = retained_attachment_view(
-            facts,
+            return replace(work, index=work.index + 1)
+        return replace(
+            work,
+            phase="origin",
+            original=work.plan.history.initial_facts,
+            history_index=0,
+        )
+    if work.phase == "origin":
+        if work.history_index == len(work.plan.history.events):
+            return replace(work, phase="view")
+        event = work.plan.history.events[work.history_index]
+        if (
+            isinstance(event, ReviewAction)
+            and event.decision_id == approval.decision_id
+            or isinstance(event, ReviewKeepCurrentGroup)
+            and any(a.decision_id == approval.decision_id for a in event.actions)
+        ):
+            return replace(work, phase="view")
+        return replace(
+            work,
+            history_index=work.history_index + 1,
+            original=event.facts
+            if isinstance(event, ReviewRefreshEvent)
+            else work.original,
+        )
+    if work.phase == "view":
+        inputs = retained_attachment_inputs(
+            work.facts,
             approval.attachment_selection,
             approval.attachment_candidate,
-            original_facts,
+            work.original,
         )
-        if view is not None:
-            result.append(
+        if inputs is None:
+            return replace(work, phase="approval", index=work.index + 1, original=None)
+        observed_epoch, view = inputs
+        return ChildWork(
+            CandidateWork(observed_epoch, approval.attachment_selection, view),
+            replace(work, phase="validated", view=view),
+        )
+    if work.phase == "validated":
+        results = work.results
+        if returned.validation.valid:
+            results += (
                 ReviewAttachmentApplicability(
                     schema_id="brz2obsidian.review-attachment-applicability",
                     schema_version=1,
                     decision_id=approval.decision_id,
-                    generation=facts.generation,
-                    candidate=view,
-                )
+                    generation=work.facts.generation,
+                    candidate=work.view,
+                ),
             )
-    return tuple(result)
+        return replace(
+            work,
+            phase="approval",
+            index=work.index + 1,
+            original=None,
+            view=None,
+            results=results,
+        )
+    raise ValueError("Unknown attachment retention phase")
 
 
 def _producer_choices(plan, facts, fresh):
@@ -214,64 +268,176 @@ def _producer_choices(plan, facts, fresh):
     ), tuple(retained)
 
 
+@dataclass(frozen=True)
+class ClosureWork:
+    nodes: tuple
+    invalidated: frozenset
+    index: int = 0
+    added: frozenset = frozenset()
+
+
+def advance_closure(work, returned=None):
+    if returned is not None:
+        raise ValueError("Unexpected closure return")
+    if work.index == len(work.nodes):
+        if not work.added:
+            return CompletedWork(work.invalidated)
+        return replace(
+            work, index=0, invalidated=work.invalidated | work.added, added=frozenset()
+        )
+    node = work.nodes[work.index]
+    added = work.added
+    if node.key not in work.invalidated and any(
+        key in work.invalidated for key in node.depends_on
+    ):
+        added = added | {node.key}
+    return replace(work, index=work.index + 1, added=added)
+
+
+@dataclass(frozen=True)
+class RefreshWork:
+    plan: object
+    facts: ReconciliationInput
+    preflight: ReviewPreflight
+    phase: str = "initial"
+    producer_facts: object = None
+    applicability: tuple = ()
+    attachment_applicability: tuple = ()
+    retained: tuple = ()
+    old: tuple = ()
+    new: tuple = ()
+    tentative: object = None
+    changed: frozenset = frozenset()
+    invalidated: frozenset = frozenset()
+    closure_start: frozenset = frozenset()
+    bindings: tuple = ()
+    event: object = None
+    consents: tuple = ()
+
+
 def _refresh(plan, facts, preflight):
-    if facts.proposal_id != plan.proposal.proposal_id:
-        return _transition(plan, "refused", "wrong_proposal")
-    if facts.generation != plan.proposal.generation + 1:
-        return _transition(plan, "stale", "generation_changed")
-    attachment_applicability = ()
-    fresh = _plan(facts, preflight, actions=plan.actions)
-    try:
-        producer_facts, applicability = _producer_choices(plan, facts, fresh)
-    except ValueError:
-        return _transition(plan, "refused", "choice_not_admitted")
-    fresh = _plan(
-        facts,
-        preflight,
-        actions=plan.actions,
-        producer_facts=producer_facts,
-        producer_applicability=applicability,
-        attachment_applicability=attachment_applicability,
-    )
-    new_by_id = {c.change_id: c for c in fresh.proposal.changes}
-    retained = tuple(a for a in plan.approvals if a.change_id in new_by_id)
-    old_changes = {c.change_id: c for c in plan.proposal.changes}
-    try:
-        old = review_dependencies(plan)
-        while True:
-            attachment_applicability = _attachment_views(plan, producer_facts, retained)
-            tentative = _plan(
+    return drive_inline(RefreshWork(plan, facts, preflight))
+
+
+def advance_refresh(work, returned=None):
+    plan, facts, preflight = work.plan, work.facts, work.preflight
+    if work.phase == "initial":
+        if facts.proposal_id != plan.proposal.proposal_id:
+            return CompletedWork(_transition(plan, "refused", "wrong_proposal"))
+        if facts.generation != plan.proposal.generation + 1:
+            return CompletedWork(_transition(plan, "stale", "generation_changed"))
+        return ChildWork(
+            PlanWork(facts, preflight, actions=plan.actions),
+            replace(work, phase="producer"),
+        )
+    if work.phase == "producer":
+        try:
+            producer, applicability = _producer_choices(plan, facts, returned)
+        except ValueError:
+            return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
+        return ChildWork(
+            PlanWork(
                 facts,
                 preflight,
                 actions=plan.actions,
-                approvals=retained,
-                consents=plan.consents,
-                producer_facts=producer_facts,
+                producer_facts=producer,
                 producer_applicability=applicability,
-                attachment_applicability=attachment_applicability,
+            ),
+            replace(
+                work,
+                phase="fresh",
+                producer_facts=producer,
+                applicability=applicability,
+            ),
+        )
+    if work.phase == "fresh":
+        current_ids = {change.change_id for change in returned.proposal.changes}
+        retained = tuple(a for a in plan.approvals if a.change_id in current_ids)
+        try:
+            old = review_dependencies(plan)
+        except ValueError:
+            return CompletedWork(
+                _transition(plan, "refused", "dependency_graph_invalid")
             )
-            new = review_dependencies(tentative)
-            changed = {
-                key for key in old.keys() | new.keys() if old.get(key) != new.get(key)
-            }
-            invalidated = _closure(changed, old)
-            while True:
-                enlarged = _closure(_closure(invalidated, old), new)
-                if enlarged == invalidated:
-                    break
-                invalidated = enlarged
-            next_applicability = tuple(
-                b
-                for b in applicability
-                if not (
-                    {a.key for a in b.reviewed_assumptions}
-                    | {"producer-choice:" + b.original.decision_id}
-                )
-                & invalidated
+        return replace(
+            work, phase="iteration", retained=retained, old=tuple(old.values())
+        )
+    if work.phase == "iteration":
+        return ChildWork(
+            AttachmentViewsWork(plan, work.producer_facts, work.retained),
+            replace(work, phase="views"),
+        )
+    if work.phase == "views":
+        views = returned
+        return ChildWork(
+            PlanWork(
+                facts,
+                preflight,
+                actions=plan.actions,
+                approvals=work.retained,
+                consents=plan.consents,
+                producer_facts=work.producer_facts,
+                producer_applicability=work.applicability,
+                attachment_applicability=views,
+            ),
+            replace(work, phase="dependencies", attachment_applicability=views),
+        )
+    if work.phase == "dependencies":
+        try:
+            new = review_dependencies(returned)
+        except ValueError:
+            return CompletedWork(
+                _transition(plan, "refused", "dependency_graph_invalid")
             )
-            current = {c.subject_id: c for c in tentative.proposal.changes}
-            surviving = []
-            for approval in retained:
+        old = {node.key: node for node in work.old}
+        changed = frozenset(
+            key for key in old.keys() | new.keys() if old.get(key) != new.get(key)
+        )
+        return ChildWork(
+            ClosureWork(work.old, changed),
+            replace(
+                work,
+                phase="close_old",
+                tentative=returned,
+                new=tuple(new.values()),
+                changed=changed,
+            ),
+        )
+    if work.phase == "close_old":
+        # Preserve the original alternating closure to the identical fixed point.
+        return ChildWork(
+            ClosureWork(work.old, returned),
+            replace(work, phase="close_new", closure_start=returned),
+        )
+    if work.phase == "close_new":
+        return ChildWork(
+            ClosureWork(work.new, returned), replace(work, phase="closure_result")
+        )
+    if work.phase == "closure_result":
+        if returned != work.closure_start:
+            return ChildWork(
+                ClosureWork(work.old, returned),
+                replace(work, phase="close_new", closure_start=returned),
+            )
+        return replace(work, phase="retention", invalidated=returned)
+    if work.phase == "retention":
+        invalidated = work.invalidated
+        applicability = tuple(
+            b
+            for b in work.applicability
+            if not (
+                {a.key for a in b.reviewed_assumptions}
+                | {"producer-choice:" + b.original.decision_id}
+            )
+            & invalidated
+        )
+        current = {
+            change.subject_id: change for change in work.tentative.proposal.changes
+        }
+        old_changes = {change.change_id: change for change in plan.proposal.changes}
+        surviving = []
+        try:
+            for approval in work.retained:
                 before = old_changes[approval.change_id]
                 after = current.get(before.subject_id)
                 keys = {a.key for a in approval.assumptions} | {
@@ -285,110 +451,136 @@ def _refresh(plan, facts, preflight):
                     and not keys & invalidated
                     and after.change_id == approval.change_id
                     and _approval_safe(
-                        producer_facts,
+                        work.producer_facts,
                         after,
                         approval,
                         origin,
-                        attachment_applicability,
+                        work.attachment_applicability,
                     )
                 ):
                     surviving.append(approval)
-            if tuple(surviving) == retained and next_applicability == applicability:
-                break
-            retained = tuple(surviving)
-            applicability = next_applicability
-            originals = tuple(b.original for b in applicability)
-            producer_facts = producer_facts.model_copy(
+        except ValueError:
+            return CompletedWork(
+                _transition(plan, "refused", "dependency_graph_invalid")
+            )
+        if tuple(surviving) != work.retained or applicability != work.applicability:
+            originals = tuple(binding.original for binding in applicability)
+            producer = work.producer_facts.model_copy(
                 update={
                     "association_decisions": tuple(
                         d
-                        for d in producer_facts.association_decisions
+                        for d in work.producer_facts.association_decisions
                         if d in originals
                     ),
                     "rename_decisions": tuple(
-                        d for d in producer_facts.rename_decisions if d in originals
+                        d
+                        for d in work.producer_facts.rename_decisions
+                        if d in originals
                     ),
                 }
             )
-    except ValueError:
-        return _transition(plan, "refused", "dependency_graph_invalid")
-    bindings = []
-    for approval in retained:
-        before = old_changes[approval.change_id]
-        origin = next(a for a in plan.actions if a.decision_id == approval.decision_id)
-        keys = {a.key for a in approval.assumptions} | {"effect:" + before.subject_id}
-        bindings.append(
-            ReviewRetention(
-                schema_id="brz2obsidian.review-retention",
-                schema_version=1,
-                decision_id=approval.decision_id,
-                subject_id=before.subject_id,
-                domain=approval.domain,
-                origin_generation=origin.expected_generation,
-                origin_change_id=approval.change_id,
-                current_change_id=approval.change_id,
-                dependency_keys=tuple(sorted(keys)),
+            return replace(
+                work,
+                phase="iteration",
+                retained=tuple(surviving),
+                applicability=applicability,
+                producer_facts=producer,
             )
+        bindings = []
+        for approval in work.retained:
+            before = old_changes[approval.change_id]
+            origin = next(
+                a for a in plan.actions if a.decision_id == approval.decision_id
+            )
+            keys = {a.key for a in approval.assumptions} | {
+                "effect:" + before.subject_id
+            }
+            bindings.append(
+                ReviewRetention(
+                    schema_id="brz2obsidian.review-retention",
+                    schema_version=1,
+                    decision_id=approval.decision_id,
+                    subject_id=before.subject_id,
+                    domain=approval.domain,
+                    origin_generation=origin.expected_generation,
+                    origin_change_id=approval.change_id,
+                    current_change_id=approval.change_id,
+                    dependency_keys=tuple(sorted(keys)),
+                )
+            )
+        return ChildWork(
+            PlanWork(
+                facts,
+                preflight,
+                actions=plan.actions,
+                approvals=work.retained,
+                producer_facts=work.producer_facts,
+                producer_applicability=work.applicability,
+                attachment_applicability=work.attachment_applicability,
+            ),
+            replace(work, phase="consents", bindings=tuple(bindings)),
         )
-    selected = _plan(
-        facts,
-        preflight,
-        actions=plan.actions,
-        approvals=retained,
-        producer_facts=producer_facts,
-        producer_applicability=applicability,
-        attachment_applicability=attachment_applicability,
-    )
-    consent_nodes = {
-        r.change_id: r.assumptions
-        for r in consent_requirements(preflight, selected.proposal, selected.approvals)
-    }
-    consents = tuple(
-        c
-        for c in plan.consents
-        if "consent:" + c.consent_id not in invalidated
-        and consent_nodes.get("consent:" + c.consent_id) == c.assumptions
-    )
-    event = ReviewRefreshEvent(
-        schema_id="brz2obsidian.review-refresh-event",
-        schema_version=1,
-        expected_generation=plan.proposal.generation,
-        facts=facts,
-        preflight=preflight,
-        previous_dependencies=tuple(old[k] for k in sorted(old)),
-        dependencies=tuple(new[k] for k in sorted(new)),
-        changed_keys=tuple(sorted(changed)),
-        invalidated_keys=tuple(sorted(invalidated)),
-        retained=tuple(bindings),
-        producer_applicability=applicability,
-        attachment_applicability=attachment_applicability,
-    )
-    updated = _plan(
-        facts,
-        preflight,
-        actions=plan.actions,
-        approvals=tuple(retained),
-        consents=consents,
-        producer_facts=producer_facts,
-        producer_applicability=applicability,
-        attachment_applicability=attachment_applicability,
-    )
-    updated = updated.model_copy(
-        update={
-            "history": plan.history.model_copy(
-                update={"events": plan.history.events + (event,)}
+    if work.phase == "consents":
+        consent_nodes = {
+            r.change_id: r.assumptions
+            for r in consent_requirements(
+                preflight, returned.proposal, returned.approvals
             )
         }
-    )
-    return _transition(updated, "accepted", "accepted")
+        consents = tuple(
+            c
+            for c in plan.consents
+            if "consent:" + c.consent_id not in work.invalidated
+            and consent_nodes.get("consent:" + c.consent_id) == c.assumptions
+        )
+        old, new = (
+            {node.key: node for node in work.old},
+            {node.key: node for node in work.new},
+        )
+        event = ReviewRefreshEvent(
+            schema_id="brz2obsidian.review-refresh-event",
+            schema_version=1,
+            expected_generation=plan.proposal.generation,
+            facts=facts,
+            preflight=preflight,
+            previous_dependencies=tuple(old[key] for key in sorted(old)),
+            dependencies=tuple(new[key] for key in sorted(new)),
+            changed_keys=tuple(sorted(work.changed)),
+            invalidated_keys=tuple(sorted(work.invalidated)),
+            retained=work.bindings,
+            producer_applicability=work.applicability,
+            attachment_applicability=work.attachment_applicability,
+        )
+        return ChildWork(
+            PlanWork(
+                facts,
+                preflight,
+                actions=plan.actions,
+                approvals=work.retained,
+                consents=consents,
+                producer_facts=work.producer_facts,
+                producer_applicability=work.applicability,
+                attachment_applicability=work.attachment_applicability,
+            ),
+            replace(work, phase="finish", event=event),
+        )
+    if work.phase == "finish":
+        updated = returned.model_copy(
+            update={
+                "history": plan.history.model_copy(
+                    update={"events": plan.history.events + (work.event,)}
+                )
+            }
+        )
+        return CompletedWork(_transition(updated, "accepted", "accepted"))
+    raise ValueError("Unknown refresh phase")
 
 
 def refresh_review(plan, facts, *, preflight):
     validated = validate_review(plan)
     if validated.status != "accepted":
         return validated
-    return _refresh(
-        validated.plan,
-        ReconciliationInput.model_validate(facts),
-        ReviewPreflight.model_validate(preflight),
-    )
+    facts = ReconciliationInput.model_validate(facts)
+    preflight = ReviewPreflight.model_validate(preflight)
+    require_inline((facts, preflight))
+    return _refresh(validated.plan, facts, preflight)

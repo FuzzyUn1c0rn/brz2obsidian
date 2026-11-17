@@ -2,19 +2,24 @@
 
 import json
 import unicodedata
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from datetime import date
 from hashlib import sha256
-from typing import BinaryIO, Literal, Protocol
+from typing import Annotated, BinaryIO, Literal, Protocol, runtime_checkable
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     PrivateAttr,
+    Tag,
     field_validator,
+    model_serializer,
     model_validator,
 )
+from pydantic_core import core_schema
 
 
 class Contract(BaseModel):
@@ -167,7 +172,12 @@ class ClassificationAssignment(Contract):
 class TextAdaptation(Contract):
     """An exact edit from scoped source text into the document's adapted text."""
 
-    kind: Literal["literal_text", "markdown_insert"] = "literal_text"
+    kind: Literal[
+        "literal_text",
+        "markdown_insert",
+        "image_unavailable",
+        "markdown_insert_image_unavailable",
+    ] = "literal_text"
     start: int
     end: int
     before: str
@@ -540,6 +550,21 @@ class SourceSession(Protocol):
     def verify_consistency(self) -> None: ...
 
 
+class PayloadReader(Protocol):
+    def open_payload(self, asset_id: str) -> AbstractContextManager[BinaryIO]: ...
+
+
+@runtime_checkable
+class PayloadReadViews(Protocol):
+    """Optional finite copy reader; original session verification stays forceful.
+
+    The view validates selected/consumed bytes and closes with a complete source
+    check. Its lifetime ends before the publisher validates staged output.
+    """
+
+    def payload_read_view(self) -> AbstractContextManager[PayloadReader]: ...
+
+
 class SourceModule(Protocol):
     def open(self, source_ref: object) -> AbstractContextManager[SourceSession]: ...
 
@@ -629,6 +654,20 @@ class ReconciliationContract(Contract):
         return value
 
 
+class ContentIdentity(ReconciliationContract):
+    """Exact-value name established by co-admission, not byte availability."""
+
+    content_id: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def canonical_name(self):
+        if self.content_id != f"sha256:{self.sha256}:{self.size}":
+            raise ValueError("Content identity spelling is not canonical")
+        return self
+
+
 class ImmutableContentReference(ReconciliationContract):
     """An immutable locator whose supplied bytes must validate before use."""
 
@@ -637,26 +676,245 @@ class ImmutableContentReference(ReconciliationContract):
     size: int = Field(ge=0)
 
 
-class ExactContent(ReconciliationContract):
-    """Available bytes, optionally retaining a validated immutable locator.
+def _content_model_equal(left, right):
+    if type(left) is not type(right):
+        return NotImplemented
+    return (
+        left.__pydantic_private__ == right.__pydantic_private__
+        and left.__pydantic_extra__ == right.__pydantic_extra__
+        and all(
+            getattr(left, name) == getattr(right, name)
+            for name in type(left).model_fields
+            if name != "occurrence"
+        )
+    )
 
-    A locator alone is never available content. Outer stores materialize bytes
-    before invoking this contract; equality in reconciliation uses those bytes.
-    """
+
+def _content_model_hash(value):
+    return hash(
+        (
+            type(value),
+            tuple(
+                getattr(value, name)
+                for name in type(value).model_fields
+                if name != "occurrence"
+            ),
+        )
+    )
+
+
+def _content_mapping_gate(value, info):
+    if (
+        isinstance(value, Mapping)
+        and {"kind", "identity", "occurrence"}.intersection(value)
+        and (info.context or {}).get("current_content") is not True
+    ):
+        raise ValueError("Current content mappings require an explicit codec context")
+    return value
+
+
+def _content_json_gate(value, info):
+    if {"kind", "identity", "occurrence"}.intersection(value.model_fields_set) and (
+        info.context or {}
+    ).get("current_content") is not True:
+        raise ValueError("Current content JSON requires an explicit codec context")
+    return value
+
+
+def _content_core_schema(cls, source, handler):
+    # Preserve Pydantic's JSON byte decoding. Typed constructors explicitly opt
+    # into declarations; schema-driven mappings retain the legacy default.
+    schema = handler(source)
+    cached = cls.__dict__.get("__pydantic_core_schema__")
+    owned = handler.resolve_ref_schema(cached) if isinstance(cached, dict) else None
+    if schema is owned and schema["type"] == "json-or-python":
+        return schema
+    schema = schema.copy()
+    reference = schema.pop("ref", None)
+    cursor = schema
+    while cursor["type"] in ("function-before", "function-after", "function-wrap"):
+        cursor["schema"] = cursor["schema"].copy()
+        cursor = cursor["schema"]
+    if cursor["type"] != "model" or cursor["cls"] is not cls:
+        raise TypeError("Unexpected owned content schema")
+    cursor["custom_init"] = False
+    return core_schema.json_or_python_schema(
+        json_schema=core_schema.with_info_after_validator_function(
+            _content_json_gate, schema
+        ),
+        python_schema=core_schema.with_info_before_validator_function(
+            _content_mapping_gate, schema
+        ),
+        ref=reference,
+    )
+
+
+def legacy_content_fields(value):
+    """The two old content fields, without materializing an enclosing graph."""
+    if type(value) is not InlineExactContent:
+        raise ValueError("Legacy content requires available inline bytes")
+    return (("data", value.data), ("reference", value.reference))
+
+
+def _copy_content(value, update, deep):
+    original = value.__deepcopy__() if deep else value
+    changes = {} if update is None else dict(update)
+    if (
+        "occurrence" in changes
+        and changes["occurrence"] is not None
+        and changes["occurrence"] != value.occurrence
+    ):
+        raise ValueError("A content copy cannot assign another occurrence")
+    fields = {name: getattr(original, name) for name in type(original).model_fields}
+    changed_bytes = (
+        type(value) is InlineExactContent
+        and "data" in changes
+        and changes["data"] != value.data
+    )
+    if changed_bytes and "identity" not in changes:
+        fields["identity"] = None
+    fields.update(changes)
+    # The constructor checks every field, including unknown updates, exact
+    # inline identity and the complete historical reference declaration.
+    result = type(value)(**fields)
+    if changed_bytes or result.identity != value.identity:
+        if changes.get("occurrence") is not None:
+            raise ValueError("Changed content cannot retain an old occurrence")
+        object.__setattr__(result, "occurrence", None)
+    object.__setattr__(result, "__pydantic_private__", original.__pydantic_private__)
+    object.__setattr__(
+        result, "__pydantic_fields_set__", value.model_fields_set | changes.keys()
+    )
+    return result
+
+
+class InlineExactContent(ReconciliationContract):
+    """Available exact bytes; default serialization retains the v1 shape."""
 
     data: bytes
     reference: ImmutableContentReference | None = None
+    kind: Literal["inline"] = "inline"
+    identity: ContentIdentity | None = None
+    occurrence: tuple[str | int, ...] | None = Field(default=None, exclude=True)
+
+    def __init__(self, /, **data):
+        self.__pydantic_validator__.validate_python(
+            data, self_instance=self, context={"current_content": True}
+        )
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        return _content_core_schema(cls, source, handler)
+
+    def __eq__(self, other):
+        return _content_model_equal(self, other)
+
+    def __hash__(self):
+        return _content_model_hash(self)
+
+    def model_copy(self, *, update=None, deep=False):
+        return _copy_content(self, update, deep)
 
     @model_validator(mode="after")
     def validate_reference(self):
+        digest = sha256(self.data).hexdigest()
+        identity = ContentIdentity(
+            content_id=f"sha256:{digest}:{len(self.data)}",
+            sha256=digest,
+            size=len(self.data),
+        )
+        if self.identity is not None and self.identity != identity:
+            raise ValueError("Inline content identity differs from its exact bytes")
+        object.__setattr__(self, "identity", identity)
         if self.reference is not None and (
-            len(self.data) != self.reference.size
-            or sha256(self.data).hexdigest() != self.reference.sha256
+            len(self.data) != self.reference.size or digest != self.reference.sha256
         ):
             raise ValueError(
                 "Immutable content reference does not match available bytes"
             )
         return self
+
+    @model_serializer(mode="wrap")
+    def content_encoding(self, handler, info):
+        fields = handler(self)
+        if (info.context or {}).get("current_content") is True:
+            return fields
+        return {
+            name: fields[name]
+            for name, _ in legacy_content_fields(self)
+            if name in fields
+        }
+
+
+ExactContent = InlineExactContent
+
+
+class OpaqueContent(ReconciliationContract):
+    """An exact-value declaration that confers no byte availability."""
+
+    kind: Literal["opaque"] = "opaque"
+    identity: ContentIdentity
+    reference: ImmutableContentReference | None = None
+    occurrence: tuple[str | int, ...] | None = Field(default=None, exclude=True)
+
+    def __init__(self, /, **data):
+        self.__pydantic_validator__.validate_python(
+            data, self_instance=self, context={"current_content": True}
+        )
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        return _content_core_schema(cls, source, handler)
+
+    def __eq__(self, other):
+        return _content_model_equal(self, other)
+
+    def __hash__(self):
+        return _content_model_hash(self)
+
+    def model_copy(self, *, update=None, deep=False):
+        return _copy_content(self, update, deep)
+
+    @model_validator(mode="after")
+    def compatibility_reference(self):
+        if self.reference is not None and (
+            self.reference.sha256 != self.identity.sha256
+            or self.reference.size != self.identity.size
+        ):
+            raise ValueError("Historical reference differs from content identity")
+        return self
+
+    @model_serializer(mode="wrap")
+    def content_encoding(self, handler, info):
+        if (info.context or {}).get("current_content") is not True:
+            raise ValueError("Opaque content has no v1 inline serialization")
+        return handler(self)
+
+
+def _content_kind(value):
+    if type(value) is InlineExactContent:
+        return "inline"
+    if type(value) is OpaqueContent:
+        return "opaque"
+    if isinstance(value, Mapping):
+        return value.get("kind", "inline")
+    return None
+
+
+ContentValue = Annotated[
+    Annotated[InlineExactContent, Tag("inline")]
+    | Annotated[OpaqueContent, Tag("opaque")],
+    Discriminator(_content_kind),
+]
+
+
+def same_content(left, right):
+    """Compare bytes or exact-value declarations; this grants no availability."""
+    if left is None or right is None:
+        return left is right
+    if type(left) is InlineExactContent and type(right) is InlineExactContent:
+        return left.data == right.data
+    return left.identity == right.identity
 
 
 class OutputIdentity(ReconciliationContract):
@@ -671,7 +929,7 @@ class OutputIdentity(ReconciliationContract):
 
 class ContentVersion(ReconciliationContract):
     status: Literal["known", "unknown"]
-    content: ExactContent | None
+    content: ContentValue | None
     unavailable_digest: str | None
 
     @model_validator(mode="after")
@@ -689,7 +947,7 @@ class ContentVersion(ReconciliationContract):
 class CurrentContent(ReconciliationContract):
     existence: Literal["present", "absent", "unknown"]
     path: str
-    content: ExactContent | None
+    content: ContentValue | None
 
     @model_validator(mode="after")
     def consistent_existence(self):
@@ -701,7 +959,7 @@ class CurrentContent(ReconciliationContract):
 class FormatBaselineOutput(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
-    content: ExactContent
+    content: ContentValue
 
 
 class SupportedFormatBaseline(ReconciliationContract):
@@ -728,6 +986,7 @@ class FormatOperation(ReconciliationContract):
     Establishment records bind available generated bytes to identity and source.
     """
 
+    automatic_merge: bool = Field(default=False, exclude_if=lambda value: not value)
     schema_id: Literal["brz2obsidian.format-operation"]
     schema_version: Literal[1]
     kind: Literal[
@@ -748,7 +1007,7 @@ class FormatReview(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     choices: tuple[Literal["keep_current", "use_target", "edit_result"], ...]
     configuration_choice: bool
-    target_generated: ExactContent | None
+    target_generated: ContentValue | None
     target_eligible: bool
 
 
@@ -881,11 +1140,24 @@ class OwnedSection(ReconciliationContract):
     targets: tuple[ReferenceTarget, ...]
 
 
+def _structure_requires_inline(
+    status, fields, memberships, appearance, sections, body_start
+):
+    return (
+        status == "supported"
+        or bool(fields)
+        or bool(memberships)
+        or appearance is not None
+        or bool(sections)
+        or body_start != 0
+    )
+
+
 class StructuredDocument(ReconciliationContract):
     schema_id: Literal["brz2obsidian.structured-document"]
     schema_version: Literal[1]
     output_format: int = Field(ge=1)
-    content: ExactContent
+    content: ContentValue
     status: Literal["supported", "unsupported", "opaque"]
     issues: tuple[str, ...]
     fields: tuple[StructureField, ...]
@@ -896,7 +1168,18 @@ class StructuredDocument(ReconciliationContract):
 
     @model_validator(mode="after")
     def bounded_distinct_fields(self):
-        if self.body.end != len(self.content.data):
+        if _structure_requires_inline(
+            self.status,
+            self.fields,
+            self.memberships,
+            self.appearance_field,
+            self.owned_sections,
+            self.body.start,
+        ) and not isinstance(self.content, InlineExactContent):
+            raise ValueError(
+                "Semantic structure evidence requires available inline content"
+            )
+        if self.body.end != self.content.identity.size:
             raise ValueError("Structure body must end at available content boundary")
         keys = [f.key for f in self.fields]
         if len(set(keys)) != len(keys):
@@ -951,18 +1234,22 @@ class OperationReversalOutput(ReconciliationContract):
     path: str = Field(min_length=1)
     target_id: str = Field(min_length=1)
     produced_existence: Literal["present", "absent"]
-    produced: ExactContent | None
+    produced: ContentValue | None
     current: CurrentContent
     target_existence: Literal["present", "absent"]
-    target: ExactContent | None
+    target: ContentValue | None
 
     @model_validator(mode="after")
     def exact_version_change(self):
         if (
             (self.produced_existence == "present") != (self.produced is not None)
             or (self.target_existence == "present") != (self.target is not None)
-            or (None if self.produced is None else self.produced.data)
-            == (None if self.target is None else self.target.data)
+            or (self.produced is None and self.target is None)
+            or (
+                self.produced is not None
+                and self.target is not None
+                and same_content(self.produced, self.target)
+            )
             or self.current.existence == "unknown"
             or self.current.path != self.path
         ):
@@ -975,8 +1262,9 @@ class OperationReversalOutput(ReconciliationContract):
 class OperationReversalTarget(ReconciliationContract):
     """Outer-validated selected-output ownership and exact operation versions.
 
-    Origin IDs join the retained canonical decision; they are not authority by
-    themselves. Outer history verifies membership and complete inventories again
+    Origin IDs join the retained canonical selection; an absent decision joins
+    only a canonical automatic result. They are not authority by themselves.
+    Outer history verifies membership and complete inventories again
     before publication. No output row creates a source item or facet.
     """
 
@@ -988,7 +1276,9 @@ class OperationReversalTarget(ReconciliationContract):
     operation_generation: int = Field(ge=1)
     history_fingerprint: str = Field(min_length=1)
     origin_change_id: str = Field(min_length=1)
-    origin_decision_id: str = Field(min_length=1)
+    origin_decision_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     owned_targets: tuple[ReferenceTarget, ...]
     outputs: tuple[OperationReversalOutput, ...]
 
@@ -1036,13 +1326,22 @@ class ReconciliationSubject(ReconciliationContract):
     path: str
     baseline: ContentVersion
     current: CurrentContent
-    incoming: ExactContent | None
+    incoming: ContentValue | None
     interpretation: Literal["supported", "opaque", "unsupported"]
     title: str | None = None
     source_target: IdentityTargetFacts
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
+    automatic_attachment: AttachmentCandidate | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    automatic_attachment_links: tuple[LinkOccurrenceChoice, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    automatic_result: ReviewedTextCandidate | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     operation_reversal: OperationReversalTarget | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -1211,10 +1510,10 @@ class ProposedChange(ReconciliationContract):
     facet: str
     path: str
     target_path: str
-    original: ExactContent | None
-    current: ExactContent | None
-    incoming: ExactContent | None
-    result: ExactContent | None
+    original: ContentValue | None
+    current: ContentValue | None
+    incoming: ContentValue | None
+    result: ContentValue | None
     disposition: Literal[
         "no_change",
         "preserve_vault",
@@ -1244,7 +1543,7 @@ class ProposedChange(ReconciliationContract):
     def conservative_result(self):
         if self.structure_result is not None and (
             self.result is None
-            or self.structure_result.content.data != self.result.data
+            or not same_content(self.structure_result.content, self.result)
             or self.structure_result.status != "supported"
         ):
             raise ValueError(
@@ -1284,13 +1583,13 @@ class ProposedChange(ReconciliationContract):
                     "Suppressed local deletion retains absence without selecting bytes"
                 )
         elif self.disposition == "compatible":
-            if self.result is None or not self.requires_decision:
-                raise ValueError("Compatible results still require review")
+            if self.result is None:
+                raise ValueError("Compatible results require exact selected bytes")
         elif (
             self.requires_decision
             or self.result is None
             or self.current is None
-            or self.result.data != self.current.data
+            or not same_content(self.result, self.current)
         ):
             raise ValueError(
                 "Preservation/no-change results must keep exact current bytes"
@@ -1529,7 +1828,7 @@ class SourceVersionMemory(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
     source_version: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reviewed_incoming: ExactContent
+    reviewed_incoming: ContentValue
     review_domain: Literal["content", "configuration"]
     configuration_context: ConfigurationMemoryContext | None
     choice: Literal["keep_vault", "decline_restoration"]
@@ -1561,9 +1860,9 @@ class SourceVersionMemory(ReconciliationContract):
                 raise ValueError(
                     "Configuration memory lacks its explicitly reviewed semantic context"
                 )
-        if sha256(self.reviewed_incoming.data).hexdigest() != self.source_version:
+        if self.reviewed_incoming.identity.sha256 != self.source_version:
             raise ValueError(
-                "Remembered source version must match available reviewed bytes"
+                "Remembered source version must match reviewed content identity"
             )
         scope = reconciliation_subject_id(
             self.module_id, self.collection_id, self.item_id, self.facet
@@ -1708,12 +2007,12 @@ class AttachmentFacts(ReconciliationContract):
 class AttachmentOutput(ReconciliationContract):
     target_id: str = Field(min_length=1)
     path: str
-    content: ExactContent
+    content: ContentValue
     content_version: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def exact_payload_version(self):
-        if sha256(self.content.data).hexdigest() != self.content_version:
+        if self.content.identity.sha256 != self.content_version:
             raise ValueError("Attachment version must bind exact available bytes")
         return self
 
@@ -1774,6 +2073,40 @@ class LinkAnchor(ReconciliationContract):
     raw_parts: tuple[bytes, ...]
 
 
+class LinkQuery(ReconciliationContract):
+    value: str = Field(min_length=1)
+    mode: Literal["exact", "shortened"]
+    spellings: tuple[str, ...]
+
+
+class ReferenceDeclarationFacts(ReconciliationContract):
+    status: Literal["absent", "blank", "valid", "invalid"]
+    query: LinkQuery | None
+
+    @model_validator(mode="after")
+    def qualified_query(self):
+        if (self.status == "valid") != (self.query is not None):
+            raise ValueError("Only a valid reference declaration has a query")
+        return self
+
+
+class MembershipDeclarationFacts(ReconciliationContract):
+    status: Literal["absent", "valid", "invalid"]
+    queries: tuple[LinkQuery, ...]
+
+
+class FileRoleFacts(ReconciliationContract):
+    """Dialect-qualified roles bound to one exact file version and path."""
+
+    path: str = Field(min_length=1)
+    content_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    category: bool
+    image_path: bool
+    category_memberships: MembershipDeclarationFacts
+    provider: ReferenceDeclarationFacts
+    owned_icon: ReferenceDeclarationFacts
+
+
 class LinkTargetFacts(ReconciliationContract):
     schema_id: Literal["brz2obsidian.link-target-facts"]
     schema_version: Literal[1]
@@ -1781,20 +2114,32 @@ class LinkTargetFacts(ReconciliationContract):
     existence: Literal[
         "present", "missing", "known_source_gap", "intentionally_uncreated", "unknown"
     ]
-    content: ExactContent | None
+    content: ContentValue | None
     fragments: tuple[LinkFragment, ...]
     anchors: tuple[LinkAnchor, ...]
     structure: StructuredDocument | None
     memberships: tuple[str, ...]
     interpretation: Literal["supported", "unsupported", "unknown"]
+    file_roles: FileRoleFacts | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # Read-only association to retained generated content. It creates neither
+    # a reconciliation subject nor permission to write this resource.
+    resource_origin: RetainedAttachmentOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bound_fragment_and_membership_evidence(self):
+        if self.file_roles is not None and self.file_roles.content_sha256 != (
+            None if self.content is None else self.content.identity.sha256
+        ):
+            raise ValueError("File roles must bind exact available target bytes")
         if tuple(a.fragment for a in self.anchors) != self.fragments:
             raise ValueError("Fragment facts require exact available anchors")
         for anchor in self.anchors:
             if (
-                self.content is None
+                not isinstance(self.content, InlineExactContent)
                 or not anchor.spans
                 or len(anchor.spans) != len(anchor.raw_parts)
             ):
@@ -1808,7 +2153,9 @@ class LinkTargetFacts(ReconciliationContract):
             if b"#".join(anchor.raw_parts) != anchor.fragment.value.encode("utf-8"):
                 raise ValueError("Fragment value must bind its normalized anchor parts")
         if self.structure is not None:
-            if self.content is None or self.structure.content.data != self.content.data:
+            if self.content is None or not same_content(
+                self.structure.content, self.content
+            ):
                 raise ValueError("Target structure must bind exact available bytes")
             observed = tuple(
                 e.target_id for m in self.structure.memberships for e in m.entries
@@ -1820,12 +2167,6 @@ class LinkTargetFacts(ReconciliationContract):
         elif self.memberships:
             raise ValueError("Membership facts require exact normalized structure")
         return self
-
-
-class LinkQuery(ReconciliationContract):
-    value: str = Field(min_length=1)
-    mode: Literal["exact", "shortened"]
-    spellings: tuple[str, ...]
 
 
 class LinkMeaning(ReconciliationContract):
@@ -2168,10 +2509,10 @@ class ReviewApproval(ReconciliationContract):
     choice: ReviewChoice
     attachment_selection: AttachmentSelection | None
     attachment_candidate: AttachmentCandidate | None
-    result: ExactContent | None
+    result: ContentValue | None
     target_path: str
     assumptions: tuple[ProposalAssumption, ...]
-    provenance: Literal["explicit_user", "compatible_bulk"]
+    provenance: Literal["explicit_user", "compatible_bulk", "automatic_merge"]
     source_accepted: bool
     source_memory: SourceVersionMemory | None
 
@@ -2278,12 +2619,19 @@ class ReviewRefreshEvent(ReconciliationContract):
     attachment_applicability: tuple[ReviewAttachmentApplicability, ...]
 
 
+class ReviewKeepCurrentGroup(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-keep-current-group"]
+    schema_version: Literal[1]
+    group_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    actions: tuple[ReviewAction, ...] = Field(min_length=1)
+
+
 class ReviewHistory(ReconciliationContract):
     schema_id: Literal["brz2obsidian.review-history"]
     schema_version: Literal[1]
     initial_facts: ReconciliationInput
     initial_preflight: ReviewPreflight
-    events: tuple[ReviewAction | ReviewRefreshEvent, ...]
+    events: tuple[ReviewAction | ReviewRefreshEvent | ReviewKeepCurrentGroup, ...]
 
 
 class ReviewPlan(ReconciliationContract):
@@ -2311,7 +2659,7 @@ class SelectedReviewFile(ReconciliationContract):
 
     path: str
     subject_id: str = Field(min_length=1)
-    content: ExactContent
+    content: ContentValue
 
 
 class SelectedReviewEffects(ReconciliationContract):

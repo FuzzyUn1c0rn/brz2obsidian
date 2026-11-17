@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from tests.application.test_attachment_cleanup_application import literal_cleanup_case
 
 
@@ -36,7 +38,7 @@ def worker_context_call(producer, arguments):
 def context_case(tmp_path):
     from brz2obsidian.application.update_context import UpdateContext
 
-    case = literal_cleanup_case(tmp_path, independent_keep=True)
+    case = literal_cleanup_case(tmp_path, independent_keep=True, output_format=8)
     operations_type = type(case.operations)
 
     class NativeInputs(operations_type):
@@ -48,6 +50,187 @@ def context_case(tmp_path):
 
     case.operations = NativeInputs()
     return UpdateContext(operations=case.operations), case
+
+
+def replacement_context_case(tmp_path):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_context import UpdateContext
+    from brz2obsidian.application.update_contracts import UpdateResult
+    from tests.application.test_update_lifecycle_contracts import preparation
+    from tests.reconciliation.test_attachments import linked_attachment_request
+
+    raw = b"Keep [[Assets/data.bin|First]] and ![[Assets/data.bin|Second]]. `[[Assets/data.bin]]`\r\n"
+    prepared = preparation(linked_attachment_request(raw=raw)).model_copy(
+        update={"vault": str(tmp_path)}
+    )
+    current = {"Notes/Owner.md": raw, "Assets/data.bin": b"\x00authored"}
+    for name, value in current.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(value)
+
+    class NativeInputs(Operations):
+        # Existing Native ports: real immutable Core review, no Git/source setup.
+        def prepare_update(self, vault, source):
+            return UpdateResult(
+                status="unresolved",
+                code="prepared",
+                preparation=prepared,
+                changes=1,
+                unresolved=1,
+                history_retained=True,
+            )
+
+        def read_checkpoint(self, vault, **kwargs):
+            from brz2obsidian.application.checkpoint_contracts import CheckpointRead
+
+            return CheckpointRead(
+                schema_id="brz2obsidian.checkpoint-read",
+                schema_version=1,
+                status="valid",
+                code="valid",
+                locator=prepared.locator,
+                manifest=None,
+                review=None,
+                message="Controlled current checkpoint",
+            )
+
+        def inspect_history(self, vault, **kwargs):
+            from tests.application.test_history_workflow import absent_history
+
+            return absent_history()
+
+        def inspect_update_status(self, vault):
+            from tests.application.test_history_workflow import operation_state
+
+            return operation_state("incomplete")
+
+        def prepare_recovery(self, vault, *, direction=None):
+            from tests.application.test_history_workflow import ready_native_recovery
+
+            assert direction == "finish"
+            return ready_native_recovery(direction="finish").native.model_copy(
+                update={"review": prepared.review}
+            )
+
+        def resolve_recovery(self, vault, previous, action):
+            from brz2obsidian.core import resolve_review
+
+            result = resolve_review(previous.review, action)
+            assert result.status == "accepted"
+            return previous.model_copy(update={"review": result.plan})
+
+    operations = NativeInputs()
+    return UpdateContext(operations=operations), operations, current
+
+
+@pytest.mark.parametrize(
+    "role,choice",
+    (("source_update", "incoming"), ("source_update", "both"), ("history", "incoming")),
+)
+def test_attachment_versions_require_complete_valid_staged_references(
+    tmp_path, role, choice
+):
+    context, _, current = replacement_context_case(tmp_path)
+
+    def send(command, **values):
+        return worker_context_call(context, {"command": command, **values})
+
+    if role == "history":
+        inspected = send(
+            "history",
+            vault=str(tmp_path),
+            selection_id="11111111-1111-4111-8111-111111111111",
+        )
+        opened = send(
+            "prepare_history",
+            binding=inspected.binding,
+            kind="recovery",
+            direction="finish",
+        )
+    else:
+        opened = send(
+            "prepare",
+            kind="source_update",
+            vault=str(tmp_path),
+            source=str(tmp_path / "incoming.brz"),
+            selection_id="11111111-1111-4111-8111-111111111111",
+        )
+    offers = context.history_choices if role == "history" else context.choice_page
+    offer = offers(opened.binding).offers[0]
+    refs = context.reference_page(
+        opened.binding, requirement_id=offer.requirement_id
+    ).references
+    assert len(refs) == 2 and all(row.selected is None for row in refs)
+    assert all("drop" not in row.choices for row in refs)
+    refused_drop = send(
+        "stage_references",
+        binding=opened.binding,
+        requirement_id=offer.requirement_id,
+        choices=({"reference_id": refs[0].reference_id, "choice": "drop"},),
+    )
+    assert (
+        refused_drop.code == "offer_changed" and refused_drop.binding == opened.binding
+    )
+    assert not refused_drop.draft_pending
+    command = "choose_history" if role == "history" else "choose"
+    options = {
+        "binding": opened.binding,
+        "requirement_id": offer.requirement_id,
+        "choice": choice,
+        "assumptions_digest": offer.assumptions_digest,
+    }
+    missing = send(command, **options)
+    assert missing.code == "reference_choices_required"
+    assert missing.binding == opened.binding and not missing.ready
+    assert "refresh_update" not in missing.next_actions
+    selected = (
+        ["use_incoming", "use_incoming"]
+        if choice == "incoming"
+        else ["keep_current", "use_secondary"]
+    )
+    first = send(
+        "stage_references",
+        binding=opened.binding,
+        requirement_id=offer.requirement_id,
+        choices=({"reference_id": refs[0].reference_id, "choice": selected[0]},),
+    )
+    partial = send(command, **{**options, "binding": first.binding})
+    assert partial.code == "reference_choices_required"
+    assert (
+        partial.binding == first.binding and partial.draft_pending and not partial.ready
+    )
+    # Invalid subsets remain safety failures, including per-version destinations.
+    bad = [
+        ({"reference_id": "0" * 64, "choice": selected[0]},),
+        ({"reference_id": refs[0].reference_id, "choice": selected[0]},) * 2,
+        ({"reference_id": refs[0].reference_id, "choice": "drop"},),
+    ]
+    if choice == "incoming":
+        bad.append(({"reference_id": refs[0].reference_id, "choice": "use_secondary"},))
+    for supplied in bad:
+        refused = send(
+            command, **{**options, "binding": first.binding, "references": supplied}
+        )
+        assert refused.code == "offer_changed" and refused.binding == first.binding
+    forged = send(
+        command,
+        **{**options, "binding": first.binding, "assumptions_digest": "0" * 64},
+    )
+    assert forged.code == "offer_changed"
+    second = send(
+        "stage_references",
+        binding=first.binding,
+        requirement_id=offer.requirement_id,
+        choices=({"reference_id": refs[1].reference_id, "choice": selected[1]},),
+    )
+    accepted = send(command, **{**options, "binding": second.binding})
+    assert accepted.code == (
+        "recovery_choice_recorded" if role == "history" else "accepted"
+    )
+    assert accepted.ready and not accepted.draft_pending
+    assert offers(accepted.binding).offers[0].selected == choice
+    assert {p: (tmp_path / p).read_bytes() for p in current} == current
 
 
 def test_reference_draft_blocks_other_operations_until_explicit_discard(tmp_path):
@@ -228,6 +411,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         hashlib.sha256(archive.read_bytes()).digest()
         != hashlib.sha256(reference.read_bytes()).digest()
     )
+    source_before = (archive.read_bytes(), reference.read_bytes())
     before = {
         path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
@@ -243,9 +427,9 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
     }
     context = UpdateContext(operations=operations)
     result = worker_context_call(context, arguments)
-    assert (
-        result.kind == "onboarding" and result.binding is not None and not result.ready
-    )
+    assert result.kind == "onboarding" and result.binding is not None and result.ready
+    assert result.unresolved == 0 and "apply_update" in result.next_actions
+    assert result.publication == "not_started"
     page = worker_context_call(context, {"command": "page", "binding": result.binding})
     assert page.status == "available"
     note = next(
@@ -253,7 +437,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         for row in page.page.items
         if row.item_id == "22222222-2222-4222-8222-222222222222"
     )
-    assert note.original == ORIGINAL and note.current == CURRENT
+    assert note.original == ORIGINAL and note.current == note.result == CURRENT
     for kind in ("source_update", "format_transition", "attachment_cleanup"):
         with pytest.raises(ValueError):
             WorkerRequest(
@@ -267,6 +451,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         for path in vault.rglob("*")
         if path.is_file()
     } == before
+    assert (archive.read_bytes(), reference.read_bytes()) == source_before
 
 
 def test_worker_pages_bound_consent_and_identity_choices_from_real_preparation(
@@ -477,7 +662,9 @@ def test_remove_choice_uses_bounded_offered_references_and_preserves_other_spans
         selection_id="11111111-1111-4111-8111-111111111111",
         kind="attachment_cleanup",
     )
+    assert opened.binding is not None, opened.model_dump_json()
     page = context.page(opened.binding, byte_limit=0)
+    assert page.page is not None, page.model_dump_json()
     change = next(row for row in page.page.items if row.item_id == "remove-asset")
     offer = next(row for row in page.offers if row.change_id == change.change_id)
     first = context.reference_page(
@@ -509,7 +696,12 @@ def test_remove_choice_uses_bounded_offered_references_and_preserves_other_spans
         choice="remove",
         assumptions_digest=offer.assumptions_digest,
     )
-    assert missing.status == "refused" and missing.code == "offer_changed"
+    assert missing.status == "refused" and missing.code == "reference_choices_required"
+    assert missing.summary == (
+        "Review references and stage a choice for every occurrence before choosing this version."
+    )
+    assert missing.binding == opened.binding and not missing.ready
+    assert "refresh_update" not in missing.next_actions
     staged = context.stage_references(
         opened.binding,
         requirement_id=offer.requirement_id,
@@ -524,7 +716,9 @@ def test_remove_choice_uses_bounded_offered_references_and_preserves_other_spans
         choice="remove",
         assumptions_digest=offer.assumptions_digest,
     )
-    assert incomplete.code == "offer_changed"
+    assert incomplete.code == "reference_choices_required"
+    assert incomplete.binding == staged.binding and incomplete.draft_pending
+    assert not incomplete.ready and "refresh_update" not in incomplete.next_actions
     staged = context.stage_references(
         staged.binding,
         requirement_id=offer.requirement_id,
@@ -1145,6 +1339,23 @@ def test_discarding_reference_draft_keeps_review_and_independent_approval(tmp_pa
         },
     )
     assert staged.draft_pending and not staged.ready
+    missing = worker_context_call(
+        context,
+        {
+            "command": "choose",
+            "binding": staged.binding,
+            "requirement_id": requirement.requirement_id,
+            "choice": "remove",
+            "assumptions_digest": requirement.assumptions_digest,
+        },
+    )
+    assert missing.code == "reference_choices_required"
+    assert missing.binding == staged.binding and missing.draft_pending
+    retained = context.page(missing.binding, byte_limit=0)
+    assert (
+        next(row for row in retained.offers if row.change_id == keep.change_id)
+        == independent
+    )
     discarded = worker_context_call(
         context, {"command": "discard_draft", "binding": staged.binding}
     )

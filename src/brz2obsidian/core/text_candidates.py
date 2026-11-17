@@ -1,7 +1,8 @@
 """Selected explicit candidate consistency; no YAML, Markdown or path parsing."""
 
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ReferenceTarget
-from brz2obsidian.core.link_validation import validate_link_document
+from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.reference_targets import validate_targets
 
 
@@ -133,7 +134,7 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
         if choice == "incoming"
         else candidate.content
     )
-    if selected is None or selected.data != candidate.content.data:
+    if selected is None or not same_content(selected, candidate.content):
         return False
     baseline = None
     context = facts.link_context
@@ -143,7 +144,7 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
             for d in context.current_documents
             if d.document_id == candidate.links.document_id
             and d.source_path == change.target_path
-            and d.content.data == change.current.data
+            and same_content(d.content, change.current)
         )
         if len(candidates) == 1:
             baseline = LinkValidationBaseline(
@@ -154,7 +155,7 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
                 target_facts=context.current_target_facts,
                 inventory=context.inventory,
             )
-    if not validate_link_document(
+    if not _validate_link_document(
         candidate.links,
         expected_content=candidate.content,
         expected_path=change.target_path,

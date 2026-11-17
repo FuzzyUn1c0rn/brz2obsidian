@@ -8,6 +8,294 @@ from tests.reconciliation.test_attachments import target_for_links
 
 
 @pytest.mark.parametrize(
+    "raw",
+    (
+        b"![](C:\\Imported\\image.webp#$width=65p$)",
+        b"![](<d:/Imported images/100%literal.webp#^opaque[fragment]>)",
+    ),
+)
+def test_format8_preserves_literal_external_windows_destination(raw):
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(),
+        target_facts=(),
+        inventory="complete",
+        output_format=8,
+    )
+    assert document.status == "supported" and not document.issues
+    (occurrence,) = document.occurrences
+    assert occurrence.raw == document.content.data == raw
+    assert occurrence.query is None
+    assert occurrence.meaning.status == "external"
+    assert occurrence.meaning.target_id is None
+    assert occurrence.meaning.path is None and occurrence.meaning.fragment is None
+
+
+@pytest.mark.parametrize(
+    "raw, output_format",
+    (
+        (b"![](C:\\Imported\\image.webp)", 7),
+        (b"![](C:relative.webp)", 8),
+        (b"[[C:\\Imported\\image.webp]]", 8),
+        (b"![](C%3A%5CImported%5Cimage.webp)", 8),
+        (b"![](C:\\Imported images\\image.webp)", 8),
+        (b"![](<C:\\Imported\\bad\x00image.webp>)", 8),
+    ),
+)
+def test_external_windows_support_preserves_existing_path_refusals(raw, output_format):
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(),
+        target_facts=(),
+        inventory="complete",
+        output_format=output_format,
+    )
+    assert document.status == "unsupported"
+    assert all(o.meaning.status != "external" for o in document.occurrences)
+
+
+def test_format8_interprets_rendered_relative_image_and_vault_wiki_together():
+    image = target_for_links("image", "Attachments/id/É image.webp", kind="resource")
+    note = target_for_links("note", "Notes/Other.md")
+    states = tuple(
+        interpret_link_target(
+            ExactContent(data=b"content\n"),
+            target_id=target.target_id,
+            existence="present",
+            memberships=(),
+        )
+        for target in (image, note)
+    )
+    raw = "É ![](../Attachments/id/%C3%89%20image.webp) [[Notes/Other.md]]\n".encode()
+    parsed = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(image, note),
+        target_facts=states,
+        inventory="complete",
+        output_format=8,
+    )
+    assert parsed.status == "supported" and parsed.content.data == raw
+    image_link, wiki_link = parsed.occurrences
+    assert (
+        image_link.query.value,
+        image_link.meaning.status,
+        image_link.meaning.target_id,
+    ) == (
+        "Attachments/id/É image.webp",
+        "resolved",
+        "image",
+    )
+    assert (
+        raw[image_link.span.start : image_link.span.end]
+        == b"![](../Attachments/id/%C3%89%20image.webp)"
+    )
+    assert (
+        raw[image_link.destination_span.start : image_link.destination_span.end]
+        == b"../Attachments/id/%C3%89%20image.webp"
+    )
+    assert (wiki_link.query.value, wiki_link.meaning.target_id) == (
+        "Notes/Other.md",
+        "note",
+    )
+
+
+def test_unchanged_format8_relative_image_keeps_its_exact_destination():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    target = target_for_links("image", "Attachments/id/image.webp", kind="resource")
+    state = interpret_link_target(
+        ExactContent(data=b"image"),
+        target_id="image",
+        existence="present",
+        memberships=(),
+    )
+    raw = b"![](../Attachments/id/image.webp)"
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(target,),
+        target_facts=(state,),
+        inventory="complete",
+        output_format=8,
+    )
+    occurrence = document.occurrences[0]
+    assert occurrence.meaning.status == "resolved"
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            occurrence.meaning,
+            targets=(target,),
+            target_facts=(state,),
+        )
+        == raw
+    )
+
+
+def test_format8_relative_image_keeps_uri_when_target_bytes_change():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    target = target_for_links("image", "Attachments/id/image.webp", kind="resource")
+    old, new = (
+        interpret_link_target(
+            ExactContent(data=content),
+            target_id="image",
+            existence="present",
+            memberships=(),
+        )
+        for content in (b"old image", b"new image")
+    )
+    raw = b"![](../Attachments/id/image.webp)"
+    options = {
+        "document_id": "owner",
+        "source_path": "Notes/note.md",
+        "path_mode": "vault",
+        "targets": (target,),
+        "inventory": "complete",
+        "output_format": 8,
+    }
+    document = interpret_links(ExactContent(data=raw), target_facts=(old,), **options)
+    selected = (
+        interpret_links(ExactContent(data=raw), target_facts=(new,), **options)
+        .occurrences[0]
+        .meaning
+    )
+    occurrence = document.occurrences[0]
+    assert occurrence.meaning.status == selected.status == "resolved"
+    assert occurrence.meaning.target_version != selected.target_version
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            selected,
+            targets=(target,),
+            target_facts=(new,),
+        )
+        == raw
+    )
+    with pytest.raises(ValueError):
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            occurrence.meaning,
+            targets=(target,),
+            target_facts=(new,),
+        )
+
+
+def test_changed_format8_relative_image_keeps_relative_uri_and_other_bytes():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    targets = (
+        target_for_links("old", "Attachments/id/image.webp", kind="resource"),
+        target_for_links("new", "Attachments/id/new asset.webp", kind="resource"),
+        target_for_links("note", "Notes/Other.md"),
+        target_for_links("local", "Notes/local.webp", kind="resource"),
+    )
+    states = tuple(
+        interpret_link_target(
+            ExactContent(data=b"content"),
+            target_id=target.target_id,
+            existence="present",
+            memberships=(),
+        )
+        for target in targets
+    )
+    options = {
+        "document_id": "owner",
+        "source_path": "Notes/note.md",
+        "path_mode": "vault",
+        "targets": targets,
+        "target_facts": states,
+        "inventory": "complete",
+        "output_format": 8,
+    }
+    raw = "É ![](../Attachments/id/image.webp) [[Notes/Other.md]]\n".encode()
+    document = interpret_links(ExactContent(data=raw), **options)
+    occurrence = document.occurrences[0]
+    selected = (
+        interpret_links(
+            ExactContent(data=b"![](../Attachments/id/new%20asset.webp)"), **options
+        )
+        .occurrences[0]
+        .meaning
+    )
+    assert selected.status == "resolved" and selected.target_id == "new"
+    replacement = render_link_replacement(
+        document,
+        occurrence.occurrence_id,
+        selected,
+        targets=targets,
+        target_facts=states,
+    )
+    assert replacement == b"![](../Attachments/id/new%20asset.webp)"
+    changed = raw[: occurrence.span.start] + replacement + raw[occurrence.span.end :]
+    assert (
+        changed
+        == "É ![](../Attachments/id/new%20asset.webp) [[Notes/Other.md]]\n".encode()
+    )
+    parsed = interpret_links(ExactContent(data=changed), **options)
+    image, wiki = parsed.occurrences
+    assert image.meaning == selected
+    assert changed[image.destination_span.start : image.destination_span.end] == (
+        b"../Attachments/id/new%20asset.webp"
+    )
+    assert wiki.meaning.target_id == "note" and wiki.query.value == "Notes/Other.md"
+    local = (
+        interpret_links(ExactContent(data=b"![](./local.webp)"), **options)
+        .occurrences[0]
+        .meaning
+    )
+    assert local.status == "resolved" and local.target_id == "local"
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            local,
+            targets=targets,
+            target_facts=states,
+        )
+        == b"![](./local.webp)"
+    )
+
+
+def test_format8_relative_image_retains_path_and_target_guards():
+    def parse(raw, output_format=8):
+        return interpret_links(
+            ExactContent(data=raw),
+            document_id="owner",
+            source_path="Notes/note.md",
+            path_mode="vault",
+            targets=(),
+            target_facts=(),
+            inventory="complete",
+            output_format=output_format,
+        )
+
+    assert parse(b"![](../Attachments/id/image.webp)", 7).issues == (
+        "path_unsupported",
+    )
+    assert parse(b"![](../../outside.webp)").issues == ("path_unsupported",)
+    assert parse(b"![](../Attachments/%FF.webp)").issues == ("path_unsupported",)
+    unknown = parse(b"![](../Attachments/id/missing.webp)")
+    assert unknown.status == "supported"
+    assert unknown.occurrences[0].meaning.status != "resolved"
+    wiki = parse(b"[[../Attachments/id/image.webp]]")
+    assert wiki.issues == ("path_unsupported",)
+
+
+@pytest.mark.parametrize(
     ("old", "expected", "path", "mode"),
     (
         (

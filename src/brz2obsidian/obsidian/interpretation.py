@@ -8,6 +8,7 @@ import re
 from datetime import date
 from difflib import SequenceMatcher
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     MembershipEntry,
     MembershipSet,
@@ -143,7 +144,7 @@ def interpret_structure(
     fields, body_start, status, issues = (), 0, "supported", ()
     memberships, appearance, sections = (), None, ()
     try:
-        if output_format != 7:
+        if output_format not in (7, 8):
             raise _Unsupported("format_unsupported")
         try:
             raw.decode("utf-8")
@@ -306,6 +307,7 @@ def align_structure(
     section_bases=(),
 ):
     """Supply explicit body alignment facts without deciding a merged result."""
+    require_inline((original, current, incoming))
     bodies = tuple(
         doc.content.data[doc.body.start : doc.body.end]
         for doc in (original, current, incoming)

@@ -9,8 +9,9 @@ from decimal import Decimal
 from types import MappingProxyType
 from uuid import UUID
 
-from .api_manifest import read_json
-from .text import inline_candidates
+from .api_manifest import audited, read_json
+from .note_links import assert_no_omitted, markdown_destination, thought_destination
+from .text import inline_candidates, literal_edits
 
 THOUGHT_REQUIRED = {
     "id",
@@ -118,26 +119,26 @@ class ScopeView:
         return thaw(self._declarations)
 
 
-def scope_note(raw, excluded):
+def scope_note(raw, excluded, *, qualified_brain=None, profile_version="1"):
     """Remove whole active outer phrases before inspecting enclosed images."""
+    current = profile_version in {"4", "5"}
+    offset = int(current and raw.startswith("\ufeff"))
+    source = raw[offset:]
+    if current:
+        literal_edits(source, allow_literal_tokens=True)
     removals, removed = [], set()
-    for begin, end, _image, _label, start, finish in inline_candidates(raw)[0]:
-        target = raw[start:finish]
-        if not target.startswith("brain://"):
+    for begin, end, _image, _label, start, finish in inline_candidates(source)[0]:
+        target = source[start:finish]
+        if not markdown_destination(target).casefold().startswith("brain://"):
             continue
-        spelling = target[8:].split("/", 1)[0]
-        try:
-            key = str(
-                UUID(
-                    bytes_le=base64.urlsafe_b64decode(
-                        spelling + "=" * (-len(spelling) % 4)
-                    )
-                )
+        destination = thought_destination(target, qualified_brain=qualified_brain)
+        if destination.qualified:
+            assert not _image and not inline_candidates(_label, inline_only=True)[0], (
+                "qualified ordinary inline phrase"
             )
-        except (ValueError, TypeError) as exc:
-            raise AssertionError("qualified scoped thought destination") from exc
+        key = destination.local_id
         if key in excluded:
-            removals.append((begin, end))
+            removals.append((begin + offset, end + offset))
             removed.add(key)
     for begin, end in reversed(removals):
         raw = raw[:begin] + raw[end:]
@@ -161,13 +162,24 @@ def scope_note(raw, excluded):
             r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", decoded
         )
     ), "unremoved excluded note association"
+    if qualified_brain is not None:
+        # This is an expected-fact dependency, separate from production parsing.
+        from .checker import inline_display
+
+        source = raw[offset:]
+        for _, _, _, label, begin, end in inline_candidates(source)[0]:
+            assert_no_omitted(
+                (markdown_destination(source[begin:end]), inline_display(label)), tokens
+            )
     return raw, frozenset(removed)
 
 
+@audited(reuse="scope")
 def qualify_scope(baseline, *, profile_version):
     """Derive scope only; no safe text/availability assertion is an input."""
-    assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
-    baseline.verify()
+    assert profile_version in {"1", "2", "3", "4", "5"}, (
+        "unsupported API profile version"
+    )
     data = baseline.data
     graphs = {
         key: read_json(baseline.bytes(path), parse_float=Decimal)
@@ -460,7 +472,12 @@ def qualify_scope(baseline, *, profile_version):
                 "required raw note HTTP outcome"
             )
             raw = baseline.bytes(value["path"]).decode("utf8", errors="strict")
-            text, removed = scope_note(raw, excluded)
+            text, removed = scope_note(
+                raw,
+                excluded,
+                qualified_brain=collection if profile_version in {"4", "5"} else None,
+                profile_version=profile_version,
+            )
             safe_notes[key] = SafeNote(row["sourceId"], text, removed)
     omitted = frozenset(
         key for key, note in safe_notes.items() if note.removed_thought_ids

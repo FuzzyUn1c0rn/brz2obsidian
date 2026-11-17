@@ -4,6 +4,7 @@ import hashlib
 import json
 import unicodedata
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 
 from brz2obsidian.contracts import (
     AttachmentDestination,
@@ -16,7 +17,9 @@ from brz2obsidian.contracts import (
     IdentityInventoryItem,
     IdentityTargetFacts,
     ImportedItemIdentity,
+    InlineExactContent,
     LinkContext,
+    OpaqueContent,
     OutputIdentity,
     ReconciliationInput,
     ReconciliationSubject,
@@ -26,10 +29,12 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.obsidian import (
     align_structure,
+    inspect_text_candidate,
     interpret_link_target,
     interpret_links,
     interpret_structure,
 )
+from brz2obsidian.obsidian_dialect import native_properties
 
 
 def digest(value):
@@ -50,7 +55,8 @@ def target(path):
 
 
 def record(payload):
-    value = json.loads(payload["migration-record.json"])
+    raw = payload["migration-record.json"]
+    value = json.loads(raw.data if isinstance(raw, InlineExactContent) else raw)
     if value.get("schema") != "brz2obsidian.migration":
         raise ValueError("association_record_invalid")
     return value
@@ -166,7 +172,10 @@ def _membership_targets(records, inventory=()):
                 status="safe",
             )
         )
-    if rows:
+    # Current templates carry the reserved role even when this source has no
+    # definitions. Keep recorded7 target registries deterministic for replay.
+    # The shared role identity remains stable across the qualified7/8 grammar.
+    if rows or identity.output_format == 8:
         result.append(
             ReferenceTarget(
                 schema_id="brz2obsidian.reference-target",
@@ -185,22 +194,45 @@ def _membership_targets(records, inventory=()):
 
 
 def link_state(
-    content, *, target_id, existence, membership_targets=(), source_path=None
+    content,
+    *,
+    target_id,
+    existence,
+    memberships=None,
+    membership_targets=(),
+    source_path=None,
+    output_format=7,
+    qualify_roles=False,
+    _owner=None,
 ):
+    if _owner is not None:
+        return _owner._assembly_link_state(
+            content,
+            target_id=target_id,
+            existence=existence,
+            memberships=memberships,
+            membership_targets=membership_targets,
+            source_path=source_path,
+            output_format=output_format,
+            qualify_roles=qualify_roles,
+        )
     document = (
         interpret_structure(
-            content, output_format=7, membership_targets=membership_targets
+            content, output_format=output_format, membership_targets=membership_targets
         )
         if content is not None
         else None
     )
-    memberships = (
-        tuple(
-            entry.target_id for group in document.memberships for entry in group.entries
+    if memberships is None:
+        memberships = (
+            tuple(
+                entry.target_id
+                for group in document.memberships
+                for entry in group.entries
+            )
+            if document is not None
+            else ()
         )
-        if document is not None
-        else ()
-    )
     return interpret_link_target(
         content,
         target_id=target_id,
@@ -208,15 +240,42 @@ def link_state(
         memberships=memberships,
         membership_targets=membership_targets,
         source_path=source_path,
+        output_format=output_format,
+        qualify_roles=qualify_roles,
     )
 
 
-def _observed_identity(path, content, identity, established):
+def _observed_identity(path, content, identity, established, *, native_metadata=False):
     if path in established and established[path][1] != "note":
         return "valid", _identity(identity, established[path][0]), established[path][2]
     if not path.lower().endswith(".md"):
         return "missing", None, None
-    document = interpret_structure(content, output_format=7)
+    if identity.output_format == 8 or native_metadata:
+        properties = native_properties(content)
+        names = ("source_collection_id", "source_item_id")
+        if properties is not None and all(
+            isinstance(properties.get(name), str) and properties[name] for name in names
+        ):
+            return (
+                "valid",
+                ImportedItemIdentity(
+                    collection_id=properties[names[0]],
+                    module_id=identity.module_id,
+                    item_id=properties[names[1]],
+                ),
+                "content",
+            )
+        return (
+            "malformed"
+            if properties is None or any(name in properties for name in names)
+            else "missing",
+            None,
+            "content",
+        )
+    # Recorded6 retains the delivered bounded identity grammar, without gaining
+    # structured merge or original-reproduction authority for that generation.
+    read_format = 7 if identity.output_format == 6 else identity.output_format
+    document = interpret_structure(content, output_format=read_format)
     fields = {
         field.identity_component: field.value
         for field in document.fields
@@ -252,7 +311,20 @@ def assemble_facts(
     originals_known=True,
     onboarding=False,
     retained_ownership=None,
+    _owner=None,
 ):
+    def content(raw, *, semantic):
+        value = (
+            raw
+            if isinstance(raw, (InlineExactContent, OpaqueContent))
+            else ExactContent(data=raw)
+        )
+        return (
+            _owner._assembly_content(value, semantic=semantic)
+            if _owner is not None
+            else value
+        )
+
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
@@ -300,8 +372,18 @@ def assemble_facts(
         established[path] = item, role, facet
     inventory = []
     for path, raw in sorted(current.items()):
-        content = ExactContent(data=raw)
-        state, claim, facet = _observed_identity(path, content, identity, established)
+        current_content = content(
+            raw, semantic=established.get(path, (None, None, None))[2] != "asset"
+        )
+        state, claim, facet = _observed_identity(
+            path,
+            current_content,
+            old_identity,
+            established,
+            # A new format8 operation qualifies edited native metadata while
+            # the baseline identity and merge grammar retain their generation.
+            native_metadata=identity.output_format == 8,
+        )
         inventory.append(
             IdentityInventoryItem(
                 entry_id="file:" + path,
@@ -310,7 +392,9 @@ def assemble_facts(
                 identity=claim,
                 raw_identity=None,
                 title=PurePosixPath(path).stem,
-                current=CurrentContent(existence="present", path=path, content=content),
+                current=CurrentContent(
+                    existence="present", path=path, content=current_content
+                ),
                 target=target(path),
             )
         )
@@ -326,13 +410,15 @@ def assemble_facts(
         path, role, title = new.get(key, old.get(key, historical.get(key)))
         old_path = old.get(key, (path, role, title))[0]
         original = (
-            ExactContent(data=baseline[old_path])
+            content(baseline[old_path], semantic=facet != "asset")
             if originals_known
             and (retained_ownership is None or key in old)
             and old_path in baseline
             else None
         )
-        received = ExactContent(data=incoming[path]) if key in new else None
+        received = (
+            content(incoming[path], semantic=facet != "asset") if key in new else None
+        )
         matches = [
             row
             for row in inventory
@@ -348,7 +434,7 @@ def assemble_facts(
                 if old_path in observed_paths
                 else "absent",
                 path=old_path,
-                content=ExactContent(data=current[old_path])
+                content=content(current[old_path], semantic=facet != "asset")
                 if old_path in current
                 else None,
             )
@@ -373,11 +459,16 @@ def assemble_facts(
         ):
             documents = tuple(
                 interpret_structure(
-                    content, output_format=7, membership_targets=targets
+                    content, output_format=version, membership_targets=targets
                 )
-                for content, targets in zip(
+                for content, targets, version in zip(
                     (original, selected.content, received),
                     membership_views,
+                    (
+                        old_identity.output_format,
+                        old_identity.output_format,
+                        identity.output_format,
+                    ),
                     strict=True,
                 )
             )
@@ -393,7 +484,7 @@ def assemble_facts(
                 name = (
                     parent.stem
                     + " (incoming-"
-                    + hashlib.sha256(received.data).hexdigest()[:8]
+                    + received.identity.sha256[:8]
                     + ")"
                     + suffix
                 )
@@ -456,6 +547,7 @@ def assemble_facts(
             schema_id="brz2obsidian.format-operation",
             schema_version=1,
             kind="onboarding" if onboarding else "source_update",
+            automatic_merge=True,
             recorded_generation="supported" if originals_known else "unknown",
             baseline_source_version=old_record["source_identity"]["snapshot_digest"]
             if originals_known
@@ -473,12 +565,156 @@ def assemble_facts(
         ),
         link_context=None,
     )
-    return facts.model_copy(
+    facts = facts.model_copy(
         update={
             "link_context": _link_context(
-                facts, old_record, new_record, current_inventory
+                facts, old_record, new_record, current_inventory, _owner=_owner
             )
         }
+    )
+
+    return automatic_merge_facts(facts, _owner=_owner)
+
+
+def automatic_merge_facts(facts, *, _owner=None):
+    """Interpret computed clean results; Core independently validates their evidence."""
+    facts = facts.model_copy(
+        update={
+            "format_operation": facts.format_operation.model_copy(
+                update={"automatic_merge": True}
+            )
+        }
+    )
+    from brz2obsidian.content_fingerprints import drive_inline
+    from brz2obsidian.core.reconciliation import ReconcileWork
+
+    proposal = (
+        drive_inline(ReconcileWork(facts))
+        if _owner is None
+        else _owner._drive(ReconcileWork(facts))
+    )
+    context = facts.link_context
+    subjects = []
+    for subject, change in zip(facts.subjects, proposal.changes, strict=True):
+        if (
+            change.disposition == "compatible"
+            and change.attachment_review is not None
+            and change.format_review is None
+        ):
+            subject = automatic_attachment_facts(
+                facts, proposal, subject, change, _owner=_owner
+            )
+            subjects.append(subject)
+            continue
+        if (
+            change.disposition != "compatible"
+            or change.structure_result is None
+            or subject.attachment is not None
+            or change.format_review is not None
+        ):
+            subjects.append(subject)
+            continue
+        targets = context.incoming_targets
+        own = next(
+            (
+                t
+                for t in context.current_targets
+                if t.canonical_path == change.target_path
+            ),
+            None,
+        )
+        if own is None:
+            subjects.append(subject)
+            continue
+        content = change.result
+        state = link_state(
+            content,
+            target_id=own.target_id,
+            existence="present",
+            membership_targets=targets,
+            source_path=change.target_path,
+            output_format=facts.incoming_identity.output_format,
+            _owner=_owner,
+        )
+        states = tuple(
+            s for s in context.incoming_target_facts if s.target_id != own.target_id
+        ) + (state,)
+        candidate = inspect_text_candidate(
+            content,
+            identity=_identity(facts.incoming_identity, subject.item_id),
+            target=subject.source_target,
+            output_format=facts.incoming_identity.output_format,
+            source_path=change.target_path,
+            document_id=own.target_id,
+            path_mode="vault",
+            link_targets=targets,
+            link_target_facts=states,
+            link_inventory=context.inventory,
+            membership_targets=targets,
+        )
+        subjects.append(subject.model_copy(update={"automatic_result": candidate}))
+    return facts.model_copy(update={"subjects": tuple(subjects)})
+
+
+def automatic_attachment_facts(facts, proposal, subject, change, *, _owner=None):
+    from brz2obsidian.contracts import ReviewRequirement
+
+    from .attachment_choices import selected_attachment_candidate
+    from .review_choices import review_plan_attachment_references
+
+    # Interpretation only: this view does not supply a canonical admission verdict.
+    view = SimpleNamespace(facts=facts, proposal=proposal)
+    row = ReviewRequirement(
+        requirement_id=change.change_id,
+        change_id=change.change_id,
+        domain="attachment",
+        choices=("incoming",),
+        assumptions=change.assumptions,
+    )
+    alternative = next(
+        (
+            a
+            for a in change.attachment_review.alternatives
+            if a.choice == "incoming" and a.eligible
+        ),
+        None,
+    )
+    if alternative is None:
+        return subject
+    refs = review_plan_attachment_references(view, row.requirement_id, _choices=(row,))
+    offered = {
+        (r.document_id, r.occurrence_id): r for r in change.attachment_review.links
+    }
+    choices = []
+    for token, doc, occurrence in refs:
+        link = offered[(doc.document_id, occurrence.occurrence_id)]
+        if (
+            link.old is None
+            or link.incoming is None
+            or "use_incoming" not in link.choices
+        ):
+            return subject
+        # Only the content version may change; preserve destination identity, path,
+        # fragment, status and authored display text without guessing a reference.
+        if (
+            link.old.model_copy(update={"target_version": link.incoming.target_version})
+            != link.incoming
+        ):
+            return subject
+        choices.append({"reference_id": token, "choice": "use_incoming"})
+    try:
+        links, candidate = selected_attachment_candidate(
+            view,
+            change,
+            alternative,
+            tuple(choices),
+            refs,
+            _session=_owner,
+        )
+    except ValueError:
+        return subject
+    return subject.model_copy(
+        update={"automatic_attachment": candidate, "automatic_attachment_links": links}
     )
 
 
@@ -498,7 +734,9 @@ def _physical_target(path, current_path, inventory):
     return value.model_copy(update={"status": "unsafe"}) if collisions else value
 
 
-def _link_context(facts, baseline_record, incoming_record, physical_inventory):
+def _link_context(
+    facts, baseline_record, incoming_record, physical_inventory, *, _owner=None
+):
     subjects = {
         (_identity(facts.incoming_identity, s.item_id), s.facet): s
         for s in facts.subjects
@@ -580,6 +818,13 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 existence="present" if row.current.content is not None else "missing",
                 membership_targets=current_memberships,
                 source_path=actual.canonical_path,
+                qualify_roles=facts.incoming_identity.output_format == 8,
+                output_format=(
+                    7
+                    if facts.baseline_identity.output_format == 6
+                    else facts.baseline_identity.output_format
+                ),
+                _owner=_owner,
             )
         )
         incoming_states.append(
@@ -589,6 +834,8 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 existence="present" if received is not None else "missing",
                 membership_targets=incoming_memberships,
                 source_path=future.canonical_path,
+                output_format=facts.incoming_identity.output_format,
+                _owner=_owner,
             )
         )
         paths.append((row, subject, actual, received))
@@ -649,6 +896,14 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                     targets=tuple(current_targets),
                     target_facts=tuple(current_states),
                     inventory="complete",
+                    output_format=8
+                    if facts.incoming_identity.output_format == 8
+                    else (
+                        7
+                        if facts.baseline_identity.output_format == 6
+                        else facts.baseline_identity.output_format
+                    ),
+                    record_format=facts.baseline_identity.output_format,
                 )
             )
         if received is not None and actual.kind != "resource":
@@ -664,6 +919,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                         targets=tuple(incoming_targets),
                         target_facts=tuple(incoming_states),
                         inventory="complete",
+                        output_format=facts.incoming_identity.output_format,
                     )
                 )
     return LinkContext(

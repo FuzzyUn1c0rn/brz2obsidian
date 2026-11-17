@@ -2,6 +2,7 @@ from brz2obsidian.contracts import FindingDisposition, SourcePolicy
 
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_DECLARATION_RULE,
     ABSENT_TXT_RULE,
     ABSENT_TYPE_ICON_RULE,
     ABSENT_TYPE_NOTE_RULE,
@@ -12,11 +13,28 @@ from .inserts import INSERT_RULE
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="10",
+    profile_version="11",
     module_id="thebrain-brz",
-    module_version="10",
+    module_version="11",
     format_version="5",
     finding_dispositions=(
+        FindingDisposition(
+            rule_id="thebrain.unavailable-declared-image.v1",
+            kind="unavailable_image_reference",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="A referenced declared image has recorded state3 and no archive payload; no image bytes were recovered.",
+            guidance="Review the exact reference, image declaration and state evidence in the Migration report.",
+        ),
+        FindingDisposition(
+            rule_id="thebrain.unavailable-image.v1",
+            kind="unavailable_image_reference",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            message="An inline image is unavailable; its source reference is retained and no image bytes were recovered.",
+            guidance="Review the original reference and absence evidence in the Migration report.",
+        ),
         FindingDisposition(
             rule_id=INSERT_RULE,
             kind="formatting_loss",
@@ -31,7 +49,7 @@ BRZ_POLICY = SourcePolicy(
             disposition="warning",
             issue_code="approved_source_gap",
             permits_absent_payload=True,
-            message="Source category icon is absent; its provider and inheriting members have neutral appearance.",
+            message="Source category icon is absent.",
             guidance="Review the provider and affected included members in the Migration report; optionally restore the source icon and re-export.",
         ),
         FindingDisposition(
@@ -60,6 +78,15 @@ BRZ_POLICY = SourcePolicy(
             permits_absent_payload=True,
             message="Absent source file; its metadata is retained and an intact PDF exists under the same owner.",
             guidance="Review the absent filename in the source; no purpose or specific PDF pairing is inferred.",
+        ),
+        FindingDisposition(
+            rule_id=ABSENT_TXT_DECLARATION_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="This archive declares TXT content but contains no payload; its declaration is retained and the missing bytes were not recovered.",
+            guidance="Review the retained filename and declared length; obtain complete source bytes if the missing TXT is required. Other available source content is preserved separately.",
         ),
         FindingDisposition(
             rule_id=ICON_LENGTH_RULE,

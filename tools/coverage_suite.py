@@ -7,6 +7,7 @@ Explicit --test selections are partial measurements and default to pytest only.
 import argparse
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -24,6 +25,12 @@ def save(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def windows_command_too_long(argv):
+    return os.name == "nt" and (
+        len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 > 32767
+    )
+
+
 def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -35,12 +42,14 @@ def arguments():
     parser.add_argument("--require-gui", action="store_true")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3, 4))
     parser.add_argument("--check", action="append", choices=CHECKS)
-    parser.add_argument("--timeout", type=float, default=900)
+    parser.add_argument("--timeout", type=float)
     parser.add_argument("--min-branch", type=float)
     parser.add_argument("--measurement-intent")
     args = parser.parse_args()
-    if not 0 < args.timeout <= 900:
-        parser.error("--timeout must be greater than zero and at most 900 seconds")
+    if args.timeout is not None and (
+        not math.isfinite(args.timeout) or args.timeout <= 0
+    ):
+        parser.error("--timeout must be positive and finite")
     if args.min_branch is not None and (
         not 0 <= args.min_branch <= 100 or not (args.measurement_intent or "").strip()
     ):
@@ -55,9 +64,9 @@ def arguments():
 
 
 def execute(argv, root, output, name, deadline):
-    """Keep every command within the shared deadline, retaining original output."""
-    remaining = deadline - time.perf_counter()
-    if remaining <= 0:
+    """Run a command, honoring an optional shared deadline and retaining output."""
+    remaining = None if deadline is None else deadline - time.perf_counter()
+    if remaining is not None and remaining <= 0:
         raise TimeoutError("Global verification deadline exhausted")
     flags = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -69,8 +78,20 @@ def execute(argv, root, output, name, deadline):
             argv, cwd=root, stdout=log, stderr=subprocess.STDOUT, **flags
         )
         try:
-            code = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired, KeyboardInterrupt:
+            while True:
+                remaining = None if deadline is None else deadline - time.perf_counter()
+                if remaining is not None and remaining <= 0:
+                    raise TimeoutError(
+                        f"Global verification deadline interrupted {name}"
+                    )
+                try:
+                    # Finite waits let Windows deliver Ctrl+C without a run deadline.
+                    interval = min(0.2, remaining) if remaining is not None else 0.2
+                    code = process.wait(timeout=interval)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except (TimeoutError, KeyboardInterrupt) as error:
             if os.name == "nt":
                 subprocess.run(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -82,6 +103,8 @@ def execute(argv, root, output, name, deadline):
             else:
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=5)
+            if isinstance(error, KeyboardInterrupt):
+                raise
             raise TimeoutError(
                 f"Global verification deadline interrupted {name}"
             ) from None
@@ -148,7 +171,7 @@ def metrics(data, root):
 def main():
     started = time.perf_counter()
     args = arguments()
-    deadline = started + args.timeout
+    deadline = None if args.timeout is None else started + args.timeout
     root = args.checkout.resolve()
     python = (
         args.python
@@ -269,10 +292,37 @@ def main():
         ]
         for check in checks:
             command += ["--check", check]
+        selector_position = len(command)
         for node in selectors:
             command += ["--test", node]
         if require_gui:
             command += ["--require-gui"]
+        selector_input = {}
+        if windows_command_too_long(command):
+            selector_path = output / "selectors.json"
+            raw = json.dumps(
+                selectors, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
+            with selector_path.open("xb") as handle:
+                handle.write(raw)
+            selector_input = {
+                "selector_input": {
+                    "role": "selector_input",
+                    "path": str(selector_path),
+                    "size": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            }
+            command = [
+                *command[:selector_position],
+                "--tests-file",
+                str(selector_path),
+                *command[selector_position + 2 * len(selectors) :],
+            ]
+            if windows_command_too_long(command):
+                raise ValueError(
+                    "Compacted runner command exceeds Windows process limit"
+                )
         save(
             output / "plan.json",
             {
@@ -280,6 +330,7 @@ def main():
                 "command": command,
                 "requirements": str(output / "requirements.json"),
                 "coverage_config": str(config),
+                **selector_input,
             },
         )
         run_log = execute(command, root, output, "run", deadline)
@@ -362,7 +413,7 @@ def main():
             raise RuntimeError(
                 f"Production branch threshold {threshold}% was not reached"
             )
-        if time.perf_counter() >= deadline:
+        if deadline is not None and time.perf_counter() >= deadline:
             raise TimeoutError(
                 "Global verification deadline exhausted during reporting"
             )
@@ -380,8 +431,17 @@ def main():
         result["error"] = str(error)
         print(f"COVERAGE SUITE ERROR: {error}", file=sys.stderr)
         return_code = 1 if isinstance(error, (RuntimeError, TimeoutError)) else 2
+    except KeyboardInterrupt:
+        result["status"] = "interrupted"
+        result["error"] = "Verification interrupted by user"
+        print(f"COVERAGE SUITE ERROR: {result['error']}", file=sys.stderr)
+        return_code = 3
     result["elapsed_seconds"] = time.perf_counter() - started
-    if result["elapsed_seconds"] >= args.timeout:
+    if (
+        return_code != 3
+        and args.timeout is not None
+        and result["elapsed_seconds"] >= args.timeout
+    ):
         result["status"] = "failed"
         result["error"] = "Global verification deadline exhausted"
         return_code = 1

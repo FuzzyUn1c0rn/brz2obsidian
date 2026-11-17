@@ -11,7 +11,14 @@ import re
 from urllib.parse import quote
 
 from .checker import inline_display, source_references, wiki
-from .text import active_mask, inline_candidates, literal_edits
+from .text import (
+    active_mask,
+    inline_candidates,
+    inline_code_spans,
+    literal_edits,
+    native_table_intervals,
+    paragraph_intervals,
+)
 
 KINDS = frozenset(
     [
@@ -79,10 +86,11 @@ def insert_activity(text):
     return "".join(mask)
 
 
-def callouts(text, operations=None, ownership=None):
+def callouts(text, operations=None, ownership=None, origins=None):
     mask = insert_activity(text)
     output, opened, offset = [], set(), 0
     containers = []
+    mapped = []
 
     def close_container(stop):
         start, _, changed = containers.pop()
@@ -150,12 +158,36 @@ def callouts(text, operations=None, ownership=None):
             opened.clear()
         output.append(line)
         replacement = "".join(output[first:])
+        if origins is not None:
+            if line == original:
+                line_origins = origins[begin:offset]
+            else:
+                # The rebuilt marker is generated; only the trimmed authored
+                # title and original line ending are copied source pieces.
+                title_start = marker.start(5) + len(marker[5]) - len(marker[5].lstrip())
+                title_end = marker.end(5) - len(marker[5]) + len(marker[5].rstrip())
+                lead = len(line) - len(marker[6]) - len(title)
+                title_origins = [None] * len(title)
+                authored = marker[5].strip()
+                if authored:
+                    shift = len(icon) + 1 if emoji else 0
+                    title_origins[shift : shift + len(authored)] = origins[
+                        begin + title_start : begin + title_end
+                    ]
+                line_origins = (
+                    [None] * lead
+                    + title_origins
+                    + origins[begin + marker.start(6) : offset]
+                )
+            mapped.extend([None] * (len(replacement) - len(line)) + line_origins)
         if active and replacement != original:
             containers[-1][2] = True
         if operations is not None and replacement != original:
             operations.append((begin, begin + len(original), replacement))
     while containers:
         close_container(len(text))
+    if origins is not None:
+        origins[:] = mapped
     return "".join(output)
 
 
@@ -185,14 +217,24 @@ def row_cells(line):
     return cells + [stripped[start:-1]]
 
 
-def tables(text, operations=None, ownership=None):
+def tables(
+    text,
+    operations=None,
+    ownership=None,
+    origins=None,
+    *,
+    current_tables=False,
+    malformed=None,
+):
+    if current_tables:
+        return current_table_text(text, operations, ownership, origins, malformed)
     lines = markdown_lines(text)
     scan = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
         cursor += len(line)
-    edits = {}
+    edits, mapped = {}, {}
     for index, line in enumerate(lines):
         suffix = re.search(
             r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\r\n|\r|\n|$)',
@@ -253,22 +295,62 @@ def tables(text, operations=None, ownership=None):
             re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in row_cells(lines[rows[0]])
         )
         ending = re.search(r"(?:\r\n|\r|\n)$", line)
+        blank_header = (
+            current_tables and not separator and any(cell.strip() for cell in cells)
+        )
+        generated_header = (
+            "|"
+            + "|".join(" " for _ in cells)
+            + "|\n|"
+            + "|".join("---" for _ in cells)
+            + "|\n"
+        )
         edits[index] = (
-            header
-            + ("" if separator else "\n|" + "|".join("---" for _ in cells) + "|")
+            (generated_header + header if blank_header else header)
+            + (
+                ""
+                if separator or blank_header
+                else "\n|" + "|".join("---" for _ in cells) + "|"
+            )
             + (ending[0] if ending else "")
         )
+        if origins is not None:
+            copied = origins[offsets[index] : offsets[index] + len(header)]
+            eol = (
+                origins[offsets[index] + ending.start() : offsets[index] + ending.end()]
+                if ending
+                else []
+            )
+            mapped[index] = (
+                [None] * len(generated_header) + copied + eol
+                if blank_header
+                else copied
+                + [None] * (len(edits[index]) - len(header) - len(eol))
+                + eol
+            )
         for following in [index, *rows]:
             original = edits.get(following, lines[following])
+            code_edits = []
 
-            def code(match, following=following):
-                position = offsets[following] + match.start()
+            def code(
+                match,
+                following=following,
+                generated_header=generated_header,
+                blank_header=blank_header,
+                index=index,
+                code_edits=code_edits,
+            ):
+
+                local_start = match.start() - (
+                    len(generated_header) if blank_header and following == index else 0
+                )
+                position = offsets[following] + local_start
                 # Comments own backticks too; code spans are not inferred there.
                 if (
-                    "<!--" in lines[following][: match.start()]
+                    "<!--" in lines[following][:local_start]
                     and "-->"
                     not in lines[following][
-                        lines[following].rfind("<!--", 0, match.start()) : match.start()
+                        lines[following].rfind("<!--", 0, local_start) : local_start
                     ]
                 ):
                     return match[0]
@@ -280,20 +362,284 @@ def tables(text, operations=None, ownership=None):
                 value = match[2].replace("\n", " ")
                 if value.startswith(" ") and value.endswith(" ") and value.strip():
                     value = value[1:-1]
-                return (
+                replacement = (
                     "<code>"
                     + html.escape(value, quote=False).replace("|", "&#124;")
                     + "</code>"
                 )
+                code_edits.append((match.start(), match.end(), replacement))
+                return replacement
 
             edits[following] = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, original)
+            if origins is not None:
+                span = mapped.get(
+                    following,
+                    origins[
+                        offsets[following] : offsets[following] + len(lines[following])
+                    ],
+                )[:]
+                for begin, end, replacement in reversed(code_edits):
+                    span[begin:end] = [None] * len(replacement)
+                mapped[following] = span
     if operations is not None:
         operations.extend(
             (offsets[i], offsets[i] + len(lines[i]), replacement)
             for i, replacement in sorted(edits.items())
             if replacement != lines[i]
         )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
     return "".join(edits.get(i, line) for i, line in enumerate(lines))
+
+
+def current_table_text(text, operations, ownership, origins, malformed):
+    """Current native table facts, independently from source adapter parsers.
+
+    Styling is an opaque source declaration. Ordinary row groups belong only
+    to top-level paragraphs; declarations instead use active inline ownership.
+    A real separator admits ragged data without inventing or discarding cells.
+    """
+    lines = markdown_lines(text)
+    offsets, cursor = [], 0
+    for line in lines:
+        offsets.append(cursor)
+        cursor += len(line)
+    scan = insert_activity(text)
+    paragraphs = paragraph_intervals(text)
+    codes = {(a, b): (c, d) for a, b, c, d in inline_code_spans(text)}
+    protected_codes = cross_container_code(text)
+    changes, mapped, declared = {}, {}, set()
+
+    def active(index):
+        return bool(scan[offsets[index] : offsets[index] + len(lines[index])].strip())
+
+    def cells(index, row=None):
+        raw = lines[index].rstrip("\r\n") if row is None else row
+        first, last = len(raw) - len(raw.lstrip()), len(raw.rstrip()) - 1
+        if (
+            last < first
+            or scan[offsets[index] + first] != "|"
+            or scan[offsets[index] + last] != "|"
+        ):
+            return None
+        if any(
+            a < offsets[index] + len(raw) and offsets[index] < b
+            for a, b in protected_codes
+        ):
+            return None
+        return row_cells(raw)
+
+    def separator(parts, width):
+        return (
+            parts is not None
+            and len(parts) == width
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", part) for part in parts)
+        )
+
+    def native(index, row):
+        local = []
+        values = (
+            origins[offsets[index] : offsets[index] + len(row)]
+            if origins is not None
+            else [None] * len(row)
+        )
+        position = len(row) - len(row.lstrip()) + 1
+        for part in row_cells(row) or ():
+            linked = re.fullmatch(
+                r"(?P<space>\s*)(?P<source>`curl -[Ii] \["
+                r"(?P<url>https?://[^\s`|<>\[\]()\\]+)`)"
+                r"\]\((?P=url)\)(?P<tail>\s*)",
+                part,
+            )
+            if (
+                linked
+                and (
+                    offsets[index] + position + linked.start("source"),
+                    offsets[index] + position + linked.end("source"),
+                )
+                in codes
+            ):
+                opening = linked.start("source")
+                removed = linked.start("url") - 1
+                replacement = (
+                    part[:opening] + "[" + part[opening:removed] + part[removed + 1 :]
+                )
+                copied = values[position : position + len(part)]
+                mapped_part = (
+                    copied[:opening]
+                    + [None]
+                    + copied[opening:removed]
+                    + copied[removed + 1 :]
+                )
+                local.append((position, position + len(part), replacement, mapped_part))
+            position += len(part) + 1
+        for (begin, end), (inside, stop) in codes.items():
+            left, right = begin - offsets[index], end - offsets[index]
+            if 0 <= left < right <= len(row) and "|" in text[inside:stop]:
+                value = text[inside:stop].replace("\r", " ").replace("\n", " ")
+                if value.startswith(" ") and value.endswith(" ") and value.strip():
+                    value = value[1:-1]
+                replacement = (
+                    "<code>"
+                    + html.escape(value, quote=False)
+                    .replace("\\", "&#92;")
+                    .replace("|", "&#124;")
+                    + "</code>"
+                )
+                local.append((left, right, replacement, [None] * len(replacement)))
+        for match in re.finditer(re.escape("{nl}"), row):
+            if (
+                scan[offsets[index] + match.start() : offsets[index] + match.end()]
+                == "{nl}"
+            ):
+                local.append((match.start(), match.end(), "<br>", [None] * 4))
+        for begin, end, replacement, mapped_part in sorted(local, reverse=True):
+            row = row[:begin] + replacement + row[end:]
+            values[begin:end] = mapped_part
+        return row, values
+
+    def emit(start, stop, parts, explicit, styled):
+        empty = all(not part.strip() for part in parts)
+        blank = "|" + "|".join(" " for _ in parts) + "|"
+        header = blank + "\n|" + "|".join("---" for _ in parts) + "|"
+        for index in range(start, stop):
+            raw = lines[index].rstrip("\r\n")
+            row = styled if index == start and styled is not None else raw
+            row, values = native(index, row)
+            if index == start:
+                if empty:
+                    row = blank if explicit else header
+                    values = [None] * len(row)
+                elif not explicit:
+                    row = header + "\n" + row
+                    values = [None] * (len(header) + 1) + values
+                if start and lines[start - 1].strip():
+                    row, values = "\n" + row, [None] + values
+            if index == stop - 1 and stop < len(lines) and lines[stop].strip():
+                row, values = row + "\n", values + [None]
+            ending = lines[index][len(raw) :]
+            changes[index] = row + ending
+            mapped[index] = values + (
+                origins[offsets[index] + len(raw) : offsets[index] + len(lines[index])]
+                if origins is not None
+                else [None] * len(ending)
+            )
+        if ownership is not None:
+            ownership.append((offsets[start], offsets[stop - 1] + len(lines[stop - 1])))
+
+    def warn(declaration, styled):
+        if malformed is not None:
+            malformed.append(
+                {
+                    "feature": "table",
+                    "declaration": declaration,
+                    "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with "
+                    + (
+                        "a matching header separator."
+                        if styled
+                        else "matching columns and a header separator."
+                    ),
+                }
+            )
+
+    for index, line in enumerate(lines):
+        raw = line.rstrip("\r\n")
+        starts = [
+            m.start()
+            for m in re.finditer(re.escape(":(table="), raw)
+            if scan[offsets[index] + m.start() : offsets[index] + m.start() + 2] == ":("
+        ]
+        if not starts:
+            continue
+        suffix = re.search(r':\(table="(?:[^"\\\r\n]|\\.)*"\):$', raw)
+        if suffix and suffix.start() not in starts:
+            suffix = None
+        if suffix:
+            starts = [
+                position
+                for position in starts
+                if not suffix.start() < position < suffix.end()
+            ]
+        stop = index + 1
+        while (
+            stop < len(lines) and active(stop) and lines[stop].lstrip().startswith("|")
+        ):
+            stop += 1
+        declared.update(range(index, stop))
+        first = cells(index, raw[: suffix.start()]) if suffix else None
+        rows = [cells(i) for i in range(index + 1, stop)]
+        if (
+            suffix
+            and raw[: suffix.start()].strip() == "||"
+            and len(rows) == 1
+            and rows[0] is not None
+            and len(rows[0]) == 2
+        ):
+            first = ["", ""]
+        explicit = bool(first and rows and separator(rows[0], len(first)))
+        if (
+            first
+            and len(starts) == 1
+            and rows
+            and (
+                explicit
+                or all(row is not None and len(row) == len(first) for row in rows)
+            )
+        ):
+            emit(index, stop, first, explicit, raw[: suffix.start()])
+        else:
+            warn(raw[starts[0] :], True)
+
+    index = 0
+    while index < len(lines):
+        start = index
+        while (
+            index < len(lines)
+            and index not in declared
+            and active(index)
+            and lines[index].lstrip().startswith("|")
+            and any(a <= offsets[index] < b for a, b in paragraphs)
+        ):
+            index += 1
+        if index - start < 2:
+            index = max(index, start + 1)
+            continue
+        rows = [cells(i) for i in range(start, index)]
+        first = rows[0]
+        if first is None:
+            continue
+        if (
+            lines[start].strip() == "||"
+            and len(rows) == 2
+            and rows[1] is not None
+            and len(rows[1]) == 2
+        ):
+            first = ["", ""]
+        explicit = separator(rows[1], len(first))
+        if not explicit and (
+            len(first) < 2
+            or any(row is None or len(row) != len(first) for row in rows[1:])
+        ):
+            warn(lines[start].rstrip("\r\n"), False)
+            continue
+        emit(start, index, first, explicit, None)
+    if operations is not None:
+        operations.extend(
+            (offsets[i], offsets[i] + len(lines[i]), after)
+            for i, after in sorted(changes.items())
+            if after != lines[i]
+        )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
+    return "".join(changes.get(i, line) for i, line in enumerate(lines))
 
 
 def label_text(value):
@@ -306,42 +652,10 @@ def label_text(value):
     def escaped_at(text, position):
         return (len(text[:position]) - len(text[:position].rstrip("\\"))) % 2 == 1
 
-    def owned_codes(text):
-        ranges, cursor = [], 0
-        while cursor < len(text):
-            if text.startswith("<!--", cursor) and not escaped_at(text, cursor):
-                close = text.find("-->", cursor + 4)
-                if close >= 0:
-                    cursor = close + 3
-                    continue
-            if text[cursor] != "`":
-                cursor += 1
-                continue
-            if escaped_at(text, cursor):
-                cursor += 1
-                continue
-            opening = re.match(r"`+", text[cursor:])
-            start = cursor
-            cursor += len(opening[0])
-            closing = next(
-                (
-                    run
-                    for run in re.finditer(r"`+", text[cursor:])
-                    if len(run[0]) == len(opening[0])
-                ),
-                None,
-            )
-            if closing is not None:
-                content_end = cursor + closing.start()
-                finish = cursor + closing.end()
-                ranges.append((start, finish, cursor, content_end))
-                cursor = finish
-        return ranges
-
     phrases = [
         (start, end) for start, end, *_ in inline_candidates(value, inline_only=True)[0]
     ]
-    codes = [(start, end) for start, end, _, _ in owned_codes(value)]
+    codes = [(start, end) for start, end, _, _ in inline_code_spans(value)]
     dollars = [
         (i - 1, i + 1)
         for i, char in enumerate(value)
@@ -363,7 +677,7 @@ def label_text(value):
         literals.append(text)
         return placeholder + "L" + str(len(literals) - 1) + placeholder
 
-    for begin, end, content_start, content_end in reversed(owned_codes(value)):
+    for begin, end, content_start, content_end in reversed(inline_code_spans(value)):
         text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
         if text.startswith(" ") and text.endswith(" ") and text.strip():
             text = text[1:-1]
@@ -391,7 +705,7 @@ def label_text(value):
         display = inline_display(label)
         if not visible_literals(display).strip():
             display = "Image" if image else ""
-        value = value[:begin] + display + value[end:]
+        value = value[:begin] + keep(visible_literals(display)) + value[end:]
     value = inline_display(value)
     value = re.sub(r"(?: {2,}|\\)?(?:\r\n?|\n)", " ", value)
     value = visible_literals(value).strip() or "Heading"
@@ -406,7 +720,7 @@ def label_text(value):
     )
 
 
-def contents(text, operations=None, ownership=None):
+def contents(text, operations=None, ownership=None, origins=None):
     lines = markdown_lines(text)
     mask = insert_activity(text)
     offsets, cursor = [], 0
@@ -485,7 +799,7 @@ def contents(text, operations=None, ownership=None):
             for h in headings
         )
     used = set(re.findall(r"(?<!\S)\^([A-Za-z0-9-]+)(?=\s*$)", mask, re.MULTILINE))
-    claimed, replacements = set(), {}
+    claimed, replacements, mapped = set(), {}, {}
     for number, heading in enumerate(headings, 1):
         name = heading["name"]
         ident = (
@@ -539,6 +853,38 @@ def contents(text, operations=None, ownership=None):
             )
             for i in range(heading["start"] + 1, heading["end"] + 1):
                 replacements[i] = ""
+            if origins is not None:
+                copied = []
+                if heading["setext"]:
+                    for i in range(heading["start"], heading["end"]):
+                        part = lines[i][len(heading["prefix"]) :].strip()
+                        rest = lines[i][len(heading["prefix"]) :]
+                        left = len(heading["prefix"]) + len(rest) - len(rest.lstrip())
+                        if copied:
+                            copied.append(None)
+                        copied.extend(
+                            origins[offsets[i] + left : offsets[i] + left + len(part)]
+                        )
+                elif name:
+                    match = re.match(
+                        r"^(?: {0,3}> ?)* {0,3}#{1,6}[ \t]+", lines[heading["start"]]
+                    )
+                    copied = origins[
+                        offsets[heading["start"]] + match.end() : offsets[
+                            heading["start"]
+                        ]
+                        + match.end()
+                        + len(name)
+                    ]
+                start_generated = len(heading["prefix"]) + heading["level"] + bool(name)
+                replacement = replacements[heading["start"]]
+                mapped[heading["start"]] = (
+                    [None] * start_generated
+                    + copied
+                    + [None] * (len(replacement) - start_generated - len(copied))
+                )
+                for i in range(heading["start"] + 1, heading["end"] + 1):
+                    mapped[i] = []
     hierarchy, entries = [], []
     for heading in headings:
         while hierarchy and hierarchy[-1] >= heading["level"]:
@@ -558,48 +904,42 @@ def contents(text, operations=None, ownership=None):
             "\n".join(prefix + entry for entry in entries)
             or prefix + "No authored headings."
         ) + (ending[0] if ending else "")
+        mapped[index] = [None] * len(replacements[index])
     if operations is not None:
         operations.extend(
             (offsets[i], offsets[i] + len(lines[i]), replacement)
             for i, replacement in sorted(replacements.items())
             if replacement != lines[i]
         )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
 
 
 def table_contexts(text):
-    lines = markdown_lines(text)
-    table_rows, offset = set(), 0
-    for index, line in enumerate(lines[:-1]):
-        cells, separator = row_cells(line), row_cells(lines[index + 1])
-        if (
-            cells
-            and separator
-            and len(cells) == len(separator)
-            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", value) for value in separator)
-        ):
-            table_rows.add(index)
-            for following in range(index + 1, len(lines)):
-                row = row_cells(lines[following])
-                if row is None or len(row) != len(cells):
-                    break
-                table_rows.add(following)
-    contexts = []
-    for index, line in enumerate(lines):
-        if index in table_rows:
-            contexts.append((offset, offset + len(line)))
-        offset += len(line)
-    return contexts
+    """Native table rows retain optional edge pipes within their own block.
+
+    Native cell splitting differs from source-table admission: edge pipes are
+    optional and body widths may differ. Blank/code/comment/heading blocks and
+    new list items or quote/list ownership terminate continuation.
+    """
+    return native_table_intervals(text)
 
 
-def document_references(text, owner, assets):
+def document_references(text, owner, assets, *, qualified_brain=None):
     """Reference coordinates from active adapted text, with its exact digest."""
     masked = re.sub(
         r"<code>[^<]*</code>",
         lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
         protect_cross_container_code(text),
     )
-    references = source_references(masked, owner, assets)
+    references = source_references(
+        masked, owner, assets, qualified_brain=qualified_brain
+    )
     digest = hashlib.sha256(text.encode()).hexdigest()
     contexts = table_contexts(masked)
     for reference in references:
@@ -612,7 +952,7 @@ def document_references(text, owner, assets):
     return references
 
 
-def render_references(text, owner, path, names, assets):
+def render_references(text, owner, path, names, assets, *, qualified_brain=None):
     result = text
     contexts = table_contexts(text)
     masked = re.sub(
@@ -620,7 +960,9 @@ def render_references(text, owner, path, names, assets):
         lambda match: " " * len(match[0]),
         protect_cross_container_code(text),
     )
-    for reference in reversed(source_references(masked, owner, assets)):
+    for reference in reversed(
+        source_references(masked, owner, assets, qualified_brain=qualified_brain)
+    ):
         if reference["kind"] == "item":
             begin, end = reference["start"], reference["end"]
             replacement = wiki(names[reference["target"]], reference["label"])
@@ -639,22 +981,84 @@ def render_references(text, owner, path, names, assets):
     return result
 
 
-def expected_document_text(raw):
+def literal_note_edits(raw, *, profile_version="1"):
+    """API4 signature ownership and literal spans in original source coordinates."""
+    assert profile_version in {"1", "2", "3", "4", "5"}, "supported source profile"
+    current = profile_version in {"4", "5"}
+    signature = current and raw.startswith("\ufeff")
+    source = raw[1:] if signature else raw
+    _, edits = literal_edits(
+        protect_cross_container_code(source), allow_literal_tokens=current
+    )
+    if not signature:
+        return (
+            [
+                edit | {"source_digest": hashlib.sha256(raw.encode()).hexdigest()}
+                for edit in edits
+            ]
+            if current
+            else edits
+        )
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    return [
+        {
+            "kind": "literal_text",
+            "start": 0,
+            "end": 1,
+            "before": "\ufeff",
+            "after": "",
+            "adapted_start": 0,
+            "adapted_end": 0,
+            "source_digest": digest,
+            "source_basis": "scoped_source_text/unicode_codepoints",
+            "adapted_basis": "document.text/unicode_codepoints",
+        },
+        *(
+            edit
+            | {
+                "start": edit["start"] + 1,
+                "end": edit["end"] + 1,
+                "source_digest": digest,
+            }
+            for edit in edits
+        ),
+    ]
+
+
+def expected_document_text(raw, *, profile_version="1"):
     """Independent adapted document facts; untouched source EOLs stay exact."""
-    _, edits = literal_edits(protect_cross_container_code(raw))
+    edits = literal_note_edits(raw, profile_version=profile_version)
     text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
-    return contents(callouts(tables(text)))
+    return contents(
+        callouts(tables(text, current_tables=profile_version in {"4", "5"}))
+    )
 
 
-def expected_note_text(raw, owner, path, names, assets):
+def expected_note_text(
+    raw,
+    owner,
+    path,
+    names,
+    assets,
+    *,
+    qualified_brain=None,
+    profile_version="1",
+    prepared=None,
+):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    text = expected_document_text(normalized)
-    return render_references(text, owner, path, names, assets)
+    text = (
+        expected_document_text(normalized, profile_version=profile_version)
+        if prepared is None
+        else prepared.replace("\r\n", "\n").replace("\r", "\n")
+    )
+    return render_references(
+        text, owner, path, names, assets, qualified_brain=qualified_brain
+    )
 
 
-def adaptation_activity(raw):
+def adaptation_activity(raw, *, profile_version="1"):
     """Raw ownership of independently recognized literal and insert operations.
 
     Origins propagate through composition. Recognized tables own their rows,
@@ -662,7 +1066,7 @@ def adaptation_activity(raw):
     consumed headings even when those rows/headings need no string replacement.
     Unrelated source gaps cannot be relabeled by a large emitted edit.
     """
-    _, literal = literal_edits(protect_cross_container_code(raw))
+    literal = literal_note_edits(raw, profile_version=profile_version)
     activity = {
         "literal_text": [(e["start"], e["end"]) for e in literal],
         "markdown_insert": [],
@@ -675,7 +1079,16 @@ def adaptation_activity(raw):
         origins[start:end] = [(start, end)] * len(edit["after"])
     for transform in (tables, callouts, contents):
         operations, ownership = [], []
-        after = transform(text, operations, ownership)
+        after = transform(
+            text,
+            operations,
+            ownership,
+            **(
+                {"current_tables": profile_version in {"4", "5"}}
+                if transform is tables
+                else {}
+            ),
+        )
         for start, end in ownership:
             owned = origins[start:end]
             activity["markdown_insert"].append(
@@ -732,7 +1145,7 @@ def owned_replacement(raw, start, end, replacement, intervals):
     return cursor <= len(replacement) - len(gaps[-1])
 
 
-def validate_document_adaptations(raw, adapted, edits):
+def validate_document_adaptations(raw, adapted, edits, *, profile_version="1"):
     """Validate serialized provenance without prescribing one edit segmentation."""
     assert type(edits) is list, "document adaptation collection"
     fields = {
@@ -747,7 +1160,12 @@ def validate_document_adaptations(raw, adapted, edits):
         "source_basis",
         "adapted_basis",
     }
-    activity = adaptation_activity(raw)
+    activity = adaptation_activity(raw, profile_version=profile_version)
+    current_literals = (
+        literal_note_edits(raw, profile_version=profile_version)
+        if profile_version in {"4", "5"}
+        else None
+    )
     digest = hashlib.sha256(raw.encode()).hexdigest()
     source_cursor = adapted_cursor = 0
     replay = []
@@ -786,6 +1204,14 @@ def validate_document_adaptations(raw, adapted, edits):
             adapted[adapted_cursor:adapted_start] == gap
             and adapted[adapted_start:adapted_end] == edit["after"]
         ), "document adaptation unchanged gaps/replacement"
+        if current_literals is not None and kind == "literal_text":
+            # A literal token has one independently known logical extent.
+            # Insert operations retain their existing composition freedom.
+            assert any(
+                (start, end, edit["after"])
+                == (literal["start"], literal["end"], literal["after"])
+                for literal in current_literals
+            ), "document adaptation exact literal token extent"
         assert owned_replacement(raw, start, end, edit["after"], activity[kind]), (
             "document adaptation source activity kind"
         )

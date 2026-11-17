@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
     ExactContent,
     ImportedItemIdentity,
@@ -26,6 +28,7 @@ from brz2obsidian.core import (
     select_review_effects,
     validate_review,
 )
+from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
 from brz2obsidian.publication.vault_native import available_memory, observe_file
 
@@ -64,9 +67,22 @@ def _refused(code, history=None, *, action="inspect_history", preparation=None):
     )
 
 
-def _history(operations, vault, observed=None, *, onboarding=False, maintenance=False):
+def _history(
+    operations,
+    vault,
+    observed=None,
+    *,
+    onboarding=False,
+    maintenance=False,
+    new_operation=None,
+):
+    purpose = {"new_operation": new_operation} if new_operation is not None else {}
     history = (
-        operations.inspect_history(vault) if observed is None else observed.history
+        operations.inspect_history(vault, **purpose)
+        if observed is None
+        else observed.inspect(subjects=(), **purpose)
+        if purpose
+        else observed.history
     )
     if history.admission.status == "recovery_first":
         checkpoint = history.checkpoint
@@ -95,25 +111,30 @@ def _history(operations, vault, observed=None, *, onboarding=False, maintenance=
     # and current admission above still have to be fully valid.
     if maintenance:
         return history, None
+    from brz2obsidian.publication.vault_history import _MetadataCheckpoint
+
+    checkpoint = history.checkpoint
+    review_kind = (
+        checkpoint.review.saved.plan.facts.format_operation.kind
+        if checkpoint.review is not None
+        else checkpoint.metadata[10]
+        if type(checkpoint) is _MetadataCheckpoint and checkpoint.metadata is not None
+        else None
+    )
     if (
-        history.checkpoint.review is not None
-        and history.checkpoint.manifest.boundary != "result"
-        and history.checkpoint.review.saved.plan.facts.format_operation.kind
-        == "format_transition"
+        history.checkpoint.manifest.boundary != "result"
+        and review_kind == "format_transition"
     ):
         return history, _refused(
             "format_transition_review_required", history, action="resume_update"
         )
     onboarding_pending = (
-        history.checkpoint.review is not None
-        and history.checkpoint.manifest.boundary != "result"
-        and history.checkpoint.review.saved.plan.facts.format_operation.kind
-        == "onboarding"
+        history.checkpoint.manifest.boundary != "result" and review_kind == "onboarding"
     )
     if onboarding and onboarding_pending:
         return history, None
     identity = history.checkpoint.manifest.identity
-    if identity.output_format != 7:
+    if identity.output_format != 8:
         return history, _refused(
             "format_transition_required", history, action="review_format_transition"
         )
@@ -141,12 +162,14 @@ def _history(operations, vault, observed=None, *, onboarding=False, maintenance=
     return history, None
 
 
-def _read_physical(root, rows):
+def _read_physical(root, rows, *, _owner=None):
     rows = tuple(
         row
         for row in rows
         if getattr(row, "exclusion", None) not in ("cache", "temporary")
     )
+    if _owner is not None:
+        return _owner._physical_payload(root, rows)
     if sum(row.size for row in rows) > available_memory() // 4:
         raise ValueError("comparison_resources_unavailable")
     result = {}
@@ -167,11 +190,13 @@ def _read_physical(root, rows):
     return result
 
 
-def _read_source(operations, vault, checkpoint, observed=None):
+def _read_source(operations, vault, checkpoint, observed=None, *, _owner=None):
     # One finite request verifies the current complete owned manifest once.
     from .checkpoint_payload_contracts import CheckpointPayloadRequest
 
     rows = checkpoint.manifest.source
+    if _owner is not None:
+        return _owner._source_payload(checkpoint)
     budget = sum(row.size for row in rows)
     if budget > available_memory() // 4:
         raise ValueError("comparison_resources_unavailable")
@@ -199,7 +224,7 @@ class _ExcludedDependency(ValueError):
 
 
 def _observed_facts(
-    history, baseline, incoming, *, retained_ownership=None, **identity
+    history, baseline, incoming, *, retained_ownership=None, _owner=None, **identity
 ):
     inventory = history.admission.inventory
     managed = set(baseline) | set(incoming)
@@ -222,6 +247,7 @@ def _observed_facts(
             for row in inventory
             if row.path in managed or row.path.lower().endswith(".md")
         ),
+        _owner=_owner,
     )
 
     def assembled():
@@ -231,6 +257,7 @@ def _observed_facts(
             current,
             current_inventory=inventory,
             retained_ownership=retained_ownership,
+            _owner=_owner._session if _owner is not None else None,
             **identity,
         )
 
@@ -255,7 +282,8 @@ def _observed_facts(
         row.excluded and row.path not in managed and row.path.lower().endswith(".md")
         for row in inventory
     ):
-        for change in reconcile(facts).changes:
+        reconciled = reconcile(facts) if _owner is None else _owner._reconcile(facts)
+        for change in reconciled.changes:
             related.update(
                 by_path[candidate.current.path]
                 for candidate in change.identity_review.candidates
@@ -301,18 +329,21 @@ def _observed_facts(
         elif row.path in needed and row.path not in current:
             additional.append(row)
     if additional:
-        current.update(_read_physical(history.admission.vault, additional))
+        current.update(
+            _read_physical(history.admission.vault, additional, _owner=_owner)
+        )
     return assembled() if removed or additional else facts
 
 
-def _baseline(checkpoint, source):
+def _baseline(checkpoint, source, *, _owner=None):
+    review = _owner._tip if _owner is not None else checkpoint.review
     if (
         checkpoint.manifest.boundary != "local"
-        or checkpoint.review is None
+        or review is None
         or checkpoint.manifest.reviewed_source is not None
     ):
         return source
-    facts = checkpoint.review.saved.plan.producer_facts
+    facts = review.saved.plan.producer_facts
     # Saved unresolved reviews retain complete exact originals in schema-1
     # review_content; the source role retains the complete incoming payload.
     rows = {(s.item_id, s.facet): s for s in facts.subjects}
@@ -321,7 +352,11 @@ def _baseline(checkpoint, source):
     ].baseline.content
     if original_record is None:
         raise ValueError("onboarding_required")
-    old_record = json.loads(original_record.data)
+    old_record = json.loads(
+        _owner._session._text(original_record).data
+        if _owner is not None
+        else original_record.data
+    )
     paths = {
         (row["original_identity"], "content"): row["relative_path"]
         for row in old_record["item_targets"]
@@ -346,16 +381,23 @@ def _baseline(checkpoint, source):
         )
         if path is None:
             raise ValueError("baseline_payload_unavailable")
-        result[path] = subject.baseline.content.data
+        result[path] = (
+            _owner._session._text(subject.baseline.content)
+            if _owner is not None and path == "migration-record.json"
+            else subject.baseline.content
+            if _owner is not None
+            else subject.baseline.content.data
+        )
     return result
 
 
 class _UpdateRenderer:
     """Retain the creation time of the same established Home bookmark."""
 
-    def __init__(self, delegate, baseline):
+    def __init__(self, delegate, baseline, *, _owner=None):
         self.delegate = delegate
         self.baseline = baseline
+        self._owner = _owner
 
     def render(self, plan, metadata):
         if ".obsidian/bookmarks.json" not in self.baseline:
@@ -368,7 +410,10 @@ class _UpdateRenderer:
             ),
             None,
         )
-        bookmarks = json.loads(self.baseline[".obsidian/bookmarks.json"])
+        bookmarks_raw = self.baseline[".obsidian/bookmarks.json"]
+        if self._owner is not None:
+            bookmarks_raw = self._owner._session._text(bookmarks_raw).data
+        bookmarks = json.loads(bookmarks_raw)
         items = bookmarks.get("items", ())
         if len(items) == 1 and set(items[0]) == {"type", "ctime", "path", "title"}:
             old = items[0]
@@ -385,7 +430,9 @@ class _UpdateRenderer:
         return self.delegate.render(plan, metadata)
 
 
-def _render(operations, source, baseline, *, metadata=None, directory=None):
+def _render(
+    operations, source, baseline, *, metadata=None, directory=None, _owner=None
+):
     from .contracts import BrzSourceSelection
 
     workflow, reference = operations._selected_workflow(
@@ -394,7 +441,7 @@ def _render(operations, source, baseline, *, metadata=None, directory=None):
     metadata = workflow.metadata_factory() if metadata is None else metadata
     renderer = Workflow(
         workflow.binding,
-        _UpdateRenderer(workflow.renderer, baseline),
+        _UpdateRenderer(workflow.renderer, baseline, _owner=_owner),
         workflow.publisher,
         metadata_factory=lambda: metadata,
     )
@@ -408,16 +455,22 @@ def _render(operations, source, baseline, *, metadata=None, directory=None):
             SimpleNamespace(path=row.relative_path, size=row.length, sha256=row.sha256)
             for row in result.receipt.manifest
         ),
+        _owner=_owner,
     )
-    equivalent = _equivalent_payload(baseline, payload)
+    if _owner is not None:
+        _owner._session._coadmit()
+    equivalent = _equivalent_payload(baseline, payload, _owner=_owner)
     if equivalent:
         for path, raw in baseline.items():
-            (directory / path).write_bytes(raw)
+            if _owner is None:
+                (directory / path).write_bytes(raw)
+            else:
+                _owner._write_content(raw, directory / path)
         payload = baseline
     return directory, payload, result.source_identity, equivalent
 
 
-def _equivalent_payload(baseline, incoming):
+def _equivalent_payload(baseline, incoming, *, _owner=None):
     if set(baseline) != set(incoming):
         return False
     old, new = record(baseline), record(incoming)
@@ -446,12 +499,30 @@ def _equivalent_payload(baseline, incoming):
                 + new["source_identity"]["snapshot_digest"]
                 + "; collection: "
             )
-            raw = raw.replace(
+            report = (
+                _owner._session._text(raw).data
+                if _owner is not None
+                else raw.data
+                if hasattr(raw, "identity")
+                else raw
+            )
+            raw = report.replace(
                 ("Source fingerprint: " + new_sha + suffix).encode(),
                 ("Source fingerprint: " + old_sha + suffix).encode(),
                 1,
             )
-        if raw != baseline[path]:
+        old_raw = baseline[path]
+        if hasattr(old_raw, "identity") and type(raw) is bytes:
+            old_raw = (
+                _owner._session._text(old_raw).data
+                if _owner is not None
+                else old_raw.data
+            )
+        if (
+            not canonical_equal(raw, old_raw)
+            if hasattr(raw, "identity") and hasattr(old_raw, "identity")
+            else raw != old_raw
+        ):
             return False
     return True
 
@@ -496,6 +567,51 @@ def _stale_slots(before, after):
     return len((prior - current) & required)
 
 
+def _review_explanation(result, *, review=None):
+    """Expose approved guidance without copying authored names or references."""
+    messages = (
+        (
+            "current_link_coverage_unavailable",
+            "Some links in the current vault could not be verified.",
+            "Review the current notes and attachment targets in All changes. Restore complete supported link evidence before applying.",
+        ),
+        (
+            "selected_link_context_conflict",
+            "The selected file versions have incompatible or unavailable reference evidence.",
+            "Review the selected notes, attachment versions and reference choices in All changes. Choose compatible targets or repair the affected references, then refresh before applying.",
+        ),
+        (
+            "selected_provider_cycle",
+            "The selected appearance-category chains contain a cycle.",
+            "Review the selected appearance-category chains and remove the repeated provider before applying. A nearer owned icon does not repair the independent cycle.",
+        ),
+        (
+            "selected_provider_invalid",
+            "A selected appearance-category chain reaches an invalid declaration.",
+            "Follow the selected appearance-category chain to the note with the invalid declaration. Choose a valid category membership there or leave its appearance category blank. Repair or clear any invalid icon declaration, including a missing or unsuitable image target, then refresh the review. A nearer owned icon does not repair the independent declaration.",
+        ),
+    )
+    if review is None and result.preparation is not None:
+        review = result.preparation.review
+    selected = tuple(
+        row for row in messages if review is not None and row[0] in review.blockers
+    )
+    if selected:
+        guidance = tuple(row[2] for row in selected)
+        updates = {
+            "summary": " ".join(row[1] for row in selected),
+            "guidance": (*guidance, *result.guidance)
+            if isinstance(result.guidance, tuple)
+            else " ".join((*guidance, result.guidance)),
+        }
+        if hasattr(result, "findings"):
+            updates["findings"] = tuple(
+                dict.fromkeys((*result.findings, *(row[0] for row in selected)))
+            )
+        return result.model_copy(update=updates)
+    return result
+
+
 def _prepared(
     history,
     directory,
@@ -509,6 +625,7 @@ def _prepared(
     status="prepared_review",
     code="prepared",
     stale=0,
+    _owner=None,
 ):
     source_record = json.loads(
         next(
@@ -562,6 +679,7 @@ def _prepared(
         if review.ready
         and preparation.kind == "onboarding"
         and preparation.locator is None
+        and not review.facts.format_operation.automatic_merge
         else ("apply_update",)
         if review.ready
         else ("resolve_update", "save_update"),
@@ -572,15 +690,22 @@ def _prepared(
         if preparation.kind == "onboarding"
         else (),
     )
-    return _configuration_route(result)
+    return _review_explanation(_configuration_route(result, _owner=_owner))
 
 
 def _scoped(operations, history, facts, review=None, observed=None):
     subjects = _subjects(facts, review)
+    purpose = (
+        {"new_operation": "format_transition"}
+        if facts.format_operation.kind == "format_transition"
+        else {}
+    )
     scoped = (
-        operations.inspect_history(history.admission.vault, subjects=subjects)
+        operations.inspect_history(
+            history.admission.vault, subjects=subjects, **purpose
+        )
         if observed is None
-        else observed.inspect(subjects=subjects)
+        else observed.inspect(subjects=subjects, **purpose)
     )
     if (
         scoped.status != history.status
@@ -631,10 +756,11 @@ def _memory(plan):
     return tuple(records.values())
 
 
-def _producer_memory(checkpoint, proposal_id=None):
-    if checkpoint.review is None:
+def _producer_memory(checkpoint, proposal_id=None, *, _owner=None):
+    retained = _owner._tip if _owner is not None else checkpoint.review
+    if retained is None:
         return ()
-    saved = checkpoint.review.saved.plan
+    saved = retained.saved.plan
     if (
         checkpoint.manifest.boundary == "local"
         and checkpoint.manifest.reviewed_source is not None
@@ -644,7 +770,7 @@ def _producer_memory(checkpoint, proposal_id=None):
     return _memory(saved)
 
 
-def _configuration_route(result):
+def _configuration_route(result, *, _owner=None):
     if result.kind == "onboarding":
         from .onboarding import route_onboarding
 
@@ -656,7 +782,11 @@ def _configuration_route(result):
         or result.status in ("refused", "stale_review", "failed")
     ):
         return result
-    selected = select_review_effects(prepared.review)
+    selected = (
+        select_review_effects(prepared.review)
+        if _owner is None
+        else _owner._session._drive(SelectedEffectsWork(prepared.review))
+    )
     if selected.status != "selected":
         return result
     current = prepared.review.producer_facts.identity_inventory
@@ -668,7 +798,7 @@ def _configuration_route(result):
         changed |= (
             len(matching) != 1
             or matching[0].current.content is None
-            or matching[0].current.content.data != row.content.data
+            or not same_content(matching[0].current.content, row.content)
         )
     if not changed:
         return result
@@ -688,7 +818,7 @@ def _configuration_route(result):
     )
 
 
-def _text_choice(plan, change, choice, edited):
+def _text_choice(plan, change, choice, edited, *, _owner=None):
     if choice == "edited":
         if edited is None:
             raise ValueError("Edited bytes are required")
@@ -697,6 +827,8 @@ def _text_choice(plan, change, choice, edited):
         content = change.incoming
     if content is None:
         return None
+    if _owner is not None:
+        content = _owner._session._assembly_content(content, semantic=True)
     context = plan.producer_facts.link_context
     document_id = next(
         (
@@ -723,6 +855,75 @@ def _text_choice(plan, change, choice, edited):
         states = tuple(s for s in states if s.target_id not in selected_ids) + tuple(
             s for s in candidate.target_facts if s.target_id in selected_ids
         )
+    if plan.facts.incoming_identity.output_format == 8:
+        # Observe only results reconstructed from the actual producer facts and
+        # admitted actions. Unresolved peers do not imply a Current selection.
+        if _owner is None:
+            validated = validate_review(plan)
+            canonical = validated.plan if validated.status == "accepted" else None
+        else:
+            canonical = _owner._session._replay(plan)
+        if canonical is None:
+            raise ValueError("The review plan is not canonical")
+        selected = []
+        versions = {
+            row.change_id: (row, row.target_path, row.result)
+            for row in canonical.proposal.changes
+            if not row.requires_decision
+        }
+        for approval in canonical.approvals:
+            if approval.domain not in ("text", "format", "mapping"):
+                continue
+            comparison = next(
+                row
+                for row in canonical.proposal.changes
+                if row.change_id == approval.change_id
+            )
+            versions[comparison.change_id] = (
+                comparison,
+                approval.target_path,
+                approval.result,
+            )
+        for comparison, selected_path, chosen in versions.values():
+            matches = tuple(
+                row
+                for row in targets
+                if row.identity is not None
+                and row.identity.item_id == comparison.item_id
+                and row.identity.collection_id
+                == plan.facts.incoming_identity.collection_id
+                and row.identity.module_id == plan.facts.incoming_identity.module_id
+            )
+            if comparison.facet != "content" or len(matches) != 1:
+                continue
+            owner = next(
+                (
+                    row
+                    for row in (*context.current_targets, *targets)
+                    if row.target_id == matches[0].target_id
+                    and row.canonical_path == selected_path
+                ),
+                None,
+            )
+            if owner is None:
+                continue
+            targets = tuple(
+                owner if row.target_id == owner.target_id else row for row in targets
+            )
+            selected.append((owner, chosen))
+        for owner, chosen in selected:
+            observed = link_state(
+                chosen,
+                target_id=owner.target_id,
+                existence="present" if chosen is not None else "missing",
+                membership_targets=targets,
+                source_path=owner.canonical_path,
+                output_format=8,
+                _owner=_owner._session if _owner is not None else None,
+            )
+            states = tuple(s for s in states if s.target_id != owner.target_id) + (
+                observed,
+            )
     if own is not None:
         observed = link_state(
             content,
@@ -730,6 +931,8 @@ def _text_choice(plan, change, choice, edited):
             existence="present",
             membership_targets=targets,
             source_path=change.target_path,
+            output_format=plan.facts.incoming_identity.output_format,
+            _owner=_owner._session if _owner is not None else None,
         )
         states = tuple(s for s in states if s.target_id != own.target_id) + (observed,)
     return inspect_text_candidate(
@@ -740,7 +943,7 @@ def _text_choice(plan, change, choice, edited):
             item_id=change.item_id,
         ),
         target=target(change.target_path),
-        output_format=7,
+        output_format=plan.facts.incoming_identity.output_format,
         source_path=change.target_path,
         document_id=document_id,
         path_mode="vault",
@@ -785,6 +988,19 @@ def _current_path_choice(plan, change):
         prospective if row.target_id == owner.target_id else row
         for row in context.current_targets
     )
+    observed = link_state(
+        change.current,
+        target_id=owner.target_id,
+        existence="present",
+        membership_targets=targets,
+        source_path=change.target_path,
+        output_format=facts.baseline_identity.output_format,
+        qualify_roles=facts.incoming_identity.output_format == 8,
+    )
+    states = tuple(
+        observed if row.target_id == owner.target_id else row
+        for row in context.current_target_facts
+    )
     return inspect_text_candidate(
         change.current,
         identity=ImportedItemIdentity(
@@ -798,13 +1014,13 @@ def _current_path_choice(plan, change):
         document_id=document.document_id,
         path_mode=document.path_mode,
         link_targets=targets,
-        link_target_facts=context.current_target_facts,
+        link_target_facts=states,
         link_inventory=context.inventory,
         membership_targets=targets,
     )
 
 
-def text_choice_action(plan, action, *, edited=None):
+def text_choice_action(plan, action, *, edited=None, _owner=None):
     if (
         action.domain == "text"
         and action.choice == "current"
@@ -851,6 +1067,7 @@ def text_choice_action(plan, action, *, edited=None):
                         change,
                         "incoming" if action.choice == "reverse" else action.choice,
                         edited,
+                        _owner=_owner,
                     )
                 }
             )
@@ -861,7 +1078,10 @@ def resolve_update(operations, preparation, action, *, edited=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
         plan = preparation.review
-        action = text_choice_action(plan, action, edited=edited)
+        from brz2obsidian.contracts import ReviewKeepCurrentGroup
+
+        if not isinstance(action, ReviewKeepCurrentGroup):
+            action = text_choice_action(plan, action, edited=edited)
         transition = resolve_review(plan, action)
         result_plan = transition.plan
         binding = preparation.source_binding.model_copy(
@@ -894,11 +1114,12 @@ def resolve_update(operations, preparation, action, *, edited=None):
             if result_plan.ready
             and prepared.kind == "onboarding"
             and prepared.locator is None
+            and not result_plan.facts.format_operation.automatic_merge
             else ("apply_update",)
             if result_plan.ready
             else ("resolve_update", "save_update"),
         )
-        return _configuration_route(result)
+        return _review_explanation(_configuration_route(result))
     except OSError, ValueError, KeyError, TypeError, StopIteration, AttributeError:
         return _refused("invalid_review_action", preparation=preparation)
 
@@ -934,7 +1155,11 @@ def _refresh_source_update(operations, preparation, observed, *, source):
     try:
         maintenance = preparation.kind == "format_transition"
         history, stopped = _history(
-            operations, preparation.vault, observed, maintenance=maintenance
+            operations,
+            preparation.vault,
+            observed,
+            maintenance=maintenance,
+            new_operation="format_transition" if maintenance else None,
         )
         if stopped is not None:
             return stopped
@@ -1219,6 +1444,7 @@ def inspect_update_review(
     limit=100,
     byte_offset=0,
     byte_limit=65536,
+    queue="all",
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1272,6 +1498,7 @@ def inspect_update_review(
             limit=limit,
             byte_offset=byte_offset,
             byte_limit=byte_limit,
+            queue=queue,
         )
     except OSError, ValueError, TypeError, AttributeError:
         return refused("invalid_review")
@@ -1286,6 +1513,9 @@ def review_plan_page(
     limit=100,
     byte_offset=0,
     byte_limit=65536,
+    _owner=None,
+    _canonical_plan=None,
+    queue="all",
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1313,13 +1543,30 @@ def review_plan_page(
             )
             or not 1 <= limit <= 100
             or byte_limit > available_memory() // 16
-            or validate_review(plan).status != "accepted"
+            or (
+                validate_review(plan).status != "accepted"
+                if _owner is None
+                else (
+                    _owner._session._replay(plan)
+                    if _canonical_plan is not plan
+                    else _canonical_plan
+                )
+                is None
+            )
         ):
             return refused("invalid_page")
+        if queue not in ("all", "unresolved"):
+            return refused("invalid_page")
+        unresolved_ids = {r.change_id for r in plan.requirements}
+        changes = tuple(
+            c
+            for c in plan.proposal.changes
+            if queue == "all" or c.change_id in unresolved_ids
+        )
         items = []
         remaining = byte_limit
         approvals = {approval.change_id: approval for approval in plan.approvals}
-        for change in plan.proposal.changes[offset : offset + limit]:
+        for change in changes[offset : offset + limit]:
             UpdatePreparation.relative_vault_path(change.path)
             UpdatePreparation.relative_vault_path(change.target_path)
             approval = approvals.get(change.change_id)
@@ -1332,7 +1579,7 @@ def review_plan_page(
             )
             versions = change.original, change.current, change.incoming, reviewed_result
             unread = sum(
-                content is not None and len(content.data) > byte_offset
+                content is not None and content.identity.size > byte_offset
                 for content in versions
             )
             if byte_limit and unread > remaining:
@@ -1345,9 +1592,13 @@ def review_plan_page(
                 if content is None:
                     parts.append(None)
                     continue
-                raw = content.data[byte_offset : byte_offset + quota]
+                raw = (
+                    content.data[byte_offset : byte_offset + quota]
+                    if _owner is None
+                    else _owner._byteslice(content, byte_offset, quota)
+                )
                 remaining -= len(raw)
-                omitted |= byte_offset != 0 or len(raw) != len(content.data)
+                omitted |= byte_offset != 0 or len(raw) != content.identity.size
                 parts.append(raw)
             following_byte = byte_offset + max(
                 (len(raw) for raw in parts if raw is not None), default=0
@@ -1367,7 +1618,7 @@ def review_plan_page(
                     offset=byte_offset,
                     next_byte_offset=following_byte
                     if any(
-                        content is not None and len(content.data) > following_byte
+                        content is not None and content.identity.size > following_byte
                         for content in versions
                     )
                     else None,
@@ -1375,7 +1626,7 @@ def review_plan_page(
                 )
             )
         following = offset + len(items)
-        total = len(plan.proposal.changes)
+        total = len(changes)
         return UpdateReviewPage(
             status="available",
             code="available",
@@ -1482,6 +1733,9 @@ def _reobserve_inputs(operations, preparation, observed):
         preparation.vault,
         observed,
         maintenance=preparation.kind == "format_transition",
+        new_operation="format_transition"
+        if preparation.kind == "format_transition"
+        else None,
     )
     if stopped is not None:
         return (None, stopped.model_copy(update={"kind": preparation.kind}), None)
@@ -1642,10 +1896,14 @@ def _reobserve_inputs(operations, preparation, observed):
     return (history, result, retained)
 
 
-def apply_update(operations, preparation, *, cancel=None, progress=None):
+def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=None):
     native_contact = False
     try:
-        history, current, _ = _reobserve(operations, preparation)
+        history, current, _ = (
+            _reobserve(operations, preparation)
+            if _owner is None
+            else _owner._reobserve(preparation)
+        )
         if history is None or current.status == "stale_review":
             return current
         if current.code == "separate_configuration_operation_required":
@@ -1677,16 +1935,62 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 }
             )
         if prepared.kind == "onboarding" and prepared.locator is None:
-            return current.model_copy(
-                update={
-                    "status": "unresolved",
-                    "code": "first_checkpoint_required",
-                    "ready": False,
-                    "next_actions": ("save_update",),
-                }
+            if not prepared.review.facts.format_operation.automatic_merge:
+                return current.model_copy(
+                    update={
+                        "status": "unresolved",
+                        "code": "first_checkpoint_required",
+                        "ready": False,
+                        "next_actions": ("save_update",),
+                    }
+                )
+            captured = (
+                save_update(operations, prepared, cancel=cancel, progress=progress)
+                if _owner is None
+                else _owner._save(prepared, cancel=cancel, progress=progress)
             )
+            if captured.code != "saved" or captured.preparation is None:
+                return captured
+            if cancel is not None and cancel():
+                return captured.model_copy(
+                    update={
+                        "status": "cancelled_before_publication",
+                        "code": "cancelled_before_publication",
+                        "ready": False,
+                        "publication": "not_published",
+                        "next_actions": ("continue_review", "refresh_update"),
+                    }
+                )
+            # The existing capture retained source/current separately. Reobserve
+            # the new checkpoint before entering the existing publication path.
+            applied = apply_update(
+                operations,
+                captured.preparation,
+                cancel=cancel,
+                progress=progress,
+                _owner=_owner,
+            )
+            retained = {
+                "capture": applied.capture or captured.capture,
+                "history_retained": applied.history_retained
+                or captured.history_retained,
+                "checkpoint_commit": applied.checkpoint_commit
+                or captured.checkpoint_commit,
+            }
+            if (
+                applied.preparation is None
+                and applied.application is None
+                and applied.status
+                not in ("publication_unknown", "recovery_required", "failed")
+            ):
+                retained["preparation"] = captured.preparation
+            return applied.model_copy(update=retained)
         association = prepared.locator.association
-        selected = select_review_effects(prepared.review)
+        selected = (
+            select_review_effects(prepared.review)
+            if _owner is None
+            else _owner._session.select_review_effects(prepared.review)
+        )
         source_rows = tuple(
             (r.path, r.mode, r.size, r.sha256) for r in prepared.source_binding.files
         )
@@ -1721,19 +2025,25 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             (r.path, r.mode, r.size, r.sha256)
             for r in history.checkpoint.manifest.vault
         )
-        retained_memory = (
-            _memory(history.checkpoint.review.saved.plan)
-            if history.checkpoint.review is not None
-            else ()
+        if _owner is not None:
+            if _owner._tip_commit != history.checkpoint.locator.commit:
+                _owner._tip = _owner._load_tip(history.checkpoint)
+            retained = _owner._tip
+        else:
+            retained = history.checkpoint.review
+        retained_memory = _memory(retained.saved.plan) if retained is not None else ()
+        same_memory = canonical_equal(
+            tuple(
+                sorted(
+                    _memory(prepared.review), key=lambda row: row.provenance.decision_id
+                )
+            ),
+            tuple(sorted(retained_memory, key=lambda row: row.provenance.decision_id)),
         )
-        same_memory = sorted(
-            _memory(prepared.review), key=lambda row: row.provenance.decision_id
-        ) == sorted(retained_memory, key=lambda row: row.provenance.decision_id)
         same_selected = all(
             row.path in current_files
-            and len(row.content.data) == current_files[row.path].size
-            and hashlib.sha256(row.content.data).hexdigest()
-            == current_files[row.path].sha256
+            and row.content.identity.size == current_files[row.path].size
+            and row.content.identity.sha256 == current_files[row.path].sha256
             for row in selected.files
         )
         if (
@@ -1759,6 +2069,9 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 publication="not_published",
                 summary="The source and vault are unchanged; no additional checkpoint was needed.",
             )
+        export = (
+            _owner._publication_export(prepared.review) if _owner is not None else None
+        )
         native_contact = True
         applied = operations.apply_reviewed_update(
             prepared.vault,
@@ -1769,6 +2082,7 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             vault_id=association.vault_id,
             import_id=association.import_id,
             cancel=cancel,
+            **({"_owned_export": export} if export is not None else {}),
             **({"progress": progress} if progress is not None else {}),
         )
         status = update_application_status(applied)

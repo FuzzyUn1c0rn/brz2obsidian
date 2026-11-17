@@ -1,12 +1,13 @@
 """Separate source-stable format maintenance using the shared review lifecycle."""
 
+from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
 from brz2obsidian.contracts import SourceIdentity
 from brz2obsidian.core import prepare_review
 
-from .update_facts import record
+from .update_facts import automatic_merge_facts, record
 from .update_lifecycle import (
     _baseline,
     _history,
@@ -25,9 +26,11 @@ def refused(code, history=None, *, action="inspect_history"):
     )
 
 
-def transition_facts(history, original, incoming, *, proposal_id, generation):
+def transition_facts(
+    history, original, incoming, *, proposal_id, generation, _owner=None
+):
     checkpoint = history.checkpoint
-    retained_review = checkpoint.review
+    retained_review = _owner._tip if _owner is not None else checkpoint.review
     prior = (
         retained_review.saved.plan.producer_facts
         if retained_review is not None
@@ -49,6 +52,7 @@ def transition_facts(history, original, incoming, *, proposal_id, generation):
         proposal_id=proposal_id,
         generation=generation,
         originals_known=known,
+        _owner=_owner,
     )
     old_source = record(original)["source_identity"]["snapshot_digest"]
     if not known:
@@ -96,7 +100,7 @@ def transition_facts(history, original, incoming, *, proposal_id, generation):
         )
         for subject in facts.subjects
     )
-    return facts.model_copy(
+    facts = facts.model_copy(
         update={
             "subjects": subjects,
             "baseline_identity": old_identity,
@@ -111,12 +115,21 @@ def transition_facts(history, original, incoming, *, proposal_id, generation):
             ),
         }
     )
+    return automatic_merge_facts(
+        facts, _owner=_owner._session if _owner is not None else None
+    )
 
 
-def prepare_format_transition(operations, vault, source=None):
+def prepare_format_transition(operations, vault, source=None, *, _owner=None):
     history = None
     try:
-        history, stopped = _history(operations, vault, onboarding=True)
+        history, stopped = _history(
+            operations,
+            vault,
+            _owner.observed if _owner is not None else None,
+            onboarding=True,
+            new_operation="format_transition",
+        )
         if stopped is not None and stopped.code not in (
             "format_transition_required",
             "source_profile_unavailable",
@@ -137,24 +150,51 @@ def prepare_format_transition(operations, vault, source=None):
                 history,
                 action="choose_source_reference",
             )
-        retained = _read_source(operations, vault, history.checkpoint)
-        original = _baseline(history.checkpoint, retained)
-        directory, incoming, observed, reused = _render(operations, source, original)
-        facts = transition_facts(
-            history, original, incoming, proposal_id=uuid4().hex, generation=1
-        )
-        history = _scoped(operations, history, facts)
-        review = prepare_review(facts, preflight=history.admission.preflight)
-        binding = operations.observe_reviewed_source(directory, review)
-        return _prepared(
-            history,
-            directory,
-            binding,
-            review,
-            observed,
-            reused,
-            source_ref=str(Path(source).absolute()),
-        )
+        if _owner is not None:
+            _owner._start_session()
+            _owner._tip = _owner._load_tip(history.checkpoint)
+        with _owner._session._operation() if _owner is not None else nullcontext():
+            retained = _read_source(
+                operations,
+                vault,
+                history.checkpoint,
+                _owner.observed if _owner is not None else None,
+                _owner=_owner,
+            )
+            original = _baseline(history.checkpoint, retained, _owner=_owner)
+            directory, incoming, observed, reused = _render(
+                operations,
+                source,
+                original,
+                directory=_owner._directory / "incoming"
+                if _owner is not None
+                else None,
+                _owner=_owner,
+            )
+            facts = transition_facts(
+                history,
+                original,
+                incoming,
+                proposal_id=uuid4().hex,
+                generation=1,
+                _owner=_owner,
+            )
+            if _owner is None:
+                history = _scoped(operations, history, facts)
+                review = prepare_review(facts, preflight=history.admission.preflight)
+            else:
+                history, review = _owner._plan(history, facts)
+            binding = operations.observe_reviewed_source(directory, review)
+            return _prepared(
+                history,
+                directory,
+                binding,
+                review,
+                observed,
+                reused,
+                source_ref=str(Path(source).absolute()),
+                _owner=_owner,
+            )
     except ValueError as error:
         if error.args == ("format_source_changed",):
             return refused(

@@ -10,10 +10,8 @@ are withdrawn, not deferred gates for draft publication, review or delivery.
 The old exhaustive GitHub Actions workflow has been removed.
 
 Use the maintained reduced selection for broad verification and focused checks
-for development and repairs. All required automated checks together must stay
-below fifteen minutes. If the selection grows too expensive, improve the selection
-and setup rather than restoring exhaustive discovery. Preserve historical
-results with their original identities; they are not new-candidate executions.
+for development and repairs. Keep the selection and setup efficient without
+restoring exhaustive discovery. Preserve historical results with their original identities; they are not new-candidate executions.
 
 ## Coverage-led testing
 
@@ -30,12 +28,12 @@ valid controlled input changes and a few real integration checks. Prefer useful
 existing tests over rewriting them to meet an arbitrary case count. Partial
 coverage reports describe their executed selection, not the entire suite.
 
-The complete ordinary verification bundle must finish in less than 900 seconds,
-including setup, teardown, reports, receipt validation and required repeated
-checks. Everyday focused feedback should take seconds. Measure the complete
-bundle without competing full-suite processes; an over-budget or interrupted
-attempt does not satisfy this objective. Coverage need not be regenerated for
-an unrelated documentation edit.
+Report elapsed time for the complete ordinary verification bundle, including
+setup, teardown, reports and receipt validation. Keep focused feedback efficient.
+The user withdrew the former 900-second acceptance gate and related reserves on
+2026-11-14; older conflicting ticket and skill requirements are withdrawn.
+Previously failed or interrupted attempts retain their original outcomes. Coverage
+need not be regenerated for an unrelated documentation edit.
 
 The maintained default is [tools/test-suite.json](../tools/test-suite.json).
 Its command requires the GUI development environment and checks **at least 80%
@@ -47,7 +45,7 @@ triggers for additional tests.
 
 ```powershell
 # Complete ordinary verification: pytest, lint, format, dependency, coverage,
-# reports and receipt validation, all within one 900-second deadline.
+# reports and receipt validation, with elapsed time reported.
 .\.venv\Scripts\python.exe tools/coverage_suite.py
 # Measure a changed consumer without rerunning the accumulated selection.
 .\.venv\Scripts\python.exe tools/coverage_suite.py --test tests/application/test_graph_modules.py
@@ -66,17 +64,17 @@ and have no default coverage threshold. An explicit `--min-branch` override
 requires a recorded `--measurement-intent`; it does not amend the accepted target.
 
 The command validates its receipt before and after reporting. Failure, source
-changes, missing coverage, insufficient branches or deadline exhaustion prevent
-success. Timeout cleanup may take additional seconds; an over-budget attempt
-never qualifies. Retain failed and interrupted evidence as well as later passes.
+changes, missing coverage or insufficient branches prevent success. An explicit
+positive finite `--timeout` sets an optional shared deadline; its exhaustion fails
+the run. User interruption remains incomplete. Retain failed and interrupted
+evidence as well as later passes.
 
 The maintained selection uses four pytest-xdist workers with module/class scope
 groups. Focused measurements use one process unless `--workers 2`, `--workers 3`
 or `--workers 4` is explicit. `--workers 1` selects serial execution for the
 maintained command. Parallel execution preserves relative file order within each
 worker; it does not promise global serial order. Worker restarts are disabled,
-and the shared 900-second
-deadline includes worker startup, shutdown and merged coverage reports.
+and elapsed time includes worker startup, shutdown and merged coverage reports.
 
 
 ## Choosing verification
@@ -233,7 +231,7 @@ their own routes.
 
 The former `.github/workflows/checks.yml` exhaustive BASE/GUI workflow is retired
 and removed. Do not re-enable its historical revisions or dispatch an old ref.
-Any future hosted workflow must use the reduced selection and runtime budget.
+Any future hosted workflow must use the reduced selection.
 Offscreen GUI success leaves actual Windows appearance, native dialogs and
 pointer usability unverified; source preservation and user acceptance remain
 separate evidence.

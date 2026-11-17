@@ -51,7 +51,7 @@ def inspect_text_candidate(
     appearance_present = False
     status, issues = "safe", ()
     try:
-        if output_format != 7:
+        if output_format not in (7, 8):
             raise ValueError("candidate_format_unsupported")
         text = raw.decode("utf-8")
         if (
@@ -167,6 +167,7 @@ def inspect_text_candidate(
             targets=link_targets,
             target_facts=link_target_facts,
             inventory=link_inventory,
+            output_format=output_format,
         ),
         link_targets=link_targets,
         link_target_facts=link_target_facts,

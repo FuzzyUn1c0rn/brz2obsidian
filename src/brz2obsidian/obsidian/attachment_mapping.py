@@ -28,7 +28,7 @@ def interpret_attachment_mapping(content: ExactContent, *, identity: OutputIdent
     )
     if (
         record["schema"] != "brz2obsidian.migration"
-        or actual.output_format != 7
+        or actual.output_format not in (7, 8)
         or actual != identity
     ):
         raise ValueError("Attachment mapping generation is unqualified")

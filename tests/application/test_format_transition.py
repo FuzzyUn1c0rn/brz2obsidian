@@ -7,6 +7,10 @@ import pytest
 from brz2obsidian.application.operations import Operations
 
 
+class ControlledOperations(Operations):
+    """Use the supplied history and checkpoint ports in the controlled fixture."""
+
+
 def test_interrupted_history_blocks_format_transition_before_source_access(monkeypatch):
     def unopened(*args, **kwargs):
         raise AssertionError(
@@ -23,7 +27,12 @@ def test_interrupted_history_blocks_format_transition_before_source_access(monke
             recovery_gaps=("preimage_unavailable",),
         ),
     )
-    monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+
+    def inspect_history(vault, **purpose):
+        assert purpose == {"new_operation": "format_transition"}
+        return history
+
+    monkeypatch.setattr(operations, "inspect_history", inspect_history)
     result = operations.prepare_format_transition(
         "unopened-vault", "unopened-reference.brz"
     )
@@ -140,7 +149,7 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
     )
     workflow = default_workflow()
     workflow.metadata_factory = lambda: METADATA
-    operations = Operations(workflow=workflow)
+    operations = ControlledOperations(workflow=workflow)
     monkeypatch.setattr(operations, "inspect_history", lambda *args, **kwargs: history)
     monkeypatch.setattr(
         operations,
@@ -189,7 +198,7 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
 
 
 @pytest.mark.parametrize("known_original", (True, False))
-def test_transition_compares_actual_stored_format6_original_current_and_format7_target(
+def test_transition_compares_actual_stored_format6_original_current_and_format8_target(
     tmp_path, monkeypatch, known_original
 ):
     from brz2obsidian.application.update_context import UpdateContext
@@ -206,8 +215,8 @@ def test_transition_compares_actual_stored_format6_original_current_and_format7_
         and facts.baseline_identity.profile_version == "9"
     )
     assert (
-        facts.incoming_identity.output_format == 7
-        and facts.incoming_identity.profile_version == "10"
+        facts.incoming_identity.output_format == 8
+        and facts.incoming_identity.profile_version == "11"
     )
     assert facts.format_operation.recorded_generation == "unavailable"
     assert (
@@ -259,7 +268,7 @@ def test_transition_compares_actual_stored_format6_original_current_and_format7_
         if offer.domain == "format" and "Home — Format six seed.md" in offer.disclosure
     )
     assert "Recorded output format: 6" in note.disclosure
-    assert "Incoming output format: 7" in note.disclosure
+    assert "Incoming output format: 8" in note.disclosure
     assert "Keep vault version preserves the current vault content" in note.disclosure
     assert (
         "Use incoming version replaces it with the reviewed generated content"

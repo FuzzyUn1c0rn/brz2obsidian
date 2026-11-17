@@ -40,7 +40,7 @@ from tests.reconciliation.test_resolution import action, preflight
 @pytest.mark.parametrize(
     "case", ("new", "existing_current", "unsupported", "configuration")
 )
-def test_new_source_attachment_requires_binary_approval_without_format_adoption(case):
+def test_new_source_attachment_uses_proven_absence_without_format_adoption(case):
     from brz2obsidian.application.update_facts import assemble_facts
     from tests.application.test_attachment_cleanup_lifecycle import incoming_attachment
     from tests.application.test_update_lifecycle_contracts import preparation
@@ -73,15 +73,38 @@ def test_new_source_attachment_requires_binary_approval_without_format_adoption(
     prepared = preparation(facts)
     plan = prepared.review
     change = next(c for c in plan.proposal.changes if c.item_id == item)
+    if case in ("new", "configuration"):
+        assert facts.format_operation.recorded_generation == "supported"
+        assert facts.inventory == "complete"
+        assert all(
+            (row.item_id, row.facet) != (subject.item_id, subject.facet)
+            for row in facts.format_operation.established_baseline.outputs
+        )
+        assert subject.current.existence == "absent" and subject.current.content is None
+        assert plan.ready and plan.requirements == ()
+        assert all(row.provenance == "automatic_merge" for row in plan.approvals)
+        assert plan.facts.format_operation.kind == "source_update"
+        assert plan.facts.baseline_identity == facts.baseline_identity
+        assert plan.facts.incoming_identity == facts.incoming_identity
+        assert change.format_review is None
+        if case == "configuration":
+            assert subject.output_role == "configuration"
+        else:
+            approval = next(
+                a for a in plan.approvals if a.change_id == change.change_id
+            )
+            assert approval.choice == "incoming"
+            assert approval.attachment_candidate.outputs[0].content.data == raw
+        selected = select_review_effects(plan)
+        assert selected.status == "selected" and selected.remove_paths == ()
+        assert (
+            next(row.content.data for row in selected.files if row.path == path) == raw
+        )
+        return
     requirement = next(r for r in plan.requirements if r.change_id == change.change_id)
     assert not plan.ready and not any(
         a.change_id == change.change_id for a in plan.approvals
     )
-    if case == "configuration":
-        assert (
-            requirement.domain == "configuration" and change.format_review is not None
-        )
-        return
     selection, candidate = incoming_attachment(plan, change)
     result = Operations().resolve_update(
         prepared,
@@ -97,34 +120,16 @@ def test_new_source_attachment_requires_binary_approval_without_format_adoption(
             attachment_candidate=candidate,
         ),
     )
-    if case != "new":
-        assert change.format_review is not None
-        assert (
-            result.status == "refused"
-            and result.code
-            == {
-                "existing_current": "choice_not_admitted",
-                "unsupported": "unsafe_producer_choice",
-            }[case]
-        )
-        assert result.preparation.review.approvals == plan.approvals
-        return
-    assert result.code == "accepted", (
-        result.code,
-        requirement.domain,
-        requirement.choices,
-        change.identity_review.status,
-        change.disposition,
-        change.format_review is not None,
-        tuple((a.choice, a.eligible) for a in change.attachment_review.alternatives),
+    assert change.format_review is not None
+    assert (
+        result.status == "refused"
+        and result.code
+        == {
+            "existing_current": "choice_not_admitted",
+            "unsupported": "unsafe_producer_choice",
+        }[case]
     )
-    assert change.format_review is None and requirement.domain == "restoration"
-    approval = next(
-        a
-        for a in result.preparation.review.approvals
-        if a.change_id == change.change_id
-    )
-    assert approval.attachment_candidate.outputs[0].content.data == raw
+    assert result.preparation.review.approvals == plan.approvals
 
 
 @pytest.mark.parametrize("condition", ("recovery", "incomplete_references"))
@@ -173,7 +178,9 @@ def test_cleanup_preparation_keeps_recovery_and_uncertain_references_out_of_read
     assert result.recovery_gaps == history.admission.recovery_gaps
 
 
-def literal_cleanup_case(tmp_path, *, unchanged_note=False, independent_keep=False):
+def literal_cleanup_case(
+    tmp_path, *, unchanged_note=False, independent_keep=False, output_format=8
+):
     vault = tmp_path / "vault"
     vault.mkdir()
     retained = payload(
@@ -181,6 +188,7 @@ def literal_cleanup_case(tmp_path, *, unchanged_note=False, independent_keep=Fal
         "Generated ![[Assets/remove.bin]]."
         if independent_keep
         else "Generated ![[Assets/remove.bin]] and [[Assets/keep.bin]].",
+        output_format=output_format,
     )
     asset_bytes = {
         "Assets/remove.bin": b"\x00remove-original",
@@ -353,7 +361,7 @@ def literal_cleanup_case(tmp_path, *, unchanged_note=False, independent_keep=Fal
 def test_cleanup_keeps_historical_original_distinct_from_current_retained_source(
     tmp_path, ownership
 ):
-    case = literal_cleanup_case(tmp_path)
+    case = literal_cleanup_case(tmp_path, output_format=8)
     case.retained.pop("Assets/remove.bin")
     record = json.loads(case.retained["migration-record.json"])
     record["asset_targets"] = [
@@ -410,7 +418,7 @@ def test_saved_unready_cleanup_resumes_from_current_source_and_fresh_ownership(
     from brz2obsidian.application.checkpoint_contracts import CheckpointResult
     from brz2obsidian.core import load_review, save_review
 
-    case = literal_cleanup_case(tmp_path)
+    case = literal_cleanup_case(tmp_path, output_format=8)
     case.retained.pop("Assets/remove.bin")
     record = json.loads(case.retained["migration-record.json"])
     record["asset_targets"] = [

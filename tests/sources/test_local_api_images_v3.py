@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from brz2obsidian.application.wiring import local_api_workflow
 from brz2obsidian.contracts import MigrationRefused
 from brz2obsidian.sources.thebrain.local_api import (
     LocalApiConfig,
@@ -16,6 +15,7 @@ from brz2obsidian.sources.thebrain.local_api import (
 from tests.support.local_api import ALONE, BRAIN, HOME, KEY, api_server
 from tests.support.local_api_graph import GraphApi
 from tests.support.local_api_payloads import IMAGE, JPEG, NOTE, PayloadApi, attachment
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 JPEG_SHA256 = "88d4b59a63385475e658d1992901eea75c2bf887ebc7c3a7398965dd332850e8"
 JPEG_NOTE = (
@@ -38,14 +38,17 @@ def test_jpeg_note_image_preserves_bytes_role_reference_and_output(tmp_path):
     assert len(JPEG) == 634 and hashlib.sha256(JPEG).hexdigest() == JPEG_SHA256
     api = JpegImageApi()
     with api_server(api) as (_, address):
-        workflow = local_api_workflow(
-            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        workflow = reviewed_api_workflow(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="3",
         )
         inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
         assert inspected.outcome == "clean", inspected.issues
         result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
         assert result.outcome == "clean", result.issues
     record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert record["profile_version"] == "3"
     asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
     assert (asset["owner"], asset["role"], asset["original_name"]) == (
         HOME,
@@ -122,14 +125,17 @@ def test_exact_finite_ico_preserves_whole_container_icon_name_and_owner(
     assert len(raw) == fact["length"]
     assert hashlib.sha256(raw).hexdigest() == fact["sha256"]
     with api_server(IcoIconApi(raw)) as (_, address):
-        workflow = local_api_workflow(
-            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        workflow = reviewed_api_workflow(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="3",
         )
         inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
         assert inspected.outcome == "clean", inspected.issues
         result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
         assert result.outcome == "clean", result.issues
     record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert record["profile_version"] == "3"
     asset = next(row for row in record["asset_targets"] if row["asset_id"] == ICON)
     assert (asset["owner"], asset["role"], asset["original_name"]) == (
         HOME,
@@ -269,10 +275,18 @@ def test_ico_each_directory_dib_and_extent_near_miss_refuses_without_publication
     else:
         raw[body : body + 8] = b"\x89PNG\r\n\x1a\n"
     with api_server(IcoIconApi(bytes(raw))) as (_, address):
-        result = local_api_workflow(
-            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        result = reviewed_api_workflow(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="3",
         ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
     assert result.outcome == "refused"
+    assert any(
+        issue.code == "invalid_source"
+        and issue.phase == "source"
+        and issue.rule_id == "diagnostic.attachment_content"
+        for issue in result.issues
+    )
     assert result.receipt is None
     assert not (tmp_path / "vault").exists()
 
@@ -399,7 +413,9 @@ def assert_independent_image_source_converts_and_audits(baseline, destination):
                 if payload["status"] == 200:
                     with session.open_payload(key) as stream:
                         assert stream.read() == baseline.bytes(payload["path"])
-        workflow = local_api_workflow(config, credentials=lambda: KEY)
+        workflow = reviewed_api_workflow(
+            config, credentials=lambda: KEY, profile_version="3"
+        )
         inspected = workflow.inspect(source_ref)
         assert not api.unexpected_requests
         assert inspected.outcome in {"clean", "warnings"}, inspected.issues
@@ -409,6 +425,7 @@ def assert_independent_image_source_converts_and_audits(baseline, destination):
     assert converted.receipt.verified and converted.receipt.published
     baseline.verify()
     record = json.loads((destination / "migration-record.json").read_bytes())
+    assert record["profile_version"] == "3"
     assert "documents" not in record
     assert any(row["documents"] for row in record["item_targets"])
     check_api_vault(baseline, destination, profile_version="3")

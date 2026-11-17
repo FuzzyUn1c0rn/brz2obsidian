@@ -73,7 +73,7 @@ def assign_tags(snapshot, item_targets):
     assigned = {m.tag_key for m in memberships}
     listing_path = (
         "Tag memberships.md"
-        if any(not m.native for m in memberships)
+        if any(not m.native or m.item_key in tokens for m in memberships)
         or any(t.key not in assigned for t in tags)
         else None
     )

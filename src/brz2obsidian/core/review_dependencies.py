@@ -10,7 +10,7 @@ from .link_meanings import _semantic, resolve_occurrence
 from .reversals import reversal_subject, selected_reversal_outputs
 from .review_attachments import applicable_approvals
 from .review_effects import current_note_coverage
-from .review_links import consumed_context
+from .review_links import consumed_context, provider_documents
 from .review_preflight import consent_requirements
 
 
@@ -187,7 +187,13 @@ def review_dependencies(plan):
                     if d.source_path in (change.path, change.target_path)
                 )
             portions = tuple(
-                consumed_context(documents, targets, states, context.inventory)
+                consumed_context(
+                    documents,
+                    targets,
+                    states,
+                    context.inventory,
+                    appearance_documents=provider_documents(plan.producer_facts),
+                )
                 for targets, states in (
                     (context.current_targets, context.current_target_facts),
                     (context.incoming_targets, context.incoming_target_facts),

@@ -29,10 +29,10 @@ def attachment_references(preparation, requirement_id):
     return review_plan_attachment_references(plan, requirement_id)
 
 
-def review_plan_attachment_references(plan, requirement_id):
+def review_plan_attachment_references(plan, requirement_id, *, _choices=None):
     requirement = next(
         row
-        for row in inspect_review_choices(plan)
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
         if row.requirement_id == requirement_id
     )
     change = next(
@@ -70,12 +70,14 @@ def attachment_reference_destinations(preparation, requirement_id):
     return review_plan_attachment_reference_destinations(plan, requirement_id)
 
 
-def review_plan_attachment_reference_destinations(plan, requirement_id):
+def review_plan_attachment_reference_destinations(
+    plan, requirement_id, *, _choices=None
+):
     from .update_context_contracts import UpdateReferenceDestination
 
     requirement = next(
         row
-        for row in inspect_review_choices(plan)
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
         if row.requirement_id == requirement_id
     )
     change = next(
@@ -98,7 +100,7 @@ def review_plan_attachment_reference_destinations(plan, requirement_id):
             if choice in link.choices and meaning is not None
         )
         for token, document, occurrence in review_plan_attachment_references(
-            plan, requirement_id
+            plan, requirement_id, _choices=_choices
         )
         for link in (links[(document.document_id, occurrence.occurrence_id)],)
     }
@@ -117,7 +119,7 @@ def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=10
 
 
 def review_plan_attachment_reference_page(
-    plan, requirement_id, *, offset=0, limit=100, drop_only=False
+    plan, requirement_id, *, offset=0, limit=100, drop_only=False, _choices=None
 ):
     from .update_context_contracts import UpdateReferenceOffer
 
@@ -128,8 +130,10 @@ def review_plan_attachment_reference_page(
         or not 1 <= limit <= 100
     ):
         raise ValueError("Invalid reference page")
-    refs = review_plan_attachment_references(plan, requirement_id)
-    destinations = review_plan_attachment_reference_destinations(plan, requirement_id)
+    refs = review_plan_attachment_references(plan, requirement_id, _choices=_choices)
+    destinations = review_plan_attachment_reference_destinations(
+        plan, requirement_id, _choices=_choices
+    )
     end = min(len(refs), offset + limit)
     return (
         tuple(
@@ -188,11 +192,19 @@ def review_plan_choice_action(
     references=(),
     selected_entry_id=None,
     disassociate_entry_ids=(),
+    _choices=None,
+    _owner=None,
+    _group=False,
 ):
+    def construct(model, **fields):
+        if _group and _owner is not None:
+            return _owner._session._ledger.construct(model, fields)
+        return model(**fields)
+
     requirement = next(
         (
             row
-            for row in inspect_review_choices(plan)
+            for row in (inspect_review_choices(plan) if _choices is None else _choices)
             if row.requirement_id == requirement_id
         ),
         None,
@@ -235,6 +247,11 @@ def review_plan_choice_action(
         and requirement.domain != "rename"
         and not (requirement.domain == "reversal" and choice == "current")
         and not (
+            requirement.domain in ("configuration", "format")
+            and choice == "current"
+            and change.current is None
+        )
+        and not (
             requirement.domain == "restoration" and choice == "decline_restoration"
         )
     ):
@@ -256,19 +273,11 @@ def review_plan_choice_action(
             (),
         )
         if choice == "remove":
-            from .update_context_contracts import UpdateReferenceChoice
+            from .attachment_choices import validated_reference_choices
 
-            supplied = tuple(
-                UpdateReferenceChoice.model_validate(row) for row in references
+            offered_refs = review_plan_attachment_references(
+                plan, requirement_id, _choices=_choices
             )
-            offered_refs = review_plan_attachment_references(plan, requirement_id)
-            if (
-                any(row.choice != "drop" for row in supplied)
-                or len({row.reference_id for row in supplied}) != len(supplied)
-                or {row.reference_id for row in supplied}
-                != {row[0] for row in offered_refs}
-            ):
-                raise ValueError("Reference offer changed")
             subject = next(
                 row
                 for row in plan.facts.subjects
@@ -280,9 +289,21 @@ def review_plan_choice_action(
                 for _, _, occurrence in offered_refs
             ):
                 raise ValueError("Reference choice is unavailable")
+            validated_reference_choices(
+                references, {token: ("drop",) for token, _, _ in offered_refs}
+            )
             states = tuple(
                 interpret_link_target(
-                    None, target_id=row.target_id, existence="missing", memberships=()
+                    None,
+                    target_id=row.target_id,
+                    existence="missing",
+                    memberships=(),
+                    source_path=next(
+                        target.canonical_path
+                        for target in context.current_targets
+                        if target.target_id == row.target_id
+                    ),
+                    output_format=plan.facts.incoming_identity.output_format,
                 )
                 if row.target_id == target_id
                 else row
@@ -320,6 +341,8 @@ def review_plan_choice_action(
                         targets=context.current_targets,
                         target_facts=states,
                         inventory=document.inventory,
+                        output_format=plan.facts.incoming_identity.output_format,
+                        record_format=plan.facts.baseline_identity.output_format,
                     )
                 )
             documents = tuple(rewritten)
@@ -331,6 +354,7 @@ def review_plan_choice_action(
                     memberships=row.memberships,
                     membership_targets=context.current_targets,
                     source_path=document.source_path,
+                    output_format=plan.facts.incoming_identity.output_format,
                 )
                 if (
                     document := next(
@@ -350,11 +374,15 @@ def review_plan_choice_action(
                 change,
                 alternative,
                 references,
-                review_plan_attachment_references(plan, requirement_id),
+                review_plan_attachment_references(
+                    plan, requirement_id, _choices=_choices
+                ),
+                _owner=_owner,
             )
         elif references:
             raise ValueError("Reference choice is unavailable")
-        selection = AttachmentSelection(
+        selection = construct(
+            AttachmentSelection,
             schema_id="brz2obsidian.attachment-selection",
             schema_version=1,
             proposal_id=plan.proposal.proposal_id,
@@ -367,7 +395,8 @@ def review_plan_choice_action(
             link_choices=links,
             provenance="explicit_user",
         )
-        candidate = candidate or AttachmentCandidate(
+        candidate = candidate or construct(
+            AttachmentCandidate,
             schema_id="brz2obsidian.attachment-candidate",
             schema_version=1,
             outputs=alternative.outputs,
@@ -375,7 +404,8 @@ def review_plan_choice_action(
             targets=context.current_targets,
             target_facts=states,
         )
-    action = ReviewAction(
+    action = construct(
+        ReviewAction,
         schema_id="brz2obsidian.review-action",
         schema_version=1,
         decision_id=str(uuid4()),
@@ -419,3 +449,34 @@ def resolve_update_choice(
     if preparation.kind == "format_transition" and action.domain == "configuration":
         return operations.resolve_configuration(preparation, ())
     return operations.resolve_update(preparation, action, edited=edited)
+
+
+def keep_current_group_action(plan, group_id, *, _choices=None, _owner=None):
+    from brz2obsidian.contracts import ReviewKeepCurrentGroup
+    from brz2obsidian.core.resolution import unresolved_current_scope
+
+    digest, members = unresolved_current_scope(plan)
+    if digest is None or digest != group_id:
+        raise ValueError("Conflict group changed")
+    choices = inspect_review_choices(plan) if _choices is None else _choices
+    actions = tuple(
+        review_plan_choice_action(
+            plan,
+            requirement_id=row.requirement_id,
+            choice="current",
+            assumptions_digest=requirement_digest(row),
+            _choices=choices,
+            _owner=_owner,
+            _group=True,
+        )
+        for row in members
+    )
+    fields = {
+        "schema_id": "brz2obsidian.review-keep-current-group",
+        "schema_version": 1,
+        "group_id": group_id,
+        "actions": actions,
+    }
+    if _owner is not None:
+        return _owner._session._ledger.construct(ReviewKeepCurrentGroup, fields)
+    return ReviewKeepCurrentGroup(**fields)

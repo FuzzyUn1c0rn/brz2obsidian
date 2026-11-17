@@ -18,6 +18,52 @@ def operation(kind="source_update", **changes):
     return FormatOperation(**(fields | changes))
 
 
+def test_format_declarations_retain_opaque_generated_versions():
+    from brz2obsidian.contracts import (
+        ContentIdentity,
+        FormatBaselineOutput,
+        FormatReview,
+        OpaqueContent,
+        SupportedFormatBaseline,
+    )
+
+    facts = request(original=b"abc", incoming=b"abc")
+    opaque = OpaqueContent(
+        identity=ContentIdentity(
+            content_id="sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:3",
+            sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            size=3,
+        )
+    )
+    output = FormatBaselineOutput(
+        item_id="entry:opening", facet="content", content=opaque
+    )
+    original_baseline = facts.format_operation.established_baseline
+    baseline = SupportedFormatBaseline.model_validate(
+        original_baseline.model_dump() | {"outputs": (output,)}
+    )
+    assert baseline.identity == facts.baseline_identity
+    assert baseline.source_version == "source:a"
+    assert baseline.outputs[0].content == opaque
+
+    transition = reconcile(
+        facts.model_copy(
+            update={
+                "format_operation": operation("onboarding", established_baseline=None)
+            }
+        )
+    )
+    inline_review = transition.changes[0].format_review
+    assert inline_review.target_generated.data == b"abc"
+    declared = FormatReview.model_validate(
+        inline_review.model_dump() | {"target_generated": opaque}
+    )
+    assert declared.target_generated == opaque
+    assert declared.old_identity == facts.baseline_identity
+    assert declared.target_identity == facts.incoming_identity
+    assert declared.choices == ("keep_current", "use_target", "edit_result")
+
+
 def test_new_converter_retains_recorded_supported_format_and_profile():
     facts = request()
     facts = facts.model_copy(update={"format_operation": operation()})
@@ -311,7 +357,7 @@ def test_unsupported_target_and_duplicate_establishment_records_are_rejected():
     from pydantic import ValidationError
 
     facts = request()
-    unsupported = facts.incoming_identity.model_copy(update={"output_format": 8})
+    unsupported = facts.incoming_identity.model_copy(update={"output_format": 9})
     result = reconcile(
         facts.model_copy(
             update={

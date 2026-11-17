@@ -465,6 +465,46 @@ def test_stale_generation_and_assumptions_never_record_compatible_approval():
     assert accepted.plan.proposal.model_dump_json() == before
 
 
+def test_approval_and_selected_file_declare_opaque_reviewed_content():
+    from brz2obsidian.contracts import (
+        ContentIdentity,
+        OpaqueContent,
+        ReviewApproval,
+        SelectedReviewFile,
+    )
+    from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+
+    facts = with_review_links(request(incoming=b"abc"))
+    pending = prepare_review(facts, preflight=preflight())
+    accepted = resolve_review(pending, action(pending))
+    assert accepted.status == "accepted" and accepted.plan.ready
+    (approval,) = accepted.plan.approvals
+    effects = select_review_effects(accepted.plan)
+    assert effects.status == "selected"
+    (selected,) = effects.files
+    assert approval.result.data == selected.content.data == b"abc"
+    assert selected.path == approval.target_path == "Notes/Opening.md"
+
+    opaque = OpaqueContent(
+        identity=ContentIdentity(
+            content_id="sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:3",
+            sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            size=3,
+        )
+    )
+    declared_approval = ReviewApproval.model_validate(
+        approval.model_dump() | {"result": opaque}
+    )
+    declared_file = SelectedReviewFile.model_validate(
+        selected.model_dump() | {"content": opaque}
+    )
+    assert declared_approval.result == declared_file.content == opaque
+    assert declared_approval.decision_id == "review:decision:1"
+    assert declared_approval.assumptions == approval.assumptions
+    assert declared_approval.target_path == declared_file.path == "Notes/Opening.md"
+    assert declared_file.subject_id == pending.proposal.changes[0].subject_id
+
+
 def test_review_rebuild_refuses_forged_results_and_repeated_decision_identity():
     from brz2obsidian.contracts import ExactContent
     from brz2obsidian.core import prepare_review, resolve_review

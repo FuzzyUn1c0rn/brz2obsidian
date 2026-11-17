@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
 
-from ._references import IMAGE_EXTENSIONS
+from brz2obsidian.obsidian_dialect import IMAGE_EXTENSIONS
 
 _NATIVE_EMBED = re.compile(r"!\[\[([^\[\]\r\n]+)\]\]")
 

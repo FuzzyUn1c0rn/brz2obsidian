@@ -35,12 +35,12 @@ def example(*, structured=True):
     return facts, plan, current, incoming
 
 
-def candidate(facts, data):
+def candidate(facts, data, *, output_format=7):
     return inspect_text_candidate(
         ExactContent(data=data),
         identity=IDENTITY,
         target=facts.subjects[0].source_target,
-        output_format=7,
+        output_format=output_format,
         source_path="Notes/Opening.md",
         document_id="review:owner",
         path_mode="vault",
@@ -48,6 +48,29 @@ def candidate(facts, data):
         link_target_facts=(),
         link_inventory="complete",
     )
+
+
+@pytest.mark.parametrize("version,status", [(7, "safe"), (8, "safe"), (9, "unsafe")])
+def test_current_and_historical_explicit_candidates_keep_their_recorded_format(
+    version, status
+):
+    facts = request()
+    raw = (
+        b'---\nsource_collection_id: "folio:collection"\n'
+        b'source_item_id: "entry:opening"\n---\nReviewed prose.\n'
+    )
+    offered = candidate(facts, raw, output_format=version)
+    assert offered.status == status
+    assert offered.document.output_format == version
+    assert offered.document.content.data == raw
+    if status == "safe":
+        assert offered.document.issues == ()
+        assert [
+            (p.identity_component, p.identity_value)
+            for p in offered.document.properties
+        ] == [("collection", "folio:collection"), ("item", "entry:opening")]
+    else:
+        assert offered.document.issues == ("candidate_format_unsupported",)
 
 
 def assert_refused_without_grant(plan, offered, *, choice="edited"):

@@ -50,6 +50,8 @@ from brz2obsidian.application.contracts import (
 from brz2obsidian.application.operations import validate_vault_name
 from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
+from brz2obsidian.application.update_context_contracts import UpdateContextBinding
+from brz2obsidian.application.update_history_contracts import HistoryContextBinding
 from brz2obsidian_ui.platform_actions import CompletionActions, DiagnosticActions
 from brz2obsidian_ui.validation import api_configuration
 from brz2obsidian_ui.workbench import UpdateWorkbench
@@ -409,9 +411,9 @@ class MainWindow(QMainWindow):
         self.api_status.setAccessibleName("API connection status")
         api_layout.addWidget(self.api_status)
         self.api_advanced_toggle = QPushButton(
-            "▸ Advanced search limits", objectName="diagnosticDisclosure"
+            "▸ Advanced API limits", objectName="diagnosticDisclosure"
         )
-        self.api_advanced_toggle.setAccessibleName("Advanced API search limits")
+        self.api_advanced_toggle.setAccessibleName("Advanced API limits")
         self.api_advanced_toggle.setCheckable(True)
         self.api_advanced = QWidget()
         advanced_layout = QVBoxLayout(self.api_advanced)
@@ -422,6 +424,7 @@ class MainWindow(QMainWindow):
             ("search_timeout", "Total search seconds", "300"),
             ("search_max_response_bytes", "Maximum search response bytes", "128000000"),
             ("search_max_results", "Maximum results (blank disables ceiling)", ""),
+            ("max_total_capture_bytes", "Maximum total capture bytes", "1000000000"),
         ):
             advanced_layout.addWidget(label(title))
             field = QLineEdit(default)
@@ -438,11 +441,21 @@ class MainWindow(QMainWindow):
                 "Enter 0.001–86,400 seconds, with up to three decimal places."
                 if key == "search_timeout"
                 else "Enter 1–9,223,372,036,854,775,807 bytes."
-                if key == "search_max_response_bytes"
+                if key in ("search_max_response_bytes", "max_total_capture_bytes")
                 else "Enter 1–2,147,483,647, or leave blank to disable the ceiling."
                 if key == "search_max_results"
                 else "Enter 1–2,147,483,647."
             )
+            if key == "max_total_capture_bytes":
+                advanced_layout.addWidget(
+                    label(
+                        "Default: 1,000,000,000 bytes (1 GB decimal). Choose a finite "
+                        "larger limit with headroom for API responses and stored payloads. "
+                        "Other read limits still apply. Later vault review also needs "
+                        "memory and disk space.",
+                        "muted",
+                    )
+                )
         self.api_advanced_toggle.toggled.connect(self._api_advanced_changed)
         self.api_advanced.hide()
         api_layout.addWidget(self.api_advanced_toggle)
@@ -739,7 +752,7 @@ class MainWindow(QMainWindow):
             return
         self.api_advanced.setVisible(expanded)
         self.api_advanced_toggle.setText(
-            ("▾" if expanded else "▸") + " Advanced search limits"
+            ("▾" if expanded else "▸") + " Advanced API limits"
         )
 
     def _destination_details_changed(self, expanded):
@@ -923,11 +936,36 @@ class MainWindow(QMainWindow):
             if command is not None:
                 self.submit(command)
 
+    def _undo_footer(self, state):
+        if (
+            state is None
+            or not isinstance(state.binding, HistoryContextBinding)
+            or state.binding.proposal_id is None
+            or state.reply is None
+            or state.reply.binding != state.binding
+            or state.reply.history_action is None
+            or state.reply.history_action.kind != "undo"
+        ):
+            return False, False
+        return True, bool(
+            state.ready
+            and not self.workbench.busy
+            and state.reply.history_action.ready
+            and "execute_history" in state.next_actions
+        )
+
     def _primary_action(self):
         if self.tabs.currentIndex() == 3:
             state = self.workbench.snapshot
-            if (
+            _, undo_ready = self._undo_footer(state)
+            if undo_ready:
+                self.primary.setEnabled(False)
+                self.runner.submit_update(
+                    {"command": "execute_history", "binding": state.binding}
+                )
+            elif (
                 state is not None
+                and isinstance(state.binding, UpdateContextBinding)
                 and state.ready
                 and not self.workbench.busy
                 and "apply_update" in state.next_actions
@@ -1280,11 +1318,18 @@ class MainWindow(QMainWindow):
             button.setVisible(not reviewing)
         if reviewing:
             state = self.workbench.snapshot
-            self.primary.setVisible(state is not None and state.binding is not None)
-            self.primary.setText("Apply update")
-            self.primary.setAccessibleName("Apply update")
+            undo_visible, undo_ready = self._undo_footer(state)
+            source_review = state is not None and isinstance(
+                state.binding, UpdateContextBinding
+            )
+            self.primary.setVisible(source_review or undo_visible)
+            self.primary.setText(
+                "Execute reviewed undo" if undo_visible else "Apply update"
+            )
+            self.primary.setAccessibleName(self.primary.text())
             self.primary.setEnabled(
-                state is not None
+                undo_ready
+                or source_review
                 and state.ready
                 and not self.workbench.busy
                 and "apply_update" in state.next_actions

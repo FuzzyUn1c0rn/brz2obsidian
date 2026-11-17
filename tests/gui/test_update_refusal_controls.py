@@ -82,7 +82,7 @@ def test_bound_refusal_keeps_known_overview_and_reachable_refresh_without_apply(
         captions = [
             row.text() for row in window.findChildren(QLabel) if row.isVisible()
         ]
-        assert "Changes: 3    Unresolved choices: 1" in captions
+        assert "Prepared changes: 3    Unresolved choices: 1" in captions
         assert (
             button("Apply update") is not None
             and not button("Apply update").isEnabled()

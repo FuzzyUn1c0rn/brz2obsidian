@@ -11,8 +11,9 @@ from markdown_it.rules_inline.backticks import backtick
 
 from brz2obsidian.contracts import TextAdaptation
 
+from ._origins import CopiedText, copied_join
 from .literals import adapt_literals, source_position
-from .notes import trace_inline_literal_ranges, trace_note_references
+from .notes import _mapped_blocks, trace_inline_literal_ranges, trace_note_references
 
 INSERT_RULE = "thebrain.markdown-inserts.v1"
 CALLOUTS = frozenset(
@@ -246,12 +247,14 @@ def _native_table_row(
 def adapt_note(
     text,
     *,
+    allow_literal_tokens=False,
     preserve_table_colors=False,
     legacy_tables=False,
     previous_tables=False,
     compact_tables=False,
     legacy_table_boundaries=False,
     preserve_table_warnings=False,
+    _provenance=None,
 ):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
@@ -264,7 +267,10 @@ def adapt_note(
     )
     warn_tables = preserve_table_warnings or not separate_tables
     original = text
-    text, literal_edits = adapt_literals(text)
+    text, literal_edits = adapt_literals(
+        text, allow_literal_tokens=allow_literal_tokens
+    )
+    literal_text = text
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
     if lines and not lines[-1]:
         lines.pop()
@@ -272,7 +278,20 @@ def adapt_note(
     for line in lines:
         offsets.append(position)
         position += len(line)
-    tokens = MarkdownIt("commonmark").parse(text)
+    if _provenance is not None:
+        lines = [
+            CopiedText(line, range(offset, offset + len(line)))
+            for line, offset in zip(lines, offsets, strict=True)
+        ]
+    if _provenance is None:
+        tokens = MarkdownIt("commonmark").parse(text)
+    else:
+        parser, env = MarkdownIt("commonmark"), {}
+        tokens = _mapped_blocks(text, parser, env)
+        for token in tokens:
+            if token.type == "inline":
+                token.children = []
+                parser.inline.parse(token.content, parser, env, token.children)
     active, protected, quoted, headings = set(), set(), set(), []
     paragraph_lines = set()
     for index, token in enumerate(tokens):
@@ -364,6 +383,9 @@ def adapt_note(
                 seen.clear()
             continue
         prefix, kind, metadata, fold, title = match.groups()
+        if _provenance is not None:
+            prefix = raw[slice(*match.span(1))]
+            title = raw[slice(*match.span(5))]
         kind = kind.lower()
         if kind not in CALLOUTS:
             loss(
@@ -394,13 +416,16 @@ def adapt_note(
             )
             if supported:
                 label = title.strip() or kind.title()
-                after = f"{prefix}[!{kind}]{fold} {emoji} {label}"
+                after = prefix + f"[!{kind}]{fold} {emoji} " + label
                 change = "Emoji is visible in the title; Obsidian's native icon remains. Edit the title to adjust this fallback."
             else:
                 # Preserve ambiguous metadata visibly without activating it.
                 safe = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", metadata)
                 after = (
-                    f"{prefix}[!{kind}]{fold} {title.strip() or kind.title()} — {safe}"
+                    prefix
+                    + f"[!{kind}]{fold} "
+                    + (title.strip() or kind.title())
+                    + f" — {safe}"
                 )
                 change = "Unsupported or ambiguous icon metadata is retained visibly in the title; replace it with a title emoji or remove it manually."
             loss("callout_icon", metadata, change)
@@ -728,22 +753,30 @@ def adapt_note(
                 before = "".join(lines[line:end]).rstrip("\r\n")
                 prefix = re.match(r" {0,3}(?:> ?)*", lines[line])[0]
                 content = authored
+                if _provenance is not None:
+                    content = CopiedText(authored, authored.offsets)
                 if existing:
-                    content = re.sub(
-                        rf"(?:^| )\^{re.escape(existing[1])}\s*$", "", content
+                    suffix = re.search(
+                        rf"(?:^| )\^{re.escape(existing[1])}\s*$", content
                     )
+                    content = content[: suffix.start()] if suffix else content
                 replace(
                     line,
                     before,
                     prefix
                     + "#" * level
                     + " "
-                    + " ".join(content.splitlines())
+                    + (
+                        copied_join(" ", content.splitlines())
+                        if _provenance is not None
+                        else " ".join(content.splitlines())
+                    )
                     + " ^"
                     + identifiers[line],
                 )
             elif not keep_existing:
-                base = re.sub(r"[ \t]+#+[ \t]*$", "", raw) if atx else raw
+                closing = re.search(r"[ \t]+#+[ \t]*$", raw) if atx else None
+                base = raw[: closing.start()] if closing else raw
                 if existing:
                     base = base[: existing.start()]
                 replace(anchor_line, raw, base + " ^" + identifiers[line])
@@ -821,6 +854,18 @@ def adapt_note(
     text = original
     for edit in reversed(result):
         text = text[: edit.start] + edit.after + text[edit.end :]
+    if _provenance is not None:
+        mapped = CopiedText(literal_text, range(len(literal_text)))
+        for begin, end, after in sorted(edits, key=lambda e: e[0], reverse=True):
+            mapped = mapped[:begin] + after + mapped[end:]
+        if str(mapped) != text:
+            from .notes import _refuse
+
+            _refuse(
+                "invalid_reference",
+                "Insert origin mapping differs from exact adaptation",
+            )
+        _provenance.update(origins=mapped.origins, literal_text=literal_text)
     return text, tuple(result), tuple(losses)
 
 
@@ -849,7 +894,9 @@ def bind_table_context(text, references):
     )
 
 
-def trace_adapted_references(text, edits):
+def trace_adapted_references(
+    text, edits, *, allow_qualified=False, generated_code_ranges=()
+):
     """Mask only adapter-generated code elements during source reference tracing.
 
     Their escaped literal payload cannot contain active references. Coordinate
@@ -857,6 +904,8 @@ def trace_adapted_references(text, edits):
     digest. Imported HTML has already passed the unchanged refusal boundary.
     """
     masked = text
+    for start, end in sorted(generated_code_ranges, reverse=True):
+        masked = masked[:start] + " " * (end - start) + masked[end:]
     for edit in reversed(edits):
         if edit.kind != "markdown_insert":
             continue
@@ -869,6 +918,6 @@ def trace_adapted_references(text, edits):
     digest = sha256(text.encode()).hexdigest()
     references = tuple(
         reference.model_copy(update={"document_digest": digest})
-        for reference in trace_note_references(masked)
+        for reference in trace_note_references(masked, allow_qualified=allow_qualified)
     )
     return bind_table_context(text, references)

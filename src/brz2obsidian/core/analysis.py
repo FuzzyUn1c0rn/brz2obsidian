@@ -12,18 +12,20 @@ from brz2obsidian.contracts import (
 from .appearance import validate_appearance
 from .classifications import validate_classifications
 from .references import image_presentation_issues, validate_references
-from .source_gaps import validate_source_gaps
-from .text import validate_text_adaptations
+from .source_gaps import source_gap_issues, validate_source_gaps
+from .text import validate_image_notice_evidence, validate_text_adaptations
 
 
 def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
-    def refuse(code, message):
+    def refuse(code, message, *, affected=(), evidence=()):
         raise MigrationRefused(
             (
                 Issue(
                     code=code,
                     phase="analysis",
                     message=message,
+                    affected=affected,
+                    evidence=evidence,
                     guidance="Correct the source or select a compatible reviewed source profile.",
                 ),
             )
@@ -111,6 +113,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
                 "External resource lacks its destination URI or supported role",
             )
     validate_text_adaptations(snapshot)
+    validate_image_notice_evidence(snapshot)
     validate_references(snapshot)
     validate_appearance(snapshot, refuse)
     if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
@@ -236,5 +239,5 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         policy=policy,
         entry_key=snapshot.entry_key,
         counts=counts,
-        issues=tuple(issues),
+        issues=source_gap_issues(snapshot, issues),
     )

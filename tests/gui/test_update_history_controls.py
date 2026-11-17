@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPlainTextEdit, QProgressBar
+from PySide6.QtWidgets import QApplication, QPlainTextEdit, QProgressBar, QWidget
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointRead
 from brz2obsidian.application.contracts import WorkerResponse
@@ -372,13 +372,26 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 controls.select("Overview")
                 until(app, lambda: "Changes: 1" in window_text(window))
                 assert "Unresolved choices: 1" in window_text(window)
+                footer = controls.button("Execute reviewed undo")
+                if role == "undo":
+                    assert footer is not None and not footer.isEnabled()
+                else:
+                    assert footer is None or not footer.isEnabled()
                 controls.select("Other choices")
                 controls.click("Keep vault version for reversal choice 1")
                 controls.select("Overview")
                 until(app, lambda: "Unresolved choices: 0" in window_text(window))
                 assert "Changes: 1" in window_text(window)
-                controls.select("History & recovery")
-            controls.click("Execute reviewed " + role)
+                if role == "undo":
+                    controls.click("Execute reviewed undo")
+                else:
+                    assert (
+                        controls.button("Execute reviewed undo") is None
+                        or not controls.button("Execute reviewed undo").isEnabled()
+                    )
+                    controls.select("History & recovery")
+            if role != "undo":
+                controls.click("Execute reviewed " + role)
             until(
                 app,
                 lambda: (
@@ -390,6 +403,12 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 role
             ]
             assert window.runner.session.update_snapshot.reply.status == expected
+            if role == "undo":
+                assert (
+                    sum(c.command == "execute_history" for c in transport.commands) == 1
+                )
+                assert not any(c.command == "apply" for c in transport.commands)
+                controls.select("History & recovery")
             terminal_text = {
                 "recovery": "Controlled exact native restored",
                 "undo": "Controlled exact native undone",
@@ -403,6 +422,7 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 ),
             )
             assert terminal_text in window_text(window)
+            assert window.workbench.queue.currentIndex().data() == "History & recovery"
             assert not window.runner.session.update_snapshot.ready
         assert list(vault.iterdir()) == [] and list(copy.iterdir()) == []
     finally:
@@ -623,7 +643,7 @@ def test_window_close_preserves_local_and_worker_drafts_until_explicit_discard(
                 "selection_id": selection,
             }
         )
-        controls.select("Conflicts")
+        controls.select("All changes")
         controls.click("Edit result for Notes/Opening.md")
         editor = next(
             w
@@ -665,6 +685,102 @@ def test_window_close_preserves_local_and_worker_drafts_until_explicit_discard(
             c.command == "close" and c.choice == "discard" for c in transport.commands
         )
         assert not any(c.command == "save" for c in transport.commands)
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+@pytest.mark.parametrize("kind", ("undo", "recovery"))
+def test_zero_choice_unready_history_never_enables_undo_footer(tmp_path, kind):
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "Vault"
+    vault.mkdir()
+    explanation = "Current note and attachment reference coverage is incomplete."
+    guidance = (
+        "Review the current notes and attachment targets in All changes. "
+        "Restore complete supported reference evidence before applying."
+    )
+
+    class Projection:
+        binding = None
+
+        def __call__(self, actual, callbacks):
+            args = actual.arguments
+            if args.command == "history":
+                self.binding = HistoryContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    revision=1,
+                    fingerprint="a" * 64,
+                    proposal_id="history-review",
+                    review_generation=1,
+                )
+            else:
+                assert args.command in ("page", "history_choices")
+                assert args.binding == self.binding
+            action = UpdateHistoryActionState(
+                kind=kind,
+                status="review_required",
+                ready=False,
+                available_directions=(),
+                operation=None,
+                summary=explanation,
+            )
+            return UpdateContextResult(
+                status="prepared_review" if args.command == "history" else "available",
+                code="controlled_blocked",
+                kind="history",
+                binding=self.binding,
+                ready=False,
+                changes=3,
+                unresolved=0,
+                history_action=action,
+                guidance=guidance,
+                next_actions=("resolve_history", "refresh_history"),
+            )
+
+    transport = ProjectedReviewTransport(Projection())
+    window = MainWindow(supervisor=transport)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {"command": "history", "vault": str(vault), "selection_id": selection}
+        )
+        until(
+            app,
+            lambda: (
+                window.workbench.snapshot is not None
+                and window.workbench.snapshot.binding is not None
+                and not window.workbench.busy
+            ),
+        )
+        controls.select("Overview")
+        workspace = next(
+            row
+            for row in window.findChildren(QWidget)
+            if row.accessibleName() == "Decision workspace"
+        )
+        until(app, lambda: "Changes: 3" in window_text(workspace))
+        assert explanation in window_text(workspace)
+        assert guidance in window_text(workspace)
+        assert window.workbench.snapshot.unresolved == 0
+        footer = controls.button("Execute reviewed undo")
+        assert footer is None or not footer.isEnabled()
+        assert controls.button("Apply update") is None
+        if footer is not None:
+            footer.click()
+        assert not any(
+            c.command in ("apply", "execute_history") for c in transport.commands
+        )
     finally:
         window.shutdown()
         transport.close()

@@ -1,7 +1,16 @@
 """Validate an offered binary selection and exact per-occurrence document edits."""
 
+from dataclasses import dataclass, replace
+
 from pydantic import ValidationError
 
+from brz2obsidian.content_fingerprints import (
+    ChildWork,
+    CompletedWork,
+    canonical_equal,
+    drive_inline,
+)
+from brz2obsidian.content_values import content_key, require_inline, same_content
 from brz2obsidian.contracts import (
     AttachmentCandidate,
     AttachmentCandidateValidation,
@@ -12,20 +21,13 @@ from brz2obsidian.contracts import (
 )
 
 from .identity import _paths_collide
-from .link_validation import validate_link_document
+from .link_validation import _validate_link_document
 from .reference_targets import validate_targets
 from .review_links import consumed_context, onboarding_current_context
 from .structures import validate_structure_facts
 
 
-def validate_attachment_candidate(
-    facts: ReconciliationInput,
-    selection: AttachmentSelection,
-    candidate: AttachmentCandidate,
-) -> AttachmentCandidateValidation:
-    """Validate candidate facts, never grant whole-plan consent or write files."""
-    from .reconciliation import reconcile
-
+def _validate_proposed_attachment(facts, selection, candidate, proposal):
     findings, link_findings = [], []
 
     def add(code, document_id=None, occurrence_id=None):
@@ -45,14 +47,6 @@ def validate_attachment_candidate(
             link_findings=tuple(link_findings),
         )
 
-    try:
-        facts = ReconciliationInput.model_validate(facts)
-        selection = AttachmentSelection.model_validate(selection)
-        candidate = AttachmentCandidate.model_validate(candidate)
-    except ValueError, TypeError, ValidationError:
-        add("attachment_facts_invalid")
-        return result()
-    proposal = reconcile(facts)
     changes = tuple(
         c
         for c in proposal.changes
@@ -118,7 +112,8 @@ def validate_attachment_candidate(
 
     def payloads(outputs):
         return tuple(
-            (o.target_id, o.path, o.content.data, o.content_version) for o in outputs
+            (o.target_id, o.path, content_key(o.content), o.content_version)
+            for o in outputs
         )
 
     if payloads(candidate.outputs) != payloads(alternative.outputs):
@@ -225,7 +220,7 @@ def validate_attachment_candidate(
                 or target.identity is not None
                 or target.canonical_path != output.path
                 or state.content is None
-                or state.content.data != output.content.data
+                or not same_content(state.content, output.content)
                 or state.existence != "present"
             ):
                 add("attachment_target_invalid")
@@ -269,7 +264,7 @@ def validate_attachment_candidate(
             if (
                 len(bound_docs) != 1
                 or state.content is None
-                or state.content.data != bound_docs[0].content.data
+                or not same_content(state.content, bound_docs[0].content)
                 or state.existence != "present"
             ):
                 add("attachment_target_invalid", bound_docs[0].document_id)
@@ -388,7 +383,7 @@ def validate_attachment_candidate(
             == {s.target_id: s for s in context.current_target_facts}
         ):
             continue
-        validation = validate_link_document(
+        validation = _validate_link_document(
             doc,
             expected_content=doc.content,
             expected_path=old.source_path,
@@ -411,3 +406,121 @@ def validate_attachment_candidate(
     if used != set(choices):
         add("attachment_link_choice_invalid")
     return result()
+
+
+@dataclass(frozen=True)
+class CandidateWork:
+    facts: ReconciliationInput
+    selection: AttachmentSelection
+    candidate: AttachmentCandidate
+    phase: str = "validate"
+    canonical_proposal: object = None
+
+
+@dataclass(frozen=True)
+class CandidateValidationProof:
+    facts: ReconciliationInput
+    selection: AttachmentSelection
+    candidate: AttachmentCandidate
+    validation: AttachmentCandidateValidation
+
+
+def advance_candidate(work, returned=None):
+    from .reconciliation import ReconcileWork
+
+    if work.phase == "validate":
+        try:
+            facts = ReconciliationInput.model_validate(work.facts)
+            selection = AttachmentSelection.model_validate(work.selection)
+            candidate = AttachmentCandidate.model_validate(work.candidate)
+        except ValueError, TypeError, ValidationError:
+            invalid = AttachmentCandidateValidation(
+                valid=False,
+                findings=(
+                    AttachmentValidationFinding(
+                        code="attachment_facts_invalid",
+                        document_id=None,
+                        occurrence_id=None,
+                        blocking=True,
+                    ),
+                ),
+                link_findings=(),
+            )
+            return CompletedWork(
+                CandidateValidationProof(
+                    work.facts, work.selection, work.candidate, invalid
+                )
+            )
+        if work.canonical_proposal is not None:
+            return replace(
+                work,
+                facts=facts,
+                selection=selection,
+                candidate=candidate,
+                phase="finish_bound",
+            )
+        return ChildWork(
+            ReconcileWork(facts),
+            replace(
+                work,
+                facts=facts,
+                selection=selection,
+                candidate=candidate,
+                phase="finish",
+            ),
+        )
+    if work.phase not in ("finish", "finish_bound"):
+        raise ValueError("Unknown candidate phase")
+    validation = _validate_proposed_attachment(
+        work.facts,
+        work.selection,
+        work.candidate,
+        work.canonical_proposal if work.phase == "finish_bound" else returned,
+    )
+    return CompletedWork(
+        CandidateValidationProof(work.facts, work.selection, work.candidate, validation)
+    )
+
+
+def _candidate_validation(facts, selection, candidate, proof=None):
+    if proof is None:
+        proof = drive_inline(CandidateWork(facts, selection, candidate))
+    if (
+        type(proof) is not CandidateValidationProof
+        or not canonical_equal(facts, proof.facts)
+        or not canonical_equal(selection, proof.selection)
+        or not canonical_equal(candidate, proof.candidate)
+    ):
+        raise ValueError("Candidate validation belongs to different inputs")
+    return proof.validation
+
+
+def _validate_attachment_candidate(facts, selection, candidate):
+    return _candidate_validation(facts, selection, candidate)
+
+
+def validate_attachment_candidate(
+    facts: ReconciliationInput,
+    selection: AttachmentSelection,
+    candidate: AttachmentCandidate,
+) -> AttachmentCandidateValidation:
+    """Validate public inline inputs before entering the shared pure engine."""
+    try:
+        facts = ReconciliationInput.model_validate(facts)
+        selection = AttachmentSelection.model_validate(selection)
+        candidate = AttachmentCandidate.model_validate(candidate)
+        require_inline((facts, selection, candidate))
+    except ValueError, TypeError, ValidationError:
+        return AttachmentCandidateValidation(
+            valid=False,
+            findings=(
+                AttachmentValidationFinding(
+                    code="attachment_facts_invalid",
+                    document_id=None,
+                    occurrence_id=None,
+                    blocking=True,
+                ),
+            ),
+            link_findings=(),
+        )
+    return _validate_attachment_candidate(facts, selection, candidate)

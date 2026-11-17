@@ -7,6 +7,10 @@ from brz2obsidian.contracts import DiagnosticSubject
 # A reason is admitted with its original code. The pair prevents a foreign rule
 # or a familiar rule on an unrelated failure from inventing an explanation.
 REASONS = {
+    ("incomplete_source", "api_total_capture_limit"): (
+        "the configured total API capture limit was reached.",
+        "Choose a finite larger limit in Advanced API limits or with --api-max-total-capture-bytes, allowing headroom for API responses and stored payloads. Per-response and per-payload limits still apply; later vault review also needs memory and disk space.",
+    ),
     ("unsupported_feature", "note_html"): (
         "the converter does not support this HTML (web-page formatting) in a thought note.",
         "Report this limitation with the diagnostic report so the converter can be improved.",
@@ -82,6 +86,8 @@ REASONS = {
 }
 
 _KNOWN_MESSAGES = {
+    "max_total_capture_bytes aggregate response bound exhausted": "api_total_capture_limit",
+    "max_total_capture_bytes storage limit exhausted": "api_total_capture_limit",
     "HTML note content is outside reviewed Markdown coverage": "note_html",
     "HTML declarations are outside reviewed Markdown coverage": "note_html",
     "HTML processing instructions are outside reviewed Markdown coverage": "note_html",
@@ -130,6 +136,10 @@ _KNOWN_MESSAGES = {
 # Broad codes remain compatible. Their explanation states only facts supported by
 # that code; detailed causes require a reviewed (code, reason) above.
 CODE_EXPLANATIONS = {
+    "source_type_cycle": (
+        "the source type assignments contain a cycle, including a possible self-assignment.",
+        "Review the affected type chain in the diagnostic report and correct the assignments in TheBrain, then inspect again. For a BRZ archive, export it again first.",
+    ),
     "api_credentials_missing": (
         "the local API key has not been configured.",
         "Set THE_BRAIN_LOCAL_API_KEY in the application's launch environment or configure its credential provider, then try again.",
@@ -289,6 +299,7 @@ CODE_EXPLANATIONS = {
 }
 
 WARNING_EXPLANATIONS = {
+    "icon_lookup_depth": "Icon lookup exceeds 8 links. Native dashboards show no inherited icon for this lookup. Assign a nearer valid icon or change a selected appearance category, then close and reopen affected category dashboards and Categories overview. Migration-time body snapshots use the full finite chain; depth alone does not prevent conversion.",
     "image_presentation_normalized": "An authored image width will be replaced by a responsive image that fits the available space. The exact percentage width will not be reproduced. Review the image's placement in the converted thought note.",
     "formatting_loss": "Some thought-note formatting needs review. Tables may become responsive, custom icons may use text labels, or an inserted element may be unsupported. Review the affected thought notes and the Migration report after conversion.",
     "absent_payload": "An attachment is unavailable. Review the source warnings before conversion; the converter cannot preserve bytes it could not read.",

@@ -1,0 +1,84 @@
+{
+  "producer_revision": "29ebae7e0df263cdc6fb227c569791d64a255109",
+  "migration_schema_version": 7,
+  "renderer_version": "7",
+  "profile_version": "10",
+  "source_sha256": "83f41ca26874418fcaef90545dab26e348e4c36cfdce4b72c159e9ed4cb78f13",
+  "files": {
+    ".obsidian/app.json": {
+      "size": 310,
+      "sha256": "2119b855f672fb9599158f8a93bedd293c8918724ebc7a55794dd57f4f6d15b1"
+    },
+    ".obsidian/bookmarks.json": {
+      "size": 152,
+      "sha256": "e4354982c4013c3a8d8a2778e073790b9048702090e5b3a8c44d216015d31ab8"
+    },
+    ".obsidian/core-plugins.json": {
+      "size": 262,
+      "sha256": "3ae7e697f51d753b32d3f29d14865e0549875653ee63cfb678864b4937d76461"
+    },
+    ".obsidian/templates.json": {
+      "size": 58,
+      "sha256": "6018a04105fe157c7730ec634a70307f378a0c4f88368c3496477338c88de420"
+    },
+    ".obsidian/types.json": {
+      "size": 264,
+      "sha256": "a643f364ae0fb8b8f8e80f95730d839e4ef7e57f8b8a491ac91d04746a490932"
+    },
+    "Attachments/5f71e626/Notes.md.original": {
+      "size": 33,
+      "sha256": "3f2b3616174be55f19467ae102f73b15ff0d0aa1a2fba925a7ae711a0278e925"
+    },
+    "Categories.md": {
+      "size": 51,
+      "sha256": "caa4d52d6939e1755a273f7b19eb52a499fc0a994b871fcea28741e3fc529c6e"
+    },
+    "Home \u2014 Format six seed.md": {
+      "size": 321,
+      "sha256": "bf4f3be597d1e441afe9b9735a00a3d51145eaa96cba33f4d4ff363c2df2fab3"
+    },
+    "MIGRATION REPORT.md": {
+      "size": 1624,
+      "sha256": "88bbcacfc7fcf50d62501ceee55d56875940fcaf472572ab6aa398819781230c"
+    },
+    "Templates/Bases/Categories.base": {
+      "size": 645,
+      "sha256": "1a8e46b90e55893c977c33e15323ebba665b3de80b709a543742716b7a67c0b8"
+    },
+    "Templates/Bases/Gallery.base": {
+      "size": 1831,
+      "sha256": "8919a7effffdc3f2ce29ef13d661cc878a99f24d16d9cc2e15bc5b602a87b8c5"
+    },
+    "Templates/Bases/Members.base": {
+      "size": 1821,
+      "sha256": "58398bb5b4d561c7214eaa26aeb0f1f2346ef82ce49a7f366d7021432f16c08b"
+    },
+    "Templates/Bases/Starter.base": {
+      "size": 1821,
+      "sha256": "58398bb5b4d561c7214eaa26aeb0f1f2346ef82ce49a7f366d7021432f16c08b"
+    },
+    "Templates/Category starter.md": {
+      "size": 270,
+      "sha256": "9b5084783f48c65876fbcbe16ddb36ff2df1ed839e59503538a493ea30c007ab"
+    },
+    "Templates/Member template starter.md": {
+      "size": 340,
+      "sha256": "51d7dac074e7eeb6e6b7058e35b8806dbed967b5588279414ca499e2d442f4b6"
+    },
+    "Templates/New note.md": {
+      "size": 146,
+      "sha256": "b7dfea1f1e7a5ddfa10cb3b869c8d244a51f91d7ac69cec40c3d3366e6c84293"
+    },
+    "Vault guide.md": {
+      "size": 10825,
+      "sha256": "a4f6f8a6aa939b741fd24d5be976fb660526b392d5afa025752d5c098227a43c"
+    },
+    "migration-record.json": {
+      "size": 11857,
+      "sha256": "b040047d394046b0a8efebd47b7d0f77fc3419bd58913349e55926f76141776a"
+    }
+  },
+  "purpose": "Actual historical10/7 independently retained before11/8 implementation, for explicit unchanged-source transition then changed-source update; no qualification of futurecandidate",
+  "generated_archive_sha256": "9c0b07324854df330161c78a9e5f0e5240fada885c6e65ec8b1b2e4287c12e0d",
+  "public_metadata_note": "Derived public provenance metadata: unnecessary original machine/user checkout path omitted. Immutable source, generated ZIP and every generated payload byte are unchanged from the independently retained producer capture."
+}

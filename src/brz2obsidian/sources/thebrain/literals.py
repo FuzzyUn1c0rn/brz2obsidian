@@ -1,4 +1,4 @@
-"""Adapt only active, standalone non-element opening words in Markdown."""
+"""Adapt only profile-qualified unknown tokens as visible Markdown literals."""
 
 import re
 from hashlib import sha256
@@ -172,10 +172,21 @@ HTML_ELEMENTS = frozenset(
 )
 
 
-def _literal(value):
+_CURRENT_TOKEN = r"<(/?)([A-Za-z][A-Za-z0-9-]*)[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?(/?)>"
+
+
+def _literal(value, *, allow_literal_tokens=False):
     match = re.fullmatch(r"<([A-Za-z][A-Za-z0-9-]*)>", value)
     if match and match[1].lower() not in HTML_ELEMENTS:
         return True
+    if allow_literal_tokens:
+        match = re.fullmatch(_CURRENT_TOKEN, value)
+        if (
+            match
+            and not (match[1] and match[3])
+            and match[2].lower() not in HTML_ELEMENTS
+        ):
+            return True
     if value.startswith("<!") and not value.startswith("<!--"):
         _refuse(
             "unsupported_feature",
@@ -223,10 +234,10 @@ def qualify_declaration_blocks(text):
     _declaration_parser().parse(text)
 
 
-def adapt_literals(text):
+def adapt_literals(text, *, allow_literal_tokens=False):
     """Expose codepoint edits from scoped source into explicitly adapted text.
 
-    Escape a leading unknown HTML-block opener, then reparse newly exposed
+    Escape a leading qualified HTML-block token, then reparse newly exposed
     Markdown, so code behind that opener remains protected by the parser.
     """
     original = text
@@ -239,7 +250,13 @@ def adapt_literals(text):
         def collect(state, silent, hits=hits):
             begin = state.pos
             success = html_inline(state, silent)
-            if success and not silent and _literal(state.tokens[-1].content):
+            if (
+                success
+                and not silent
+                and _literal(
+                    state.tokens[-1].content, allow_literal_tokens=allow_literal_tokens
+                )
+            ):
                 hits.append(
                     (state.src.offsets[begin], state.src.offsets[state.pos - 1] + 1)
                 )
@@ -260,8 +277,15 @@ def adapt_literals(text):
             parser.block.tokenize(state, state.line, state.lineMax)
         for block in tokens:
             if block.type == "html_block":
-                match = re.match(r"[ \t]*(<[A-Za-z][A-Za-z0-9-]*>)", block.content)
-                if match and _literal(match[1]):
+                pattern = (
+                    _CURRENT_TOKEN
+                    if allow_literal_tokens
+                    else r"<[A-Za-z][A-Za-z0-9-]*>"
+                )
+                match = re.match(r"[ \t]*(" + pattern + ")", block.content)
+                if match and _literal(
+                    match[1], allow_literal_tokens=allow_literal_tokens
+                ):
                     if not isinstance(block.content, _MappedText):
                         _refuse(
                             "unsupported_feature",
@@ -274,7 +298,7 @@ def adapt_literals(text):
                         )
                     )
                 else:
-                    _literal(block.content)
+                    _literal(block.content, allow_literal_tokens=allow_literal_tokens)
             elif block.type == "inline":
                 parser.inline.parse(block.content, parser, env, [])
         if not hits:

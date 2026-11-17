@@ -8,6 +8,8 @@ import shutil
 import stat
 import tempfile
 import zlib
+from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,12 +25,16 @@ from brz2obsidian.application.checkpoint_contracts import (
     VaultInitializationResult,
 )
 from brz2obsidian.application.vault_contracts import VaultSubject
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ExactContent,
+    OpaqueContent,
     OutputIdentity,
     SafetyFact,
     SavedReview,
     SourceMemoryProvenance,
+    legacy_content_fields,
     reconciliation_subject_id,
 )
 from brz2obsidian.core import (
@@ -111,10 +117,10 @@ def _review_meaning(saved):
                 for name in _stored_model_fields(value)
                 if name != "fingerprint"
             }
-        if isinstance(value, ExactContent):
+        if isinstance(value, (ExactContent, OpaqueContent)):
             return {
-                "sha256": hashlib.sha256(value.data).hexdigest(),
-                "size": len(value.data),
+                "sha256": value.identity.sha256,
+                "size": value.identity.size,
             }
         if isinstance(value, SourceMemoryProvenance):
             return None
@@ -140,7 +146,7 @@ def _review_source_signature(saved):
     facts = saved.plan.facts
     rows = tuple(
         sorted(
-            (s.path, len(s.incoming.data), hashlib.sha256(s.incoming.data).hexdigest())
+            (s.path, s.incoming.identity.size, s.incoming.identity.sha256)
             for s in facts.subjects
             if s.incoming is not None
         )
@@ -410,7 +416,9 @@ def _source_matches(root, expected):
     return True
 
 
-def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
+def _capture_resources(
+    root, source, proposed, temp_base, vault_size, saved, *, _owned_export=None
+):
     """Observe ordinary spool and Git capacity before writing captured bytes."""
 
     def scope_size(path):
@@ -446,7 +454,7 @@ def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
             for item in value:
                 review_bytes(item)
 
-    if saved is not None:
+    if saved is not None and _owned_export is None:
         try:
             review_bytes(saved)
         except RecursionError as error:
@@ -456,7 +464,11 @@ def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
         + vault_size
         + (scope_size(proposed) if proposed is not None else 0)
     )
-    review_size = sum(len(value) for value in unique.values())
+    review_size = (
+        sum(value.identity.size for value in _owned_export.values.values())
+        if _owned_export is not None
+        else sum(len(value) for value in unique.values())
+    )
     margin = 64 * 1024 * 1024
     # Review bytes absent from raw roles are also spooled before their Git
     # objects are written. Counting every unique review byte is a conservative
@@ -469,6 +481,11 @@ def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
         enough_space = (
             shutil.disk_usage(temp_base).free >= spool_need
             and shutil.disk_usage(root).free >= git_need
+        )
+    if _owned_export is not None:
+        _owned_export.check(saved.plan)
+        return (
+            enough_space and available_memory() >= 4 * len(_owned_export.raw) + margin
         )
     return enough_space and available_memory() >= 9 * review_size + margin
 
@@ -549,6 +566,10 @@ _REVIEW_BYTES_KEY = "__brz2obsidian_review_blob__"
 
 def _stored_model_fields(value):
     """Mirror intentional field omission without copying large review payloads."""
+    if isinstance(value, (ExactContent, OpaqueContent)):
+        for name, _ in legacy_content_fields(value):
+            yield name
+        return
     for name, field in type(value).model_fields.items():
         if field.exclude_if is None or not field.exclude_if(getattr(value, name)):
             yield name
@@ -670,28 +691,40 @@ class CheckpointReviewMemo:
         self._tip_key = None
         self._tip_review = None
 
-    def read(self, git, manifest, verified, *, include_review=False):
+    def read(
+        self,
+        git,
+        manifest,
+        verified,
+        *,
+        include_review=False,
+        commit=None,
+        _owners=None,
+    ):
         key = (
             manifest.review_object,
             manifest.boundary == "local" and not manifest.proposed,
         )
         review = None
         if key not in self._entries:
-            review, references = read_checkpoint_review(git, manifest, verified)
-            from .attachment_ownership import review_ownership_claims
-
-            self._entries[key] = (
-                manifest.review_size,
-                manifest.review_sha256,
-                _review_meaning(review.saved),
-                references,
-                _review_parent_fingerprint(review),
-                _review_source_signature(review.saved),
-                review.saved.plan.facts.baseline_identity,
-                _onboarding_absence_review(review),
-                review_ownership_claims(review.saved.plan, review.historical_effects),
-                _review_queries(review),
-            )
+            if include_review or commit is None:
+                review, references = (
+                    read_checkpoint_review(git, manifest, verified)
+                    if _owners is None
+                    else _read_owned_checkpoint_review(
+                        git, manifest, verified, commit=commit, owners=_owners
+                    )
+                )
+                self._entries[key] = _checkpoint_review_metadata(
+                    manifest, review, references
+                )
+            else:
+                self._entries[key] = _read_checkpoint_review_metadata(
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                )
         else:
             metadata = self._entries[key]
             if metadata[:2] != (manifest.review_size, manifest.review_sha256):
@@ -716,21 +749,69 @@ class CheckpointReviewMemo:
             if self._tip_key == key:
                 review = self._tip_review
             elif review is None:
-                review, _ = read_checkpoint_review(git, manifest, verified)
+                review, _ = (
+                    read_checkpoint_review(git, manifest, verified)
+                    if _owners is None
+                    else _read_owned_checkpoint_review(
+                        git, manifest, verified, commit=commit, owners=_owners
+                    )
+                )
             if self._tip_review is None:
                 self._tip_key, self._tip_review = key, review
         return self._entries[key], review if include_review else None
 
 
-def read_checkpoint_review(git, manifest, verified):
-    """Read exact review payloads within caller-owned checkpoint admission.
+def _checkpoint_review_metadata(manifest, review, references):
+    from .attachment_ownership import review_ownership_claims
 
-    The caller must complete graph, association and lineage admission before
-    exposing a valid checkpoint. A typed manifest or this result alone does not
-    establish it. This reader verifies the review object/size/digest, envelope,
-    five-role reference closure and every blob.
-    ``verified`` only accumulates checked object IDs; it confers no authority.
-    """
+    return (
+        manifest.review_size,
+        manifest.review_sha256,
+        _review_meaning(review.saved),
+        references,
+        _review_parent_fingerprint(review),
+        _review_source_signature(review.saved),
+        review.saved.plan.facts.baseline_identity,
+        _onboarding_absence_review(review),
+        review_ownership_claims(review.saved.plan, review.historical_effects),
+        _review_queries(review),
+        review.saved.plan.facts.format_operation.kind,
+    )
+
+
+def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
+    with ExitStack() as owners:
+        review, references = _read_owned_checkpoint_review(
+            git, manifest, verified, commit=commit, owners=owners
+        )
+        return _checkpoint_review_metadata(manifest, review, references)
+
+
+def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
+    from brz2obsidian.application.review_session import ReviewSession
+
+    if type(owners) is not ExitStack:
+        raise OSError("Lexical retained review ownership required")
+    record, references, available = _review_reference_graph(git, manifest)
+    session = owners.enter_context(
+        ReviewSession._retained_review(
+            git,
+            manifest,
+            commit,
+            capacity=available_memory(),
+        )
+    )
+    review = session._load_retained(
+        record,
+        available,
+        references,
+        local=manifest.boundary == "local" and not manifest.proposed,
+    )
+    verified.update(available[sha][0] for sha in references)
+    return review, references
+
+
+def _review_reference_graph(git, manifest):
     size = manifest.review_size
     if available_memory() < 4 * size + 64 * 1024 * 1024:
         raise OSError("Insufficient current memory for the saved review envelope")
@@ -776,6 +857,17 @@ def read_checkpoint_review(git, manifest, verified):
         )
     }:
         raise OSError("Saved review references are not closed over the owned graph")
+    return record, references, available
+
+
+def read_checkpoint_review(git, manifest, verified):
+    """Return an inline review only within caller-owned full history admission.
+
+    This result alone is not authority. The unchanged returned-tip/explicit
+    target path verifies its envelope, five-role closure and all payloads.
+    """
+    record, references, available = _review_reference_graph(git, manifest)
+    size = manifest.review_size
     # The actual 36 MiB distinct-byte review reached roughly 294 MiB peak
     # commit while core replay rebuilt its immutable graph. Budget that demand
     # from unique bytes, rather than the compact envelope's few KiB.
@@ -857,7 +949,12 @@ def _role_policy(association, manifest, queries):
     if manifest.boundary == "result" and (queries is None or queries.selected is None):
         return None
     # These bases never replace the ordinary policy-bearing fingerprints.
-    # They are usable only with separate fresh proof of BOTH stored policies.
+    # Policy equivalence requires separate fresh proof of BOTH stored policies.
+    # A completed SOURCE RESULT may instead supply ONLY its physical history
+    # anchor to its first LOCAL memo, with that memo's own policy freshly proved.
+    # A new format memo may likewise use its actual onboarding LOCAL as a
+    # supported storage parent, without changing the onboarding replay meaning.
+    # Neither basis transfers a grant or a saved readiness verdict.
     return _RolePolicy(
         (
             ()
@@ -918,6 +1015,7 @@ class _CheckpointRole(NamedTuple):
     onboarding_absence: bool = False
     review_context_fingerprint: str | None = None
     policy_context: _RolePolicy | None = None
+    review_kind: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1031,6 +1129,24 @@ def _damaged_loose_payload(root, row):
     return True
 
 
+@dataclass(frozen=True)
+class _MetadataCheckpoint:
+    """Full graph projection; an explicit lexical owner may retain its review."""
+
+    locator: object
+    manifest: object
+    metadata: object
+    status: str = "valid"
+    review: object = None
+
+
+@dataclass(frozen=True)
+class _MetadataHistory:
+    admission: object
+    checkpoint: object
+    status: str = "intact"
+
+
 def _read(
     root,
     git,
@@ -1042,6 +1158,8 @@ def _read(
     missing_payloads=None,
     damaged_payloads=None,
     ownership_demands_out=None,
+    _metadata_only=False,
+    _owners=None,
 ):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
@@ -1092,7 +1210,7 @@ def _read(
     blobs, controls, verified = {}, {}, set()
     review_memo = CheckpointReviewMemo()
     current, generation = locator.commit, locator.generation
-    tip_manifest = tip_review = None
+    tip_manifest = tip_review = tip_metadata = None
     memo_roles = False
     target_records = {}
     ownership_demands, ownership_roles = [], []
@@ -1232,8 +1350,12 @@ def _read(
                 git,
                 manifest,
                 verified,
-                include_review=tip_manifest is None
-                or (targets is not None and current in targets),
+                include_review=(not _metadata_only or _owners is not None)
+                and (
+                    tip_manifest is None or (targets is not None and current in targets)
+                ),
+                commit=current,
+                _owners=_owners,
             )
         meaning = review_metadata[2] if manifest.review_object is not None else None
         if manifest.review_object is not None:
@@ -1267,6 +1389,9 @@ def _read(
                         if manifest.review_object is not None
                         else None,
                     ),
+                    review_kind=review_metadata[10]
+                    if manifest.review_object is not None
+                    else None,
                 )
             )
         if manifest.reviewed_source is not None and (
@@ -1310,6 +1435,9 @@ def _read(
         if linked_intents is not None and manifest.operation_intent_commit is not None:
             linked_intents.append(manifest.operation_intent_commit)
         if tip_manifest is None:
+            tip_metadata = (
+                review_metadata if manifest.review_object is not None else None
+            )
             memo_roles = (
                 checkpoint_roles is not None
                 and manifest.boundary == "local"
@@ -1364,6 +1492,9 @@ def _read(
                         if manifest.review_object is not None
                         else None,
                     ),
+                    review_kind=review_metadata[10]
+                    if manifest.review_object is not None
+                    else None,
                 )
             )
         if tip_manifest is None:
@@ -1481,6 +1612,7 @@ def _read(
                 root,
                 observations=completed_observations,
                 trusted_association=trusted_association,
+                _owners=_owners,
             )
             observation = completed_observations[0] if completed_observations else None
             if (
@@ -1496,6 +1628,22 @@ def _read(
                 roles=tuple(ownership_roles),
                 demands=ownership_demands,
             )
+    if _metadata_only or _owners is not None:
+        if targets is not None and _owners is None:
+            raise OSError("Metadata admission cannot return operation review models")
+        result = _MetadataCheckpoint(
+            locator,
+            tip_manifest,
+            tip_metadata,
+            review=tip_review if _owners is not None else None,
+        )
+        if targets is not None:
+            if set(target_records) != set(targets):
+                raise OSError(
+                    "Operation checkpoint is outside the retained owned chain"
+                )
+            return result, target_records
+        return result
     result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
@@ -1551,6 +1699,8 @@ def _inspect_retained_history(vault, observation, *, subjects=(), active_operati
         active_operation=active_operation,
         recovery_observation=observation,
     )
+    if type(checkpoint) is _MetadataCheckpoint:
+        return _MetadataHistory(admission, checkpoint)
     return _history_result(
         status="intact" if checkpoint is not None else "unavailable",
         admission=admission,
@@ -1567,6 +1717,9 @@ def _inspect_history(
     checkpoint_observation=None,
     recovery_observation=None,
     _capture=None,
+    _metadata_only=False,
+    new_operation=None,
+    _owners=None,
 ):
     root = Path(vault).absolute()
     admission, history = _observe_vault(
@@ -1577,12 +1730,17 @@ def _inspect_history(
         checkpoint_observation=checkpoint_observation,
         recovery_observation=recovery_observation,
         _capture=_capture,
+        _new_operation=new_operation,
+        _metadata_only=_metadata_only,
+        _owners=_owners,
     )
     status = "unavailable"
     try:
         if admission.status == "supported" and admission.repository.kind == "root":
             if history is None:
-                history = _read(root, _Git(root, git_executable))
+                history = _read(
+                    root, _Git(root, git_executable), _metadata_only=_metadata_only
+                )
             status = "intact" if history.status == "valid" else "absent"
             if history.status == "absent":
                 authority = digest(
@@ -1604,6 +1762,8 @@ def _inspect_history(
                 admission = admission.model_copy(update={"preflight": preflight})
     except OSError, ValueError, TypeError, UnicodeError:
         history = None
+    if _metadata_only:
+        return _MetadataHistory(admission, history, status)
     return _history_result(
         status=status,
         admission=admission,
@@ -1611,19 +1771,29 @@ def _inspect_history(
     )
 
 
-def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
+def inspect_history(
+    vault,
+    *,
+    subjects=(),
+    git_executable=None,
+    active_operation=None,
+    new_operation=None,
+):
     return _inspect_history(
         vault,
         subjects=subjects,
         git_executable=git_executable,
         active_operation=active_operation,
+        new_operation=new_operation,
     )
 
 
 class _UpdateRead:
     """Single-use lexical reader; never accepted by capture or apply."""
 
-    def __init__(self, vault, *, git_executable=None):
+    def __init__(
+        self, vault, *, git_executable=None, _metadata_only=False, _recovery=False
+    ):
         self._root = Path(vault).absolute()
         self._executable = git_executable
         self._used = False
@@ -1632,10 +1802,19 @@ class _UpdateRead:
         self._bound_history = None
         self._inspection = None
         self._idle = None
+        self._absence = None
         self._terminal = None
+        self._fresh_scope = None
+        self._metadata_only = _metadata_only
+        self._recovery = _recovery
+        self._recovery_status = None
+        self._owners = ExitStack()
 
     def __enter__(self):
-        from .vault_admission import _IdleCheckpointObservation
+        from .vault_admission import (
+            _AbsentHistoryObservation,
+            _IdleCheckpointObservation,
+        )
 
         if self._used:
             raise OSError("Update input reader cannot be reused")
@@ -1643,12 +1822,24 @@ class _UpdateRead:
         try:
             self._open = True
             captured = []
+            recovery = None
+            if self._recovery:
+                from .vault_apply import _inspect_update_observation
+
+                self._recovery_status, recovery = _inspect_update_observation(
+                    self._root, _owners=self._owners
+                )
+                if recovery is None:
+                    raise OSError("Validated current recovery observation required")
             self._history = _inspect_history(
                 self._root,
                 git_executable=self._executable,
                 _capture=lambda inspection, admission: captured.append(
                     (inspection, admission)
                 ),
+                _metadata_only=self._metadata_only,
+                _owners=self._owners if self._metadata_only else None,
+                recovery_observation=recovery,
             )
             if (
                 self._history.status == "intact"
@@ -1666,14 +1857,29 @@ class _UpdateRead:
                         "History did not originate in the completed inspection"
                     )
                 self._inspection = inspection
-                self._bound_history = _history_result(
-                    status="intact",
-                    admission=admission,
-                    checkpoint=inspection.history,
+                self._bound_history = (
+                    _MetadataHistory(admission, inspection.history)
+                    if self._metadata_only
+                    else _history_result(
+                        status="intact",
+                        admission=admission,
+                        checkpoint=inspection.history,
+                    )
                 )
                 self._terminal = inspection.recovery_observation
                 if self._terminal is None:
                     self._idle = _IdleCheckpointObservation(inspection, admission)
+                self._check()
+            elif (
+                self._history.status == "absent"
+                and self._history.admission.status == "supported"
+                and self._history.admission.inventory_complete
+                and captured
+            ):
+                inspection, _ = captured[0]
+                self._absence = _AbsentHistoryObservation(inspection, self._history)
+                self._inspection = inspection
+                self._bound_history = self._history
                 self._check()
             return self
         except BaseException:
@@ -1686,7 +1892,10 @@ class _UpdateRead:
         self._bound_history = None
         self._inspection = None
         self._idle = None
+        self._absence = None
         self._terminal = None
+        self._fresh_scope = None
+        self._owners.close()
 
     @property
     def history(self):
@@ -1699,18 +1908,103 @@ class _UpdateRead:
         from .vault_admission import _check_read_snapshot
 
         if not self._open or self._inspection is None:
+            self._fresh_scope = None
             raise OSError("Completed current input observation required")
-        _check_read_snapshot(
-            self._root,
-            _Git(self._root, self._inspection.executable),
-            self._inspection.history,
-            self._inspection.current_refs,
-            terminal=self._terminal,
+        try:
+            if self._absence is not None:
+                self._absence.check(_Git(self._root, self._inspection.executable))
+                return
+            _check_read_snapshot(
+                self._root,
+                _Git(self._root, self._inspection.executable),
+                self._inspection.history,
+                self._inspection.current_refs,
+                terminal=self._terminal,
+            )
+        except BaseException:
+            self._fresh_scope = None
+            raise
+
+    @staticmethod
+    def _physical_scope_value(value):
+        """Named payload-free fields only: never traverse checkpoint.review."""
+        from brz2obsidian.application.vault_contracts import VaultAdmission
+
+        if (
+            type(value) not in (VaultHistoryInspection, _MetadataHistory)
+            or type(value.admission) is not VaultAdmission
+            or type(value.checkpoint) not in (CheckpointRead, _MetadataCheckpoint)
+        ):
+            raise OSError("Completed physical scoped admission required")
+        checkpoint = value.checkpoint
+        return (
+            "brz2obsidian.vault-history-inspection",
+            1,
+            value.status,
+            value.admission,
+            "brz2obsidian.checkpoint-read",
+            1,
+            checkpoint.status,
+            "validated" if type(checkpoint) is _MetadataCheckpoint else checkpoint.code,
+            checkpoint.locator,
+            checkpoint.manifest,
         )
+
+    def _scope_context(self):
+        terminal = self._terminal
+        lease = (
+            ("idle",)
+            if terminal is None
+            else (
+                "terminal",
+                terminal.graph.intent.operation_id,
+                terminal.graph.intent.kind,
+                terminal.graph.intent.generation,
+                terminal.graph.intent_commit,
+            )
+        )
+        return (
+            str(self._root),
+            self._inspection.executable,
+            self._inspection.current_refs,
+            self._inspection.history.locator if self._absence is None else None,
+            self._absence.anchors if self._absence is not None else None,
+            lease,
+        )
+
+    def _consume_fresh_scope(self, value, *, purpose, ledger):
+        """Consume an actual latest local inspection, even on mismatched input."""
+        from brz2obsidian.content_fingerprints import canonical_equal
+
+        pending, self._fresh_scope = self._fresh_scope, None
+        self._check()
+        if pending is None:
+            raise OSError("A new completed scoped inspection is required")
+        physical, subjects, actual_purpose, context = pending
+        ledger.retain_metadata(64 + 16 * 10)
+        candidate = self._physical_scope_value(value)
+        ledger.admit_metadata((physical, subjects, context, candidate))
+        if (
+            purpose != actual_purpose
+            or context != self._scope_context()
+            or not canonical_equal(physical, candidate)
+        ):
+            raise OSError("Scoped admission is not the latest completed input")
+        return physical[3], subjects
+
+    def _discard_fresh_scope(self):
+        self._fresh_scope = None
 
     def _current_history(self):
         self._check()
         return self._bound_history
+
+    def content_session(self, *, scratch_parent):
+        """Own disposable exact content after this observation's full admission."""
+        from .content_session import ContentSession
+
+        self._check()
+        return ContentSession(self, scratch_parent=scratch_parent)
 
     def read_payload(self, *, locator, requests, byte_limit, role="source"):
         from .checkpoint_payload import _read_checkpoint_payload
@@ -1735,7 +2029,8 @@ class _UpdateRead:
 
         self._check()
         if (
-            locator != self._bound_history.checkpoint.locator
+            self._absence is not None
+            or locator != self._bound_history.checkpoint.locator
             or type(paths) is not tuple
             or not paths
             or len(set(paths)) != len(paths)
@@ -1754,9 +2049,10 @@ class _UpdateRead:
         self._check()
         return result
 
-    def inspect(self, *, subjects):
+    def inspect(self, *, subjects, new_operation=None):
         from .vault_admission import _same_current_domain
 
+        self._fresh_scope = None
         self._check()
         captured = []
         scoped = _inspect_history(
@@ -1768,15 +2064,25 @@ class _UpdateRead:
             _capture=lambda inspection, admission: captured.append(
                 (inspection, admission)
             ),
+            new_operation=new_operation,
+            _metadata_only=self._metadata_only,
+            _owners=self._owners if self._metadata_only else None,
         )
         self._check()
         if (
-            scoped.status != "intact"
+            scoped.status != ("absent" if self._absence is not None else "intact")
             or scoped.admission.status != "supported"
             or not captured
             or not _same_current_domain(self._inspection, captured[0][0])
         ):
             raise OSError("Current scoped admission changed or is incomplete")
+        actual = captured[0][0]
+        self._fresh_scope = (
+            self._physical_scope_value(scoped),
+            actual.subjects,
+            actual.new_operation,
+            self._scope_context(),
+        )
         return scoped
 
 
@@ -1823,6 +2129,8 @@ def capture_checkpoint(
     undo_of_receipt_commit=None,
     progress=None,
     _observation=None,
+    _owned_export=None,
+    _owners=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -1832,6 +2140,64 @@ def capture_checkpoint(
     retained = False
     commit = ref = None
     try:
+        if _owned_export is not None:
+            from brz2obsidian.application.review_session import _OwnedReviewExport
+
+            local_export = boundary == "local" and (
+                review_source is not None
+                or review is not None
+                and review.facts.format_operation.kind == "onboarding"
+                and source_binding is not None
+                and observed_source is not None
+            )
+            prepared_export = (
+                boundary == "prepared"
+                and proposed is not None
+                and active_operation is not None
+                and review is not None
+                and (
+                    source_binding is not None
+                    and observed_source is not None
+                    and undo_of_receipt_commit is None
+                    or source_binding is None
+                    and observed_source is None
+                    and undo_of_receipt_commit is not None
+                    and _observation is not None
+                    or source_binding is None
+                    and observed_source is None
+                    and undo_of_receipt_commit is None
+                    and recovery_direction in ("finish", "restore")
+                    and _observation is not None
+                )
+                and review_source is None
+                and _owners is not None
+            )
+            result_export = (
+                boundary == "result"
+                and expected_prepared is not None
+                and active_operation is not None
+                and operation_intent_commit is not None
+                and _observation is not None
+                and _owners is not None
+                and review_source is None
+            )
+            if type(_owned_export) is not _OwnedReviewExport or not (
+                local_export or prepared_export or result_export
+            ):
+                raise OSError("Closed canonical owner export required")
+            _owned_export.check(review)
+            if (
+                prepared_export
+                or result_export
+                or local_export
+                and review.ready
+                and review.facts.format_operation.kind == "attachment_cleanup"
+            ) and (
+                _owned_export.effects is None
+                or _owned_export.effects.status != "selected"
+                or _owned_export.session._selected is not _owned_export.effects
+            ):
+                raise OSError("Current canonical selected effects required")
         from brz2obsidian.application.vault_progress_contracts import report_progress
 
         report_progress(
@@ -1881,6 +2247,21 @@ def capture_checkpoint(
             )
         ):
             return result("refused", "invalid_checkpoint_boundary")
+        saved_result = (
+            save_review(review)
+            if review is not None
+            and review.facts.format_operation.kind == "format_transition"
+            and _owned_export is None
+            else None
+        )
+        if saved_result is not None and saved_result.status != "saved":
+            return result("refused", "invalid_current_review")
+        new_operation = (
+            "format_transition"
+            if review is not None
+            and review.facts.format_operation.kind == "format_transition"
+            else None
+        )
         captured_inspections = []
         observed_history = (
             _inspect_history(
@@ -1888,9 +2269,12 @@ def capture_checkpoint(
                 subjects=subjects,
                 git_executable=git_executable,
                 active_operation=active_operation,
+                new_operation=new_operation,
                 _capture=lambda inspection, admission: captured_inspections.append(
                     inspection
                 ),
+                _metadata_only=_owned_export is not None,
+                _owners=_owners,
             )
             if _observation is None
             else _inspect_retained_history(
@@ -1934,6 +2318,7 @@ def capture_checkpoint(
             return result("refused", "association_mismatch")
         recovery_target = None
         recovery_origin_plan = None
+        recovery_origin_effects = None
         recovery_origin_intent_commit = None
         recovery_previous_operation_commit = None
         retained_recovery_direction = (
@@ -1998,6 +2383,7 @@ def capture_checkpoint(
             if origin_loaded is None:
                 return result("refused", "recovery_review_required")
             recovery_origin_plan = origin_loaded.saved.plan
+            recovery_origin_effects = origin_loaded.historical_effects
             original_prepared = authority.owned[original.prepared_commit][0]
             source_manifest = (
                 original_prepared
@@ -2009,7 +2395,12 @@ def capture_checkpoint(
                 or original.association_id != association_id
                 or source_manifest.identity != identity
                 or recovery_direction is not None
-                and select_review_effects(review).status != "selected"
+                and (
+                    select_review_effects(review)
+                    if _owned_export is None
+                    else _owned_export.effects
+                ).status
+                != "selected"
             ):
                 return result("refused", "recovery_review_required")
             if retained_recovery_direction is not None and (
@@ -2045,27 +2436,31 @@ def capture_checkpoint(
             return result("refused", "prepared_history_required")
         saved = None
         if review is not None:
-            saved_result = save_review(review)
-            if (
-                saved_result.status != "saved"
-                or (
-                    review.facts.baseline_identity
-                    if boundary == "local"
-                    and (
-                        review_source is not None
-                        or review.facts.format_operation.kind == "onboarding"
-                        and source_binding is not None
-                        and observed_source is not None
-                    )
-                    else review.facts.incoming_identity
+            if saved_result is None and _owned_export is None:
+                saved_result = save_review(review)
+            if (_owned_export is None and saved_result.status != "saved") or (
+                review.facts.baseline_identity
+                if boundary == "local"
+                and (
+                    review_source is not None
+                    or review.facts.format_operation.kind == "onboarding"
+                    and source_binding is not None
+                    and observed_source is not None
                 )
-                != identity
-            ):
+                else review.facts.incoming_identity
+            ) != identity:
                 return result("refused", "invalid_current_review")
-            saved = saved_result.record
+            saved = (
+                _owned_export.saved
+                if _owned_export is not None
+                else saved_result.record
+            )
             from .attachment_ownership import review_ownership_claims, validate_claims
 
-            claims, missing = review_ownership_claims(saved.plan)
+            claims, missing = review_ownership_claims(
+                saved.plan,
+                _owned_export.effects if _owned_export is not None else None,
+            )
             if claims or missing:
                 try:
                     roles = (
@@ -2074,7 +2469,9 @@ def capture_checkpoint(
                         else _observation[1].checkpoint_roles
                     )
                     origin_claims = (
-                        review_ownership_claims(recovery_origin_plan)[0]
+                        review_ownership_claims(
+                            recovery_origin_plan, recovery_origin_effects
+                        )[0]
                         if recovery_origin_plan is not None
                         else ()
                     )
@@ -2114,6 +2511,7 @@ def capture_checkpoint(
                             else current.inventory
                         ),
                         continuation_direction=target_direction,
+                        continuation_effects=recovery_origin_effects,
                     )
                 except OSError, ValueError, TypeError, KeyError:
                     return result("refused", "cleanup_ownership_unbound")
@@ -2174,6 +2572,10 @@ def capture_checkpoint(
             ):
                 return result("refused", "prepared_review_changed")
             saved = prior.review.saved if prior.review is not None else None
+            if _owned_export is not None:
+                if saved is None:
+                    return result("refused", "prepared_review_changed")
+                _owned_export.check(saved.plan)
             if (
                 current.policy_continuity_fingerprint
                 != prior.manifest.policy_continuity_fingerprint
@@ -2227,9 +2629,8 @@ def capture_checkpoint(
                         (expected is None) != (source_row is None)
                         or expected is not None
                         and (
-                            len(expected.data) != source_row.size
-                            or hashlib.sha256(expected.data).hexdigest()
-                            != source_row.sha256
+                            content_size(expected) != source_row.size
+                            or content_sha(expected) != source_row.sha256
                         )
                     ):
                         return result("refused", "review_bytes_changed")
@@ -2355,7 +2756,11 @@ def capture_checkpoint(
                 ):
                     selected_effects = prior.review.historical_effects
                 if selected_effects is None:
-                    selected_effects = select_review_effects(saved.plan)
+                    if _owned_export is not None:
+                        _owned_export.check(saved.plan)
+                        selected_effects = _owned_export.effects
+                    else:
+                        selected_effects = select_review_effects(saved.plan)
                 if selected_effects.status == "selected":
                     for effect in selected_effects.files:
                         if effect.subject_id not in scopes:
@@ -2407,7 +2812,15 @@ def capture_checkpoint(
             for f in current.inventory
             if not f.excluded or f.path in included_paths
         )
-        if not _capture_resources(root, source, proposed, temp_base, vault_size, saved):
+        if not _capture_resources(
+            root,
+            source,
+            proposed,
+            temp_base,
+            vault_size,
+            saved,
+            _owned_export=_owned_export,
+        ):
             return result("refused", "insufficient_checkpoint_resources")
         with tempfile.TemporaryDirectory(
             prefix="brz2obsidian-capture-", dir=temp_base
@@ -2555,9 +2968,8 @@ def capture_checkpoint(
                             (expected is None) != (observed is None)
                             or expected is not None
                             and (
-                                len(expected.data) != observed[2]
-                                or hashlib.sha256(expected.data).hexdigest()
-                                != observed[3]
+                                expected.identity.size != observed[2]
+                                or expected.identity.sha256 != observed[3]
                             )
                         ):
                             return result("refused", "review_bytes_changed")
@@ -2573,9 +2985,8 @@ def capture_checkpoint(
                             (expected is None) != (observed is None)
                             or expected is not None
                             and (
-                                len(expected.data) != observed[2]
-                                or hashlib.sha256(expected.data).hexdigest()
-                                != observed[3]
+                                expected.identity.size != observed[2]
+                                or expected.identity.sha256 != observed[3]
                             )
                         ):
                             return result("refused", "review_bytes_changed")
@@ -2641,9 +3052,17 @@ def capture_checkpoint(
                 if boundary != "result"
                 else prior.manifest.reviewed_source,
             )
+            # Duplicate meaning omits proof identities. An owned prepared
+            # export must retain the complete plan its result capture checks.
             if (
                 prior.status == "valid"
                 and prior.manifest.semantic_fingerprint == semantic
+                and (
+                    _owned_export is None
+                    or boundary != "prepared"
+                    or prior.review is not None
+                    and canonical_equal(saved.plan, prior.review.saved.plan)
+                )
             ):
                 if (
                     not _source_matches(source, source_files)
@@ -2701,7 +3120,11 @@ def capture_checkpoint(
             ):
                 return result("refused", "source_payload_changed", objects=objects)
             review_raw, review_payloads = (
-                _review_shape(saved) if saved is not None else (None, {})
+                (_owned_export.raw, _owned_export.values)
+                if _owned_export is not None
+                else _review_shape(saved)
+                if saved is not None
+                else (None, {})
             )
             role_hashes = {
                 row.sha256
@@ -2712,9 +3135,15 @@ def capture_checkpoint(
             for sha in sorted(set(review_payloads) - role_hashes):
                 payload = review_payloads[sha]
                 spool = directory / ("review-content-" + sha)
-                spool.write_bytes(payload)
-                expected_oid = _spool_oid(directory, spool, len(payload), sha)
-                declaration = (expected_oid, len(payload), sha, None)
+                if _owned_export is None:
+                    spool.write_bytes(payload)
+                    payload_size = len(payload)
+                else:
+                    with spool.open("xb", buffering=0) as output:
+                        _owned_export.copy(sha, output)
+                    payload_size = payload.identity.size
+                expected_oid = _spool_oid(directory, spool, payload_size, sha)
+                declaration = (expected_oid, payload_size, sha, None)
                 written_declarations += (declaration,)
                 object_storage = "possible"
                 actual_oid = (
@@ -2740,7 +3169,7 @@ def capture_checkpoint(
                     CheckpointFile(
                         path=sha,
                         mode="100644",
-                        size=len(payload),
+                        size=payload_size,
                         sha256=sha,
                         object_id=actual_oid,
                     )

@@ -1,8 +1,11 @@
 """Pure normalized format/onboarding policy; no parsing or output generation."""
 
-from hashlib import sha256
-
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import FormatReview
+
+# Historical review replay retains its recorded generation. Application admission
+# separately selects the current format for new source-update operations.
+REVIEW_FORMATS = frozenset({7, 8})
 
 
 def output_semantics(identity):
@@ -23,16 +26,23 @@ def format_findings(facts):
             return ("format_source_changed",)
         if output_semantics(baseline) != output_semantics(target):
             return ("profile_transition_required",)
-        return () if baseline.output_format == 7 else ("unsupported_format",)
+        return (
+            () if baseline.output_format in REVIEW_FORMATS else ("unsupported_format",)
+        )
     if operation.kind != "source_update":
         if not facts.subjects:
             return ("format_outputs_unavailable",)
-        if target.output_format != 7:
+        if target.output_format not in REVIEW_FORMATS:
             return ("format_target_unsupported",)
         if (
             operation.baseline_source_version is not None
             and operation.target_source_version is not None
             and operation.baseline_source_version != operation.target_source_version
+            and not (
+                operation.kind == "onboarding"
+                and operation.automatic_merge
+                and output_semantics(baseline) == output_semantics(target)
+            )
         ):
             return ("format_source_changed",)
         return ()
@@ -40,7 +50,7 @@ def format_findings(facts):
         return ()
     if baseline.output_format != target.output_format:
         return ("format_transition_required",)
-    if baseline.output_format != 7:
+    if baseline.output_format not in REVIEW_FORMATS:
         return ("unsupported_format",)
     if (baseline.profile_id, baseline.profile_version, baseline.settings_digest) != (
         target.profile_id,
@@ -59,14 +69,14 @@ def established_original(facts, subject):
         baseline is None
         or output_semantics(baseline.identity)
         != output_semantics(facts.baseline_identity)
-        or baseline.identity.output_format != 7
+        or baseline.identity.output_format not in REVIEW_FORMATS
         or baseline.source_version != operation.baseline_source_version
         or subject.baseline.content is None
     ):
         return False
     return any(
         (output.item_id, output.facet) == (subject.item_id, subject.facet)
-        and output.content.data == subject.baseline.content.data
+        and content_key(output.content) == content_key(subject.baseline.content)
         for output in baseline.outputs
     )
 
@@ -84,22 +94,86 @@ def configuration_change(subject):
         and subject.incoming is not None
         and (
             subject.baseline.content is None
-            or subject.baseline.content.data != subject.incoming.data
+            or content_key(subject.baseline.content) != content_key(subject.incoming)
         )
         and (
             subject.current.content is None
-            or subject.current.content.data != subject.incoming.data
+            or content_key(subject.current.content) != content_key(subject.incoming)
+        )
+    )
+
+
+def automatic_onboarding(facts, subject):
+    """Known generated originals permit normal three-way setup reconciliation."""
+    return (
+        facts.format_operation.automatic_merge
+        and facts.format_operation.kind == "onboarding"
+        and not needs_onboarding(facts, subject)
+        and output_semantics(facts.baseline_identity)
+        == output_semantics(facts.incoming_identity)
+    )
+
+
+def automatic_configuration(facts, subject):
+    return (
+        facts.format_operation.automatic_merge
+        and facts.format_operation.kind == "source_update"
+        and not needs_onboarding(facts, subject)
+        and subject.baseline.status == "known"
+    )
+
+
+def automatic_transition(facts, subject):
+    """Assess proven interpretable files inside an explicit source-stable operation."""
+    operation = facts.format_operation
+    comparison = subject.structure
+    return (
+        operation.automatic_merge
+        and operation.kind == "format_transition"
+        and operation.recorded_generation == "supported"
+        and operation.baseline_source_version is not None
+        and operation.baseline_source_version == operation.target_source_version
+        and subject.baseline.status == "known"
+        and not needs_onboarding(facts, subject)
+        and (
+            (
+                subject.attachment is not None
+                and subject.interpretation in ("opaque", "supported")
+            )
+            or (
+                subject.interpretation == "supported"
+                and comparison is not None
+                and (
+                    comparison.alignment == "supported"
+                    or same_content(subject.current.content, subject.baseline.content)
+                )
+                and all(
+                    document.status == "supported"
+                    for document in (
+                        comparison.original,
+                        comparison.current,
+                        comparison.incoming,
+                    )
+                )
+            )
         )
     )
 
 
 def format_proposal(facts, subject):
-    """A format operation always needs an explicit current-generation choice."""
+    """Retain explicit choices where the selected operation lacks safe evidence."""
     operation = facts.format_operation
-    if operation.kind == "attachment_cleanup":
+    if (
+        operation.kind == "attachment_cleanup"
+        or automatic_onboarding(facts, subject)
+        or automatic_transition(facts, subject)
+        or (operation.automatic_merge and _new_source_output(facts, subject))
+    ):
         return None
     if operation.kind == "source_update":
-        if configuration_change(subject):
+        if configuration_change(subject) and not automatic_configuration(
+            facts, subject
+        ):
             return "unresolved", None, "format_review", True
         if subject.baseline.status == "known" and needs_onboarding(facts, subject):
             return "unresolved", None, "onboarding_required", True
@@ -118,10 +192,10 @@ def _new_source_output(facts, subject):
     operation = facts.format_operation
     baseline = operation.established_baseline
     return (
-        operation.kind == "source_update"
+        operation.kind in ("source_update", "onboarding")
         and operation.recorded_generation == "supported"
         and baseline is not None
-        and baseline.identity.output_format == 7
+        and baseline.identity.output_format in REVIEW_FORMATS
         and output_semantics(baseline.identity)
         == output_semantics(facts.baseline_identity)
         and output_semantics(facts.baseline_identity)
@@ -129,7 +203,7 @@ def _new_source_output(facts, subject):
         and baseline.source_version == operation.baseline_source_version
         and operation.target_source_version is not None
         and facts.inventory == "complete"
-        and subject.output_role != "configuration"
+        and (subject.output_role != "configuration" or operation.automatic_merge)
         and subject.baseline.status == "unknown"
         and subject.baseline.content is None
         and subject.baseline.unavailable_digest is None
@@ -143,7 +217,16 @@ def _new_source_output(facts, subject):
 
 
 def review_facts(facts, subject):
-    if facts.format_operation.kind == "attachment_cleanup":
+    if (
+        facts.format_operation.kind == "attachment_cleanup"
+        or automatic_onboarding(facts, subject)
+        or automatic_transition(facts, subject)
+        or automatic_configuration(facts, subject)
+        or (
+            facts.format_operation.automatic_merge
+            and _new_source_output(facts, subject)
+        )
+    ):
         return None
     if (
         facts.format_operation.kind == "source_update"
@@ -163,7 +246,7 @@ def review_facts(facts, subject):
         target_generated=subject.incoming,
         target_eligible=(
             subject.incoming is not None
-            and facts.incoming_identity.output_format == 7
+            and facts.incoming_identity.output_format in REVIEW_FORMATS
             and (
                 (
                     facts.format_operation.kind == "source_update"
@@ -196,7 +279,7 @@ def format_assumption(facts, subject):
             output_semantics(baseline.identity),
             baseline.source_version,
             tuple(
-                sha256(o.content.data).hexdigest()
+                content_sha(o.content)
                 for o in baseline.outputs
                 if (o.item_id, o.facet) == (subject.item_id, subject.facet)
             ),

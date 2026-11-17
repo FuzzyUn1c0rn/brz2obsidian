@@ -175,6 +175,26 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
             ),
         ),
     )
+    if operation_kind == "onboarding":
+        operation = facts.format_operation
+        established = operation.established_baseline
+        assert established is not None
+        identity = facts.baseline_identity.model_copy(update={"output_format": 8})
+        facts = facts.model_copy(
+            update={
+                "baseline_identity": identity,
+                "incoming_identity": facts.incoming_identity.model_copy(
+                    update={"output_format": 8}
+                ),
+                "format_operation": operation.model_copy(
+                    update={
+                        "established_baseline": established.model_copy(
+                            update={"identity": identity}
+                        )
+                    }
+                ),
+            }
+        )
     operation = facts.format_operation
     facts = with_review_links(
         facts.model_copy(
@@ -203,6 +223,9 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
         old.model_dump()
         | {
             "kind": operation_kind,
+            "source_binding": old.source_binding.model_copy(
+                update={"incoming_identity": facts.incoming_identity}
+            ),
             "review": prepare_review(facts, preflight=old.review.preflight),
         }
     )

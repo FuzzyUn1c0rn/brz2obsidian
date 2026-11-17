@@ -3,12 +3,27 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 
 from .identity import _paths_collide, _target_context, _target_safe
-from .link_meanings import _semantic, resolve_occurrence
-from .link_validation import validate_link_document
+from .link_meanings import (
+    _query_matches_target,
+    _semantic,
+    resolve_link_meaning,
+    resolve_occurrence,
+)
+from .link_validation import _validate_link_document
 from .reference_targets import validate_targets
+
+
+def provider_documents(facts):
+    """New reviews consume owned-icon links; recorded7 replay keeps its meaning."""
+    context = facts.link_context
+    if facts.incoming_identity.output_format != 8 or context is None:
+        return ()
+    return context.current_documents + context.incoming_documents
 
 
 def consumed_context(
@@ -19,6 +34,7 @@ def consumed_context(
     *,
     include_document_targets=True,
     target_ids=(),
+    appearance_documents=(),
 ):
     """Include query competitors, selected membership facts and path collisions."""
     ids = set(target_ids) | {
@@ -29,11 +45,28 @@ def consumed_context(
     }
     for doc in documents:
         for occurrence in doc.occurrences:
-            # A single-target resolution detects lookup matches even when the full query is ambiguous.
-            for target in targets:
-                meaning = resolve_occurrence(occurrence, (target,), states, inventory)
-                if meaning.target_id is not None or meaning.candidates:
-                    ids.add(target.target_id)
+            # Discover each singleton match, even when the full query is ambiguous.
+            if occurrence.query is not None and inventory == "complete":
+                for target in targets:
+                    if _query_matches_target(occurrence.query, target):
+                        ids.add(target.target_id)
+            else:
+                for target in targets:
+                    meaning = resolve_occurrence(
+                        occurrence, (target,), states, inventory
+                    )
+                    if meaning.target_id is not None or meaning.candidates:
+                        ids.add(target.target_id)
+    by_id = {target.target_id: target for target in targets}
+    icon_documents = (
+        {
+            (doc.source_path, content_key(doc.content)): doc
+            for doc in appearance_documents + documents
+        }
+        if appearance_documents
+        else {}
+    )
+    expanded = set()
     changed = True
     while changed:
         previous = set(ids)
@@ -42,14 +75,71 @@ def consumed_context(
                 ids.update(
                     e.target_id for m in state.structure.memberships for e in m.entries
                 )
+                owner = by_id.get(state.target_id)
+                roles = state.file_roles
+                if roles is not None:
+                    if (
+                        state.target_id in expanded
+                        or owner is None
+                        or roles.path != owner.canonical_path
+                    ):
+                        continue
+                    expanded.add(state.target_id)
+                    queries = roles.category_memberships.queries + tuple(
+                        declaration.query
+                        for declaration in (roles.provider, roles.owned_icon)
+                        if declaration.status == "valid"
+                    )
+                    for query in queries:
+                        for target in targets:
+                            meaning = resolve_link_meaning(
+                                query, "", None, (target,), states, inventory
+                            )
+                            if meaning.target_id is not None or meaning.candidates:
+                                ids.add(target.target_id)
+                    continue
+                if (
+                    owner is None
+                    or owner.kind != "category"
+                    or state.target_id in expanded
+                ):
+                    continue
+                expanded.add(state.target_id)
+                document = icon_documents.get(
+                    (owner.canonical_path, content_key(state.content))
+                )
+                if document is None:
+                    continue
+                fields = [
+                    field for field in state.structure.fields if field.key == "icon"
+                ]
+                for occurrence in document.occurrences:
+                    if not any(
+                        field.span.start <= occurrence.span.start
+                        and occurrence.span.end <= field.span.end
+                        for field in fields
+                    ):
+                        continue
+                    for target in targets:
+                        meaning = resolve_occurrence(
+                            occurrence, (target,), states, inventory
+                        )
+                        if meaning.target_id is not None or meaning.candidates:
+                            ids.add(target.target_id)
+        active_targets = tuple(t for t in targets if t.target_id in ids)
         for target in targets:
-            if target.canonical_path is not None and any(
-                t.target_id in ids
-                and t.canonical_path is not None
-                and _paths_collide(target.canonical_path, t.canonical_path)
-                for t in targets
+            if (
+                target.canonical_path is not None
+                and any(
+                    t.target_id in ids
+                    and t.canonical_path is not None
+                    and _paths_collide(target.canonical_path, t.canonical_path)
+                    for t in active_targets
+                )
+                and target.target_id not in ids
             ):
                 ids.add(target.target_id)
+                active_targets = tuple(t for t in targets if t.target_id in ids)
         changed = ids != previous
     return (
         inventory,
@@ -59,7 +149,7 @@ def consumed_context(
                 key=lambda d: (
                     d.document_id,
                     d.source_path,
-                    sha256(d.content.data).hexdigest(),
+                    content_sha(d.content),
                 ),
             )
         ),
@@ -100,9 +190,17 @@ def text_link_assumptions(facts, subject, subject_id, target_path):
             for d in documents
             if d.source_path in (path, subject.current.path, target_path)
             and content is not None
-            and d.content.data == content.data
+            and same_content(d.content, content)
         )
-        portions.append(consumed_context(selected, targets, states, context.inventory))
+        portions.append(
+            consumed_context(
+                selected,
+                targets,
+                states,
+                context.inventory,
+                appearance_documents=provider_documents(facts),
+            )
+        )
     return (
         ProposalAssumption(
             key="text-links:" + subject_id,
@@ -143,6 +241,17 @@ def known_result_document(facts, change):
     context = facts.link_context
     if context is None or change.result is None:
         return None
+    subject = next(
+        s
+        for s in facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    candidate = subject.automatic_result
+    if candidate is not None and same_content(candidate.content, change.result):
+        from .text_candidates import validate_text_candidate
+
+        if validate_text_candidate(facts, change, candidate, "edited"):
+            return candidate.links, candidate.link_targets, candidate.link_target_facts
     options = []
     for documents, targets, states in (
         (
@@ -159,8 +268,8 @@ def known_result_document(facts, change):
         for document in documents:
             if (
                 document.source_path == change.target_path
-                and document.content.data == change.result.data
-                and validate_link_document(
+                and same_content(document.content, change.result)
+                and _validate_link_document(
                     document,
                     expected_content=change.result,
                     expected_path=change.target_path,
@@ -210,7 +319,7 @@ def current_observation_problem(facts):
         if (
             len(entries) != 1
             or entries[0].current.existence != "present"
-            or entries[0].current.content != document.content
+            or not canonical_equal(entries[0].current.content, document.content)
         ):
             return "current_link_context_unbound"
         if any(
@@ -262,7 +371,7 @@ def current_observation_problem(facts):
         entry = entries[0]
         if (
             target.identity is not None and target.identity != entry.identity
-        ) or state.content != entry.current.content:
+        ) or not canonical_equal(state.content, entry.current.content):
             return "current_link_context_unbound"
         expected = (
             ("missing", "intentionally_uncreated")
@@ -401,8 +510,42 @@ def onboarding_current_context(facts):
         )
         if (
             len(documents) != 1
-            or documents[0].content != entry.current.content
+            or not canonical_equal(documents[0].content, entry.current.content)
             or documents[0].inventory != "complete"
+        ):
+            return False
+    return True
+
+
+def _relocated_current_states(facts, candidate, owner, selected_path):
+    prior = facts.link_context.current_target_facts
+    if candidate.link_target_facts == prior:
+        return True
+    if facts.incoming_identity.output_format != 8 or len(
+        candidate.link_target_facts
+    ) != len(prior):
+        return False
+    for current, selected in zip(prior, candidate.link_target_facts, strict=True):
+        if current.target_id != owner.target_id:
+            if selected != current:
+                return False
+            continue
+        roles, qualified = current.file_roles, selected.file_roles
+        if (
+            roles is None
+            or qualified is None
+            or qualified.path != selected_path
+            or selected.content is None
+            or qualified.content_sha256 != content_sha(selected.content)
+            or qualified
+            != roles.model_copy(
+                update={
+                    "path": selected_path,
+                    "category": qualified.category,
+                    "image_path": qualified.image_path,
+                }
+            )
+            or selected.model_copy(update={"file_roles": roles}) != current
         ):
             return False
     return True
@@ -432,7 +575,7 @@ def selected_current_links_safe(facts, change, *, candidate=None):
     documents = tuple(
         d
         for d in context.current_documents
-        if d.source_path == observed_path and d.content == change.current
+        if d.source_path == observed_path and canonical_equal(d.content, change.current)
     )
     if len(documents) != 1:
         return False
@@ -452,7 +595,7 @@ def selected_current_links_safe(facts, change, *, candidate=None):
         )
         for o in document.occurrences
     )
-    valid = validate_link_document(
+    valid = _validate_link_document(
         document,
         expected_content=change.current,
         expected_path=observed_path,
@@ -466,6 +609,12 @@ def selected_current_links_safe(facts, change, *, candidate=None):
     ).valid
     if not valid or not relocated:
         return valid
+    owners = tuple(
+        t for t in context.current_targets if t.canonical_path == observed_path
+    )
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
     rename = change.rename_review
     if (
         rename is None
@@ -473,21 +622,15 @@ def selected_current_links_safe(facts, change, *, candidate=None):
         or rename.source_path != change.target_path
         or rename.current_path != observed_path
         or not current_lookup_coverage(facts)
-        or candidate.content != change.current
+        or not canonical_equal(candidate.content, change.current)
         or candidate.target != subject.source_target
         or candidate.links.document_id != document.document_id
         or candidate.links.path_mode != document.path_mode
         or candidate.links.source_path != change.target_path
         or candidate.links.inventory != context.inventory
-        or candidate.link_target_facts != context.current_target_facts
+        or not _relocated_current_states(facts, candidate, owner, change.target_path)
     ):
         return False
-    owners = tuple(
-        t for t in context.current_targets if t.canonical_path == observed_path
-    )
-    if len(owners) != 1:
-        return False
-    owner = owners[0]
     prospective = owner.model_copy(
         update={
             "canonical_path": change.target_path,
@@ -517,7 +660,7 @@ def current_keep_needs_proof(facts, change):
         subject.baseline.status == "known"
         and subject.incoming is not None
         and subject.baseline.content is not None
-        and subject.incoming.data == subject.baseline.content.data
+        and same_content(subject.incoming, subject.baseline.content)
     )
 
 
@@ -549,7 +692,7 @@ def current_lookup_coverage(facts):
         if (
             len(states) != 1
             or states[0].existence != "present"
-            or states[0].content != entry.current.content
+            or not canonical_equal(states[0].content, entry.current.content)
         ):
             return False
         if records[0].kind == "resource":
@@ -575,8 +718,26 @@ def bound_resource_record(facts, entry, target, state):
         and facts.incoming_identity.collection_id == entry.identity.collection_id
         and facts.incoming_identity.module_id == entry.identity.module_id
         and sub.current.existence == entry.current.existence
-        and sub.current.content == entry.current.content
+        and canonical_equal(sub.current.content, entry.current.content)
         for sub in facts.subjects
+    )
+    origin = state.resource_origin
+    retained = (
+        origin is not None
+        and entry.identity_state == "valid"
+        and entry.identity is not None
+        and origin.identity == entry.identity
+        and origin.facet == entry.facet
+        and origin.source_path == entry.current.path
+        and state.target_id == target.target_id
+        and (
+            origin.identity.module_id,
+            origin.identity.collection_id,
+        )
+        == (
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+        )
     )
     context = facts.link_context
     local = (
@@ -604,7 +765,7 @@ def bound_resource_record(facts, entry, target, state):
         )
     )
     return (
-        (associated or local)
+        (associated or local or retained)
         and target.kind == "resource"
         and target.identity is None
         and target.canonical_path == entry.current.path
@@ -618,5 +779,5 @@ def bound_resource_record(facts, entry, target, state):
             ),
         )
         and state.existence == "present"
-        and state.content == entry.current.content
+        and canonical_equal(state.content, entry.current.content)
     )

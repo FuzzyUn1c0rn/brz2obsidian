@@ -1,0 +1,207 @@
+{
+  "content": [
+    {
+      "hex": "",
+      "base64": "",
+      "chunk_partitions_hex": [],
+      "inline": "{\"data\":\"\",\"reference\":null}",
+      "Jc": {
+        "preimage": "{\"data\":\"\",\"reference\":null}",
+        "size": 28,
+        "sha256": "41ebd4f04a87e5c60395bf88955e6be1e54739c36674fbe17f06e8c311a74bae"
+      },
+      "Js": {
+        "preimage": "{\"data\": \"\", \"reference\": null}",
+        "size": 31,
+        "sha256": "b4d2598284777a8a11941a36dae7c7f1a7e75d4c16204442db2a651bf76377a8"
+      },
+      "Ju": {
+        "preimage": "{\"data\": \"\", \"reference\": null}",
+        "size": 31,
+        "sha256": "b4d2598284777a8a11941a36dae7c7f1a7e75d4c16204442db2a651bf76377a8"
+      }
+    },
+    {
+      "hex": "61",
+      "base64": "YQ==",
+      "chunk_partitions_hex": [
+        "61"
+      ],
+      "inline": "{\"data\":\"YQ==\",\"reference\":null}",
+      "Jc": {
+        "preimage": "{\"data\":\"YQ==\",\"reference\":null}",
+        "size": 32,
+        "sha256": "af4238155c4eb5974e6e33513072c71491bc0a05b9cdc457d39a4373d022b785"
+      },
+      "Js": {
+        "preimage": "{\"data\": \"YQ==\", \"reference\": null}",
+        "size": 35,
+        "sha256": "601c66615cee179914ce5209c249d10fa88c7ce59d64292636391266f9248dc2"
+      },
+      "Ju": {
+        "preimage": "{\"data\": \"YQ==\", \"reference\": null}",
+        "size": 35,
+        "sha256": "601c66615cee179914ce5209c249d10fa88c7ce59d64292636391266f9248dc2"
+      }
+    },
+    {
+      "hex": "6162",
+      "base64": "YWI=",
+      "chunk_partitions_hex": [
+        "61",
+        "62"
+      ],
+      "inline": "{\"data\":\"YWI=\",\"reference\":null}",
+      "Jc": {
+        "preimage": "{\"data\":\"YWI=\",\"reference\":null}",
+        "size": 32,
+        "sha256": "d8753b39c47cdd2597b7d4252a961263021339f4c0355ecbc23c7cc50f05317f"
+      },
+      "Js": {
+        "preimage": "{\"data\": \"YWI=\", \"reference\": null}",
+        "size": 35,
+        "sha256": "0558115bea3fc8b1fe4ce17cb47abdac9ae734c94622ff454693cda4f8e90718"
+      },
+      "Ju": {
+        "preimage": "{\"data\": \"YWI=\", \"reference\": null}",
+        "size": 35,
+        "sha256": "0558115bea3fc8b1fe4ce17cb47abdac9ae734c94622ff454693cda4f8e90718"
+      }
+    },
+    {
+      "hex": "616263",
+      "base64": "YWJj",
+      "chunk_partitions_hex": [
+        "61",
+        "62",
+        "63"
+      ],
+      "inline": "{\"data\":\"YWJj\",\"reference\":null}",
+      "Jc": {
+        "preimage": "{\"data\":\"YWJj\",\"reference\":null}",
+        "size": 32,
+        "sha256": "ee773f704784e9674f775ef3964f1e9a5e48a54e8c7ed5275b27ee1bd0151bf0"
+      },
+      "Js": {
+        "preimage": "{\"data\": \"YWJj\", \"reference\": null}",
+        "size": 35,
+        "sha256": "dc6c0dd8727759d4e634ede67403bd5713c6e81b721c9382e2a4770071bd247e"
+      },
+      "Ju": {
+        "preimage": "{\"data\": \"YWJj\", \"reference\": null}",
+        "size": 35,
+        "sha256": "dc6c0dd8727759d4e634ede67403bd5713c6e81b721c9382e2a4770071bd247e"
+      }
+    },
+    {
+      "hex": "fbff",
+      "base64": "-_8=",
+      "chunk_partitions_hex": [
+        "fb",
+        "ff"
+      ],
+      "inline": "{\"data\":\"-_8=\",\"reference\":null}",
+      "Jc": {
+        "preimage": "{\"data\":\"-_8=\",\"reference\":null}",
+        "size": 32,
+        "sha256": "9cae700a35705386f04cf476aeda79668327936fb98bf2b4886f10698455cc01"
+      },
+      "Js": {
+        "preimage": "{\"data\": \"-_8=\", \"reference\": null}",
+        "size": 35,
+        "sha256": "78ee5866602259233c6a1798290d294731b860394e70666c9c657dc62824395e"
+      },
+      "Ju": {
+        "preimage": "{\"data\": \"-_8=\", \"reference\": null}",
+        "size": 35,
+        "sha256": "78ee5866602259233c6a1798290d294731b860394e70666c9c657dc62824395e"
+      }
+    }
+  ],
+  "reference_null": {
+    "Jc": {
+      "preimage": "{\"data\":\"-_8=\",\"reference\":null}",
+      "size": 32,
+      "sha256": "9cae700a35705386f04cf476aeda79668327936fb98bf2b4886f10698455cc01"
+    }
+  },
+  "reference_present": {
+    "Jc": {
+      "preimage": "{\"data\":\"-_8=\",\"reference\":{\"content_id\":\"literal:fbff\",\"sha256\":\"db8fed54159afe40ace5b49d702259fd88c9c4009307181824487baab5c6bdea\",\"size\":2}}",
+      "size": 142,
+      "sha256": "c738504e17d903738dfba70a5cbecbc7eda60f6e90d49e006c2951e629628fe3"
+    }
+  },
+  "ordering_and_escaping": {
+    "input_insertion_order": {
+      "z": "é\"\\\n\t\u0001",
+      "a": [
+        null,
+        true,
+        false
+      ]
+    },
+    "Jc": {
+      "preimage": "{\"a\":[null,true,false],\"z\":\"\\u00e9\\\"\\\\\\n\\t\\u0001\"}",
+      "size": 50,
+      "sha256": "01079dcc1e94bcaa72e3b2f26adf72c3184f8a7fdbd1dca407b3f330578a2f61"
+    },
+    "Js": {
+      "preimage": "{\"a\": [null, true, false], \"z\": \"\\u00e9\\\"\\\\\\n\\t\\u0001\"}",
+      "size": 55,
+      "sha256": "be61caaeff1ddfab4975c92d9a81fe579110e80e25cbcb3a7c3ec0b9e26b9122"
+    },
+    "Ju": {
+      "preimage": "{\"z\": \"\\u00e9\\\"\\\\\\n\\t\\u0001\", \"a\": [null, true, false]}",
+      "size": 55,
+      "sha256": "ddb7a128fa4fe62f3a6130cceaf809de2bb302aa557892eca62c72232d5db77c"
+    },
+    "compact_utf8": {
+      "preimage": "{\"z\":\"é\\\"\\\\\\n\\t\\u0001\",\"a\":[null,true,false]}",
+      "size": 46,
+      "sha256": "8309b75899240cbae2e295b0d2fdb49c3cc36d5de70089b51a866e2093bdfb24"
+    }
+  },
+  "omissions": {
+    "omitted_fields": [
+      "operation_reversal",
+      "retained_ownership",
+      "removal_continuation",
+      "operation_bound",
+      "file_roles",
+      "resource_origin"
+    ],
+    "explicit_null_fields": [
+      "reference"
+    ]
+  },
+  "chunk_residues": {
+    "rule": "Concatenate raw partitions first; encode URL-safe base64 with padding at EOF only. Never concatenate independently padded base64 chunks.",
+    "vectors": [
+      {
+        "partitions_hex": [
+          "61",
+          "6263"
+        ],
+        "base64": "YWJj",
+        "incorrect_individually_padded": "YQ==YmM="
+      },
+      {
+        "partitions_hex": [
+          "6162",
+          "63"
+        ],
+        "base64": "YWJj",
+        "incorrect_individually_padded": "YWI=Yw=="
+      },
+      {
+        "partitions_hex": [
+          "fb",
+          "ff"
+        ],
+        "base64": "-_8=",
+        "incorrect_individually_padded": "-w==_w=="
+      }
+    ]
+  }
+}

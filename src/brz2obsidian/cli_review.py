@@ -180,7 +180,14 @@ def run(args):
         return report(_apply(args), json_output=args.json_output)
     if args.review_command == "inspect":
         return report(_inspect(args), json_output=args.json_output)
-    observed = Operations().inspect_history_workflow(args.vault)
+    operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    observed = (
+        operations.inspect_owned_history_status(args.vault)
+        if type(operations) is NativeOperations
+        else operations.inspect_history_workflow(args.vault)
+    )
     result = CliReviewResult(
         command="status",
         status=observed.status,
@@ -257,6 +264,29 @@ def _prepare(args):
             ),
         )
     operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    if type(operations) is NativeOperations:
+        from uuid import uuid4
+
+        from .application.update_context import UpdateContext
+
+        context = UpdateContext(operations=operations)
+        try:
+            opened = context.prepare(
+                args.vault,
+                source=args.source,
+                selection_id=str(uuid4()),
+                kind=args.kind.replace("-", "_"),
+                original_source=args.original_source
+                if args.kind == "onboarding"
+                else None,
+            )
+            if opened.binding is not None:
+                context.save(opened.binding)
+            return _update_result(context._last_result, command="prepare")
+        finally:
+            context._retire_owner()
     if args.kind == "source-update":
         prepared = operations.prepare_update(args.vault, args.source)
     elif args.kind == "onboarding":
@@ -291,10 +321,15 @@ def _inspect(args):
             ),
         )
     operations = Operations()
-    loaded = operations.load_update(args.vault)
-    if loaded.loaded is None:
-        return _update_result(loaded)
-    if (
+    from .application.operations import Operations as NativeOperations
+
+    if type(operations) is NativeOperations:
+        return _inspect_context(args, operations)
+    return _inspect_operations(args, operations)
+
+
+def _requested_identity_changed(args, loaded):
+    return (
         (args.proposal_id is not None and args.proposal_id != loaded.operation_id)
         or (args.generation is not None and args.generation != loaded.generation)
         or (
@@ -303,7 +338,90 @@ def _inspect(args):
                 loaded.checkpoint is None or args.checkpoint != loaded.checkpoint.commit
             )
         )
-    ):
+    )
+
+
+def _inspect_context(args, operations):
+    from uuid import uuid4
+
+    from .application.update_context import UpdateContext
+
+    context = UpdateContext(operations=operations)
+    selection = str(uuid4())
+    try:
+        context.load(args.vault, selection_id=selection)
+        loaded = context._last_result
+        if loaded.status != "unresolved" or loaded.code != "revalidation_required":
+            return _update_result(loaded)
+        if _requested_identity_changed(args, loaded):
+            return _update_result(
+                loaded,
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        opened = context.resume(args.vault, selection_id=selection)
+        current = context._last_result
+        if current.preparation is None:
+            return _update_result(current)
+        if (current.operation_id, current.generation, current.preparation.locator) != (
+            loaded.operation_id,
+            loaded.generation,
+            loaded.checkpoint,
+        ):
+            return _update_result(
+                current,
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("review_update",),
+            )
+        shown = context.page(
+            opened.binding,
+            offset=args.offset,
+            limit=args.limit,
+            byte_offset=args.byte_offset,
+            byte_limit=args.byte_limit,
+        )
+        if shown.status != "available":
+            return _update_result(
+                current,
+                status="refused",
+                code=shown.code,
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        choices = context.choice_page(
+            opened.binding, offset=args.offset, limit=args.limit
+        )
+        if choices.status != "available":
+            return _update_result(
+                current,
+                status="refused",
+                code=choices.code,
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        return _update_result(
+            current,
+            page=shown.page,
+            choices=choices.offers,
+            choices_total=choices.total_choices,
+            choices_next_offset=choices.next_choice_offset,
+            omissions=("attachment_alternative_outputs",)
+            + (("source_gap_details",) if current.preparation.source_gaps else ()),
+        )
+    finally:
+        context._retire_owner()
+
+
+def _inspect_operations(args, operations, *, loaded=None):
+    if loaded is None:
+        loaded = operations.load_update(args.vault)
+    if loaded.loaded is None:
+        return _update_result(loaded)
+    if _requested_identity_changed(args, loaded):
         return _update_result(
             loaded,
             status="stale_review",
@@ -367,6 +485,10 @@ def _apply(args):
             guidance=("Inspect the saved proposal before applying it.",),
         )
     operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    if type(operations) is NativeOperations:
+        return _apply_context(args, operations)
     loaded = operations.load_update(args.vault)
     if loaded.loaded is None:
         return _update_result(loaded, command="apply")
@@ -418,6 +540,66 @@ def _apply(args):
         source=current.preparation.observed_source,
         output_identity=current.preparation.review.facts.incoming_identity,
     )
+
+
+def _apply_context(args, operations):
+    from uuid import uuid4
+
+    from .application.update_context import UpdateContext
+
+    context = UpdateContext(operations=operations)
+    selection = str(uuid4())
+    try:
+        context.load(args.vault, selection_id=selection)
+        loaded = context._last_result
+        if loaded.status != "unresolved" or loaded.code != "revalidation_required":
+            return _update_result(loaded, command="apply")
+        if _requested_identity_changed(args, loaded):
+            return _update_result(
+                loaded,
+                command="apply",
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        opened = context.resume(args.vault, selection_id=selection)
+        current = context._last_result
+        if current.preparation is None:
+            return _update_result(current, command="apply")
+        if (current.operation_id, current.generation, current.preparation.locator) != (
+            loaded.operation_id,
+            loaded.generation,
+            loaded.checkpoint,
+        ):
+            return _update_result(
+                current,
+                command="apply",
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("review_update",),
+            )
+        if not current.ready:
+            return _update_result(
+                current,
+                command="apply",
+                status="unresolved",
+                code="review_not_ready",
+                ready=False,
+                next_actions=("resolve_update", "save_update"),
+            )
+        context.apply(opened.binding)
+        return _update_result(
+            context._last_result,
+            command="apply",
+            proposal_id=current.operation_id,
+            generation=current.generation,
+            source=current.preparation.observed_source,
+            output_identity=current.preparation.review.facts.incoming_identity,
+        )
+    finally:
+        context._retire_owner()
 
 
 def report_argument_failure(command, *, json_output):

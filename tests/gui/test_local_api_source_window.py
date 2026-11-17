@@ -50,7 +50,7 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
             kind.setCurrentIndex(1)
             until(app, lambda: window.snapshot.source_kind == "local-api")
             control(window, QLineEdit, "Local API address").setText(address)
-            advanced = control(window, QPushButton, "Advanced API search limits")
+            advanced = control(window, QPushButton, "Advanced API limits")
             assert not control(window, QLineEdit, "Initial result limit").isVisible()
             advanced.click()
             assert control(window, QLineEdit, "Initial result limit").text() == "5000"
@@ -77,6 +77,9 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
                 ),
             )
             assert not refresh.isEnabled() and not kind.isEnabled()
+            assert not control(
+                window, QLineEdit, "Maximum total capture bytes"
+            ).isEnabled()
             heartbeat = []
             QTimer.singleShot(0, lambda: heartbeat.append(True))
             until(app, lambda: heartbeat)
@@ -98,11 +101,17 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
 def test_real_worker_gui_publishes_only_after_api_review_and_destination(
     tmp_path, monkeypatch
 ):
+    import json
+
     from brz2obsidian_ui.window import MainWindow
+    from tests.local_acceptance.api_icon_inputs import bmp
+    from tests.sources.test_local_api_images_v3 import ICON, IcoIconApi
+    from tests.support.local_api import HOME
 
     monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
     app = QApplication.instance() or QApplication([])
-    with api_server() as (_, address):
+    fixture = bmp()
+    with api_server(IcoIconApi(fixture["raw"])) as (_, address):
         window = MainWindow()
         window.show()
         try:
@@ -116,6 +125,7 @@ def test_real_worker_gui_publishes_only_after_api_review_and_destination(
             until(app, lambda: window.snapshot.source_selection is not None)
             control(window, QPushButton, "Inspect Brain").click()
             until(app, lambda: window.snapshot.reviewed is not None)
+            assert window.snapshot.reviewed.profile_version == "5"
             window.parent_selected(str(tmp_path))
             name = control(window, QLineEdit, "Vault name")
             QTest.keyClicks(name, "API GUI vault")
@@ -124,7 +134,20 @@ def test_real_worker_gui_publishes_only_after_api_review_and_destination(
             until(app, lambda: window.snapshot.publication is not None)
             assert window.snapshot.publication.receipt_verified
             assert window.snapshot.result.status == "conversion_created"
-            assert (tmp_path / "API GUI vault/migration-record.json").is_file()
+            vault = tmp_path / "API GUI vault"
+            record = json.loads((vault / "migration-record.json").read_bytes())
+            assert record["profile_version"] == "5"
+            asset = next(a for a in record["asset_targets"] if a["asset_id"] == ICON)
+            assert (asset["owner"], asset["role"], asset["original_name"]) == (
+                HOME,
+                "icon",
+                "Icon.png",
+            )
+            assert (asset["actual_length"], asset["actual_sha256"]) == (
+                fixture["length"],
+                fixture["sha256"],
+            )
+            assert (vault / asset["relative_path"]).read_bytes() == fixture["raw"]
             assert KEY not in window.snapshot.model_dump_json()
         finally:
             window.shutdown()

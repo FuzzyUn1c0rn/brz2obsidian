@@ -1,6 +1,7 @@
 """Qualified owned payload facts; rendered note responses are never a fallback."""
 
 import hashlib
+import json
 import warnings
 from decimal import Decimal
 from io import BytesIO
@@ -14,7 +15,7 @@ from brz2obsidian.contracts import Asset, Document, MigrationRefused
 
 from ..external_files import external_file_uri
 from .declarations import source_date, uuid
-from .errors import refuse, unsupported_shape
+from .errors import check_cancel, refuse, unsupported_shape
 from .ico import validate_ico
 from .jpeg import validate_jpeg
 from .notes import scope_text
@@ -118,7 +119,7 @@ def role(value, profile_version):
         if kind == 1 and location == "Notes.md" and name is None:
             return "note_original"
         refuse("The authored note declaration is not qualified")
-    if profile_version == "3" and kind in {2, 8} and name is None:
+    if profile_version in {"3", "4", "5"} and kind in {2, 8} and name is None:
         reference_uri(location, profile_version)
         return {2: "file", 8: "directory"}[kind]
     if kind == 3:
@@ -142,9 +143,9 @@ def role(value, profile_version):
         and name is None
         and location
         in {value["id"] + ".webp"}
-        | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
-        | ({value["id"] + ".jpg"} if profile_version == "3" else set())
-        | ({value["id"] + ".svg"} if profile_version == "3" else set())
+        | ({value["id"] + ".png"} if profile_version in {"2", "3", "4", "5"} else set())
+        | ({value["id"] + ".jpg"} if profile_version in {"3", "4", "5"} else set())
+        | ({value["id"] + ".svg"} if profile_version in {"3", "4", "5"} else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -159,7 +160,9 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version in {"2", "3"}
+            or profile_version in {"4", "5"}
+            and kind == 1
+            or profile_version in {"2", "3", "4", "5"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
         ):
@@ -171,7 +174,13 @@ def role(value, profile_version):
     )
 
 
-def validate_bytes(value, raw, profile_version):
+def validate_bytes(value, raw, profile_version, *, cancel=None):
+    check_cancel(cancel)
+    if profile_version == "5" and role(value, profile_version) == "icon":
+        from .icons import validate_structural_icon
+
+        if validate_structural_icon(raw, cancel=cancel):
+            return "icon"
     source = raw if isinstance(raw, Path) else BytesIO(raw)
     if isinstance(raw, Path):
         with raw.open("rb") as stream:
@@ -189,7 +198,8 @@ def validate_bytes(value, raw, profile_version):
         except UnicodeError:
             refuse("Required authored text is not strict UTF-8")
         return selected
-    suffix = value["location"].rsplit(".", 1)[-1].lower()
+    location = value["location"]
+    suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
     if selected == "file" and suffix == "pdf":
         if not prefix.startswith(b"%PDF-"):
             refuse("Required PDF bytes do not match the qualified signature")
@@ -203,7 +213,9 @@ def validate_bytes(value, raw, profile_version):
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
         return selected
-    if selected == "image" and suffix == "svg" and profile_version == "3":
+    if selected == "file" and profile_version in {"4", "5"} and suffix != "png":
+        return selected
+    if selected == "image" and suffix == "svg" and profile_version in {"3", "4", "5"}:
         validate_svg(raw)
         return selected
     expected = None
@@ -213,9 +225,9 @@ def validate_bytes(value, raw, profile_version):
         expected = "PNG"
     elif prefix.startswith(b"\xff\xd8\xff") and (
         selected == "icon"
-        and profile_version in {"2", "3"}
+        and profile_version in {"2", "3", "4", "5"}
         or selected == "image"
-        and profile_version == "3"
+        and profile_version in {"3", "4", "5"}
         and suffix == "jpg"
     ):
         expected = "JPEG"
@@ -228,14 +240,16 @@ def validate_bytes(value, raw, profile_version):
         expected = "WEBP"
     if (
         selected == "icon"
-        and profile_version == "3"
+        and profile_version in {"3", "4"}
         and prefix[:4] == b"\x00\x00\x01\x00"
     ):
-        validate_ico(raw)
+        validate_ico(raw, cancel=cancel)
         return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
-    strict_jpeg = selected == "image" and profile_version == "3" and suffix == "jpg"
+    strict_jpeg = (
+        selected == "image" and profile_version in {"3", "4", "5"} and suffix == "jpg"
+    )
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -245,6 +259,7 @@ def validate_bytes(value, raw, profile_version):
                 if selected == "image" and suffix == "jpg" and image.format != "JPEG":
                     raise ValueError
                 image.verify()
+            check_cancel(cancel)
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
@@ -253,8 +268,10 @@ def validate_bytes(value, raw, profile_version):
                 if min(image.size) <= 0:
                     raise ValueError
                 for index in range(getattr(image, "n_frames", 1)):
+                    check_cancel(cancel)
                     image.seek(index)
                     image.load()
+                    check_cancel(cancel)
                 if strict_jpeg:
                     verified_jpeg = image.size, image.mode
     except (
@@ -364,7 +381,7 @@ def capture_owner(
                     sink=stream,
                 )
                 note_bytes = stream.getvalue()
-            validate_bytes(value, note_bytes, profile_version)
+            validate_bytes(value, note_bytes, profile_version, cancel=client.cancel)
             measured_length, measured_hash = len(note_bytes), hashlib.sha256(note_bytes)
         else:
             with directory.open(raw.name, "xb") as stream:
@@ -374,12 +391,15 @@ def capture_owner(
                     asset_id,
                     sink=stream,
                     allow_missing_txt=value["type"] == 15,
+                    allow_missing_image=profile_version in {"4", "5"}
+                    and selected == "image",
+                    bounded_icon=profile_version == "5" and selected == "icon",
                 )
             if status == 404:
-                assets.append(Asset(**common, role="file", availability="absent"))
+                assets.append(Asset(**common, role=selected, availability="absent"))
                 continue
             directory.verify()
-            validate_bytes(value, raw, profile_version)
+            validate_bytes(value, raw, profile_version, cancel=client.cancel)
             measured_length, measured_hash = 0, hashlib.sha256()
             with directory.open(raw.name, "rb") as stream:
                 while chunk := stream.read(65536):
@@ -390,7 +410,13 @@ def capture_owner(
             client.ensure_safe(text)
             if documents:
                 refuse("Multiple authored notes have ambiguous ownership")
-            text, removed = scope_text(text, excluded)
+            text, removed = scope_text(
+                text,
+                excluded,
+                brain_id=brain,
+                allow_qualified=profile_version in {"4", "5"},
+                allow_literal_tokens=profile_version in {"4", "5"},
+            )
             record("note_text", "note_text:" + owner, owner, {"text": text})
             if removed:
                 decisions.append(
@@ -443,11 +469,26 @@ def capture_owner(
     return assets, documents, payloads
 
 
+def _finding_document(finding):
+    try:
+        value = json.loads(finding.observed_json)
+        if not isinstance(value, dict):
+            raise TypeError
+        return value.get("document")
+    except ValueError, TypeError:
+        refuse("Image finding has invalid structured provenance")
+
+
 def validate_payload_binding(source, snapshot, audit):
     """Bind normalized content to closed qualified source facts, not just hashes."""
     from .notes import bind_documents
 
     profile = source["identifiers"]["profile_version"]
+    excluded_thoughts = {
+        record["value"]["id"]
+        for record in source["records"]
+        if record["domain"] == "exclusion"
+    }
     attachments = {
         r["value"]["id"]: r["value"]
         for r in source["records"]
@@ -512,10 +553,10 @@ def validate_payload_binding(source, snapshot, audit):
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")
-    from .gaps import gap_projections, validate_gap_audit
+    from .gaps import gap_projections, image_absence_facts, validate_gap_audit
 
     expected_findings, expected_decisions = gap_projections(
-        snapshot.assets, attachments
+        snapshot.assets, attachments, profile_version=profile
     )
     if (
         sorted(
@@ -529,7 +570,15 @@ def validate_payload_binding(source, snapshot, audit):
         != expected_decisions
     ):
         refuse("Missing TXT scope decisions disagree with qualified payload facts")
-    validate_gap_audit(snapshot.assets, audit, expected_decisions)
+    validate_gap_audit(
+        snapshot.assets, audit, expected_decisions, profile_version=profile
+    )
+    image_absences = image_absence_facts(
+        snapshot.assets,
+        attachments,
+        [request.model_dump(mode="json") for request in audit.requests],
+        profile,
+    )
     owners = set()
     for document in snapshot.documents:
         if document.owner in owners or document.owner not in texts:
@@ -557,8 +606,18 @@ def validate_payload_binding(source, snapshot, audit):
         retained_findings = [
             finding
             for finding in snapshot.findings
-            if finding.rule_id == "local-api.note-formatting.v1"
-            and finding.affected == tuple(sorted((document.owner, document.key)))
+            if (
+                finding.rule_id == "local-api.note-formatting.v1"
+                and set(finding.affected) == {document.owner, document.key}
+            )
+            or (
+                finding.rule_id
+                in {
+                    "thebrain.unavailable-image.v1",
+                    "thebrain.unavailable-declared-image.v1",
+                }
+                and _finding_document(finding) == document.key
+            )
         ]
         expected = None
         # Compare complete interpretations, including findings when text is
@@ -594,6 +653,12 @@ def validate_payload_binding(source, snapshot, audit):
                     compact_tables=compact_tables,
                     legacy_table_boundaries=legacy_table_boundaries,
                     preserve_table_warnings=preserve_table_warnings,
+                    brain_id=source["brain"]["id"],
+                    allow_qualified=profile in {"4", "5"},
+                    allow_literal_tokens=profile in {"4", "5"},
+                    excluded=excluded_thoughts,
+                    profile_version=profile,
+                    image_absences=image_absences,
                 )
             except MigrationRefused:
                 continue
@@ -630,6 +695,14 @@ def validate_payload_binding(source, snapshot, audit):
             )
         ):
             refuse("Normalized Markdown is not bound to qualified scoped source text")
+    admitted_images = {
+        key
+        for finding in expected_findings
+        if finding.rule_id == "thebrain.unavailable-declared-image.v1"
+        for key in finding.affected
+    }
+    if set(image_absences) != admitted_images:
+        refuse("An unavailable declared image has no admitted active reference")
     if sorted(snapshot.findings, key=lambda f: (f.affected, f.observed_json)) != sorted(
         expected_findings, key=lambda f: (f.affected, f.observed_json)
     ):

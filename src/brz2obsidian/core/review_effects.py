@@ -1,9 +1,15 @@
 """Derive effective selected files and check cross-choice link coherence."""
 
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
-from brz2obsidian.core.link_validation import validate_link_document
-from brz2obsidian.core.review_composition import composed_text_documents
+from brz2obsidian.core.link_validation import _validate_link_document
+from brz2obsidian.core.review_appearance import provider_chain_blockers
+from brz2obsidian.core.review_composition import (
+    automatic_composed_document,
+    automatic_reference_document,
+)
 from brz2obsidian.core.review_links import (
     bound_resource_record,
     current_baseline,
@@ -20,6 +26,7 @@ from .reversals import (
     reversal_target,
     selected_reversal_outputs,
 )
+from .text_candidates import validate_text_candidate
 
 
 def _onboarding_current_effects(facts, proposal, actions, approvals):
@@ -54,6 +61,9 @@ def _onboarding_current_effects(facts, proposal, actions, approvals):
             ):
                 return False
             candidate = approval.attachment_candidate
+            if candidate is not None:
+                candidate_states = {s.target_id: s for s in candidate.target_facts}
+                current_states = {s.target_id: s for s in context.current_target_facts}
             if candidate is not None and (
                 approval.attachment_selection.link_choices
                 or len(candidate.outputs) != 1
@@ -61,26 +71,90 @@ def _onboarding_current_effects(facts, proposal, actions, approvals):
                 or {t.target_id: t for t in candidate.targets}
                 != {t.target_id: t for t in context.current_targets}
                 or len(candidate.target_facts) != len(context.current_target_facts)
-                or {s.target_id: s for s in candidate.target_facts}
-                != {s.target_id: s for s in context.current_target_facts}
+                or candidate_states.keys() != current_states.keys()
+                or any(
+                    not canonical_equal(state, current_states[target_id])
+                    for target_id, state in candidate_states.items()
+                )
                 or len(candidate.documents) != len(context.current_documents)
                 or {d.document_id: d for d in candidate.documents}
                 != {d.document_id: d for d in context.current_documents}
                 or any(
                     o.path != subject.current.path
-                    or o.content != subject.current.content
+                    or not canonical_equal(o.content, subject.current.content)
                     for o in candidate.outputs
                 )
             ):
                 return False
         content = change.result if approval is None else approval.result
         path = change.target_path if approval is None else approval.target_path
-        if content != subject.current.content or path != subject.current.path:
+        if (
+            not canonical_equal(content, subject.current.content)
+            or path != subject.current.path
+        ):
             return False
     return True
 
 
-def selected_effect_blockers(facts, proposal, actions, approvals):
+def _renew_selected_current_resources(
+    facts, authority, document, resolved, targets, states, current_resources
+):
+    """Recertify unchanged incoming bytes after a later exact Current selection."""
+    if authority is None:
+        return document
+    change, candidate, ordinal = authority
+    if not canonical_equal(document, candidate.links):
+        return document
+    prior_targets = {target.target_id: target for target in candidate.link_targets}
+    selected_targets = {target.target_id: target for target in targets}
+    occurrences = []
+    changed = False
+    for occurrence, actual in zip(document.occurrences, resolved, strict=True):
+        target_id = occurrence.meaning.target_id
+        before, after = prior_targets.get(target_id), selected_targets.get(target_id)
+        if (
+            current_resources.get(target_id, -1) > ordinal
+            and before is not None
+            and after is not None
+            and before.kind == after.kind == "resource"
+            and before.status == after.status == "safe"
+            and canonical_equal(
+                (
+                    before.target_id,
+                    before.identity,
+                    before.canonical_path,
+                    before.target,
+                ),
+                (after.target_id, after.identity, after.canonical_path, after.target),
+            )
+            and occurrence.meaning.status == actual.status == "resolved"
+            and occurrence.meaning != actual
+            and occurrence.meaning.model_copy(
+                update={"target_version": actual.target_version}
+            )
+            == actual
+        ):
+            occurrence = occurrence.model_copy(update={"meaning": actual})
+            changed = True
+        occurrences.append(occurrence)
+    if not changed:
+        return document
+    renewed = document.model_copy(update={"occurrences": tuple(occurrences)})
+    proof = candidate.model_copy(
+        update={
+            "links": renewed,
+            "link_targets": targets,
+            "link_target_facts": states,
+        }
+    )
+    return (
+        renewed
+        if validate_text_candidate(facts, change, proof, "incoming")
+        else document
+    )
+
+
+def selected_effect_blockers(facts, proposal, actions, approvals, *, composition):
     context = facts.link_context
     if context is None:
         return (
@@ -109,15 +183,17 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     original_documents = dict(documents)
     approved = {a.change_id: a for a in approvals}
     action_by_id = {a.decision_id: a for a in actions}
+    action_order = {a.decision_id: index for index, a in enumerate(actions)}
+    current_resources = {}
+    incoming_authorities = {}
     writes = {}
     proof_documents = {}
     explicit_documents = set()
     operation_documents = set()
     changed_ids = set()
     blockers = []
-    composed_documents, composition_conflict = composed_text_documents(
-        facts, actions, approvals
-    )
+    composed_documents = dict(composition.documents)
+    composition_conflict = composition.conflict
 
     def add(code):
         if code not in blockers:
@@ -146,7 +222,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if current != target or old_state != state:
             changed_ids.add(target.target_id)
         targets[target.target_id] = target
-        if state is None or state.content != content:
+        if state is None or not canonical_equal(state.content, content):
             states.pop(target.target_id, None)
         else:
             states[target.target_id] = state
@@ -183,7 +259,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                         + context.incoming_target_facts
                         if s.target_id == target_id
                         and s.content is not None
-                        and s.content.data == content.data
+                        and same_content(s.content, content)
                     ),
                     None,
                 )
@@ -217,7 +293,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     for d in source_documents
                     if d.source_path == row.path
                     and d.document_id == target_id
-                    and d.content == content
+                    and canonical_equal(d.content, content)
                 )
                 if len(retained_documents) != 1:
                     add("selected_link_context_conflict")
@@ -240,7 +316,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 candidate is not None
                 and present
                 and candidate.links.source_path == row.path
-                and candidate.content.data == content.data
+                and same_content(candidate.content, content)
             ):
                 documents = {
                     key: doc
@@ -269,6 +345,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             target = next(t for t in candidate.targets if t.target_id == target_id)
             state = next(s for s in candidate.target_facts if s.target_id == target_id)
             write(target, None, change.path, state)
+        selection_action = action_by_id.get(approval.decision_id)
         for output in candidate.outputs:
             target = next(
                 t for t in candidate.targets if t.target_id == output.target_id
@@ -278,6 +355,20 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 None,
             )
             write(target, output.content, output.path, state)
+            if (
+                facts.format_operation.automatic_merge
+                and approval.provenance == "explicit_user"
+                and selection_action is not None
+                and selection_action.domain == approval.domain == "attachment"
+                and selection_action.choice
+                == approval.choice
+                == approval.attachment_selection.choice
+                == "current"
+                and len(candidate.outputs) == 1
+                and output.path == change.path
+                and canonical_equal(output.content, change.current)
+            ):
+                current_resources[output.target_id] = action_order[approval.decision_id]
         for document in candidate.documents:
             composed = composed_documents.get(document.document_id)
             if composed is not None:
@@ -333,19 +424,44 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path
+        composed = automatic_composed_document(
+            facts, change, approval, composed_documents
+        )
+        if composed is not None:
+            document, state = composed
+            documents[document.document_id] = document
+            proof_documents[document.document_id] = document
+            if not canonical_equal(document.content, subject.current.content):
+                targets_for_path = tuple(
+                    t
+                    for t in context.current_targets
+                    if t.canonical_path == selected_path
+                )
+                if len(targets_for_path) != 1:
+                    add("selected_link_context_conflict")
+                else:
+                    write(targets_for_path[0], document.content, selected_path, state)
+            continue
+        reference = automatic_reference_document(facts, change, approval, approvals)
+        if reference is not None:
+            documents[reference.document_id] = reference
+            proof_documents[reference.document_id] = reference
+            continue
         if (
             facts.format_operation.kind == "attachment_cleanup"
             and approval is None
             and not change.requires_decision
             and change.disposition == "preserve_vault"
             and selected_path == subject.current.path
-            and content == subject.current.content
+            and canonical_equal(content, subject.current.content)
             and any(
                 document.document_id in explicit_documents
                 and document.source_path == selected_path
-                and document.content != content
+                and not canonical_equal(document.content, content)
                 and (prior := original_documents.get(document.document_id)) is not None
-                and (prior.content, prior.source_path) == (content, selected_path)
+                and canonical_equal(
+                    (prior.content, prior.source_path), (content, selected_path)
+                )
                 for document in proof_documents.values()
             )
         ):
@@ -379,7 +495,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             matching = tuple(
                 d
                 for d in context.current_documents
-                if d.content == content and d.source_path == selected_path
+                if canonical_equal(d.content, content)
+                and d.source_path == selected_path
             )
             document = matching[0] if len(matching) == 1 else None
             source_targets = context.current_targets
@@ -413,7 +530,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 (
                     s
                     for s in source_states
-                    if s.target_id == target.target_id and s.content == content
+                    if s.target_id == target.target_id
+                    and canonical_equal(s.content, content)
                 ),
                 None,
             )
@@ -424,7 +542,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                         s
                         for s in context.current_target_facts
                         + context.incoming_target_facts
-                        if s.target_id == target.target_id and s.content == content
+                        if s.target_id == target.target_id
+                        and canonical_equal(s.content, content)
                     ),
                     None,
                 )
@@ -439,17 +558,57 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             ):
                 add("selected_link_context_conflict")
             continue
-        if document.source_path != selected_path or document.content != content:
+        if document.source_path != selected_path or not canonical_equal(
+            document.content, content
+        ):
             add("selected_link_context_conflict")
             continue
         existing = documents.get(document.document_id)
         if (
             document.document_id in explicit_documents
             and existing is not None
-            and (existing.content, existing.source_path) != (content, selected_path)
+            and not canonical_equal(
+                (existing.content, existing.source_path), (content, selected_path)
+            )
         ):
             add("selected_output_conflict")
         documents[document.document_id] = document
+        if (
+            facts.format_operation.automatic_merge
+            and approval is not None
+            and approval.provenance == "explicit_user"
+            and action is not None
+            and action.domain == "text"
+            and action.choice == approval.choice == "incoming"
+            and candidate is not None
+            and canonical_equal(content, change.incoming)
+        ):
+            incoming_authorities[document.document_id] = (
+                change,
+                candidate,
+                action_order[action.decision_id],
+            )
+        elif (
+            facts.format_operation.automatic_merge
+            and approval is None
+            and change.disposition == "compatible"
+            and not change.requires_decision
+            and subject.baseline.status == "known"
+            and subject.current.existence == "present"
+            and same_content(subject.current.content, subject.baseline.content)
+            and same_content(content, change.incoming)
+            and subject.automatic_result is not None
+            and same_content(subject.automatic_result.content, change.incoming)
+            and validate_text_candidate(
+                facts, change, subject.automatic_result, "incoming"
+            )
+            and canonical_equal(document, subject.automatic_result.links)
+        ):
+            incoming_authorities[document.document_id] = (
+                change,
+                subject.automatic_result,
+                -1,
+            )
         if approval is not None or change.provenance.rule == "remembered_keep":
             explicit_documents.add(document.document_id)
 
@@ -460,6 +619,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
+    # Historical7 persisted reviews retain their qualified replay semantics.
+    if facts.incoming_identity.output_format == 8:
+        for code in provider_chain_blockers(
+            context.current_target_facts,
+            final_states,
+            current_targets=context.current_targets,
+            selected_targets=final_targets,
+        ):
+            add(code)
     attachment_links = {
         (choice.document_id, choice.occurrence_id)
         for approval in approvals
@@ -542,7 +710,16 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     occurrence = occurrence.model_copy(update={"meaning": actual})
                 occurrences.append(occurrence)
             document = document.model_copy(update={"occurrences": tuple(occurrences)})
-        validation = validate_link_document(
+        document = _renew_selected_current_resources(
+            facts,
+            incoming_authorities.get(document.document_id),
+            document,
+            resolved,
+            final_targets,
+            final_states,
+            current_resources,
+        )
+        validation = _validate_link_document(
             document,
             expected_content=document.content,
             expected_path=document.source_path,
@@ -603,7 +780,7 @@ def current_note_coverage(facts):
             d
             for d in context.current_documents
             if d.source_path == entry.current.path
-            and d.content == entry.current.content
+            and canonical_equal(d.content, entry.current.content)
         )
         if (
             len(documents) != 1
@@ -629,7 +806,8 @@ def selected_effect_active(facts, proposal, approvals):
         if approval is not None and approval.attachment_candidate is not None:
             if any(
                 not any(
-                    e.current.path == o.path and e.current.content == o.content
+                    e.current.path == o.path
+                    and canonical_equal(e.current.content, o.content)
                     for e in facts.identity_inventory
                 )
                 for o in approval.attachment_candidate.outputs
@@ -645,7 +823,9 @@ def selected_effect_active(facts, proposal, approvals):
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
         path = change.target_path if approval is None else approval.target_path
-        if path != subject.current.path or content != subject.current.content:
+        if path != subject.current.path or not canonical_equal(
+            content, subject.current.content
+        ):
             return True
         if (
             approval is not None

@@ -87,3 +87,44 @@ def test_review_status_reports_initialization_without_creating_history(tmp_path)
     assert value["next_actions"] == ["initialize_vault"]
     assert note.read_bytes() == b"Keep authored bytes\r\n"
     assert sorted(path.name for path in vault.iterdir()) == ["Authored.md"]
+
+
+def test_status_subclass_uses_legacy_port_and_preserves_contract(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.cli import main
+
+    class Port(Operations):
+        def inspect_owned_history_status(self, vault):
+            raise AssertionError("subclass must use its legacy port")
+
+        def inspect_history_workflow(self, vault):
+            return SimpleNamespace(
+                status="unavailable",
+                code="history_unavailable",
+                history_retained=False,
+                checkpoint=None,
+                operation=None,
+                recovery_gaps=(),
+                findings=(),
+                next_actions=("inspect_history",),
+                summary="History is unavailable.",
+                guidance=(),
+            )
+
+    monkeypatch.setattr("brz2obsidian.cli_review.Operations", Port)
+    assert main(["review", "status", "vault", "--json"]) == 2
+    output = capsys.readouterr()
+    value = json.loads(output.out)
+    assert output.err == ""
+    assert (value["schema"], value["schema_version"], value["command"]) == (
+        "brz2obsidian.cli-review-result",
+        1,
+        "status",
+    )
+    assert (value["status"], value["code"], value["next_actions"]) == (
+        "unavailable",
+        "history_unavailable",
+        ["inspect_history"],
+    )

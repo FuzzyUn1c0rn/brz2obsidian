@@ -4,6 +4,44 @@ from brz2obsidian.core import reconcile
 from tests.reconciliation.test_absence import facts_for
 
 
+def test_current_scope_preserves_duplicate_and_exact_document_decisions():
+    facts = linked_attachment_request()
+    context = facts.link_context
+    original = reconcile(facts)
+    assert not original.findings
+
+    for field, item in (
+        ("current_targets", context.current_targets[0]),
+        ("current_target_facts", context.current_target_facts[0]),
+    ):
+        changed = context.model_copy(update={field: getattr(context, field) + (item,)})
+        result = reconcile(facts.model_copy(update={"link_context": changed}))
+        assert [finding.code for finding in result.findings] == ["link_context_invalid"]
+        assert result.changes[0].disposition == "refused"
+
+    document = context.current_documents[0]
+    duplicate = context.model_copy(
+        update={"current_documents": context.current_documents + (document,)}
+    )
+    result = reconcile(facts.model_copy(update={"link_context": duplicate}))
+    assert [finding.code for finding in result.findings] == ["link_context_unavailable"]
+    assert result.changes[0].disposition == "refused"
+
+    different = document.model_copy(
+        update={
+            "document_id": "other:note",
+            "content": document.content.model_copy(update={"data": b"other"}),
+            "occurrences": (),
+        }
+    )
+    changed = context.model_copy(
+        update={"current_documents": context.current_documents + (different,)}
+    )
+    result = reconcile(facts.model_copy(update={"link_context": changed}))
+    assert not result.findings
+    assert result.changes[0].disposition == original.changes[0].disposition
+
+
 def attachment_request():
     from brz2obsidian.contracts import (
         AttachmentDestination,
@@ -642,6 +680,73 @@ def linked_attachment_request(
         }
     )
     return facts
+
+
+def test_repeated_link_snapshots_recompute_versions_and_reject_stale_meanings():
+    from hashlib import sha256
+
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.obsidian import interpret_link_target
+
+    proposals = []
+    for raw in (b"first", b"second", b"first"):
+        facts = linked_attachment_request(payload_current=raw)
+        subject = facts.subjects[0]
+        facts = facts.model_copy(
+            update={
+                "subjects": (
+                    subject.model_copy(
+                        update={
+                            "attachment": subject.attachment.model_copy(
+                                update={"affected_documents": ()}
+                            )
+                        }
+                    ),
+                )
+            }
+        )
+        proposal = reconcile(facts)
+        links = proposal.changes[0].attachment_review.links
+        assert [row.old.target_version for row in links] == [
+            sha256(raw).hexdigest()
+        ] * 2
+        assert [row.old.display_text for row in links] == [
+            "Keep first",
+            "Redirect second",
+        ]
+        proposals.append(proposal)
+    assert proposals[0] == proposals[2] and proposals[0] != proposals[1]
+
+    stale = linked_attachment_request(payload_current=b"first")
+    current = stale.subjects[0].current.model_copy(
+        update={"content": ExactContent(data=b"second")}
+    )
+    context = stale.link_context
+    changed = stale.model_copy(
+        update={
+            "subjects": (stale.subjects[0].model_copy(update={"current": current}),),
+            "identity_inventory": (
+                stale.identity_inventory[0].model_copy(update={"current": current}),
+            )
+            + stale.identity_inventory[1:],
+            "link_context": context.model_copy(
+                update={
+                    "current_target_facts": (
+                        interpret_link_target(
+                            current.content,
+                            target_id="resource:payload",
+                            existence="present",
+                            memberships=(),
+                        ),
+                    )
+                    + context.current_target_facts[1:]
+                }
+            ),
+        }
+    )
+    refused = reconcile(changed)
+    assert not refused.ready
+    assert "link_context_invalid" in {row.code for row in refused.findings}
 
 
 def test_associated_links_expose_each_old_incoming_and_secondary_meaning_without_redirect():

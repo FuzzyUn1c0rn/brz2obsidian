@@ -5,10 +5,10 @@ import unicodedata
 from pathlib import PurePosixPath
 from urllib.parse import unquote
 
+from brz2obsidian.obsidian_dialect import nonempty_image
+
 from ._filesystem import UnsafePath, guard, read_failure
 from .contracts import VaultCheckIssue
-
-IMAGE_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 
 
 def _key(value):
@@ -106,7 +106,7 @@ def resolve(root, files, reference, artifact, kind, property=None, relative=Fals
     if (
         (kind in {"category", "provider"} and suffix != ".md")
         or (kind == "base" and suffix != ".base")
-        or (kind == "image" and (suffix not in IMAGE_EXTENSIONS or size == 0))
+        or (kind == "image" and not nonempty_image(candidate, size))
     ):
         return None, VaultCheckIssue(
             code=missing_code,

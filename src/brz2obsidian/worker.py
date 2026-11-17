@@ -12,19 +12,21 @@ from brz2obsidian.application.protocol import (
     encode_response,
     rejected_request_response,
 )
+from brz2obsidian.application.worker_input import worker_input
 
 
 def main() -> int:
     data = b""
     try:
-        data = sys.stdin.buffer.readline(REQUEST_LIMIT + 1)
+        incoming = worker_input(sys.stdin.buffer)
+        data = incoming.readline(REQUEST_LIMIT + 1)
         request = decode_request(data)
         if request.operation == "update":
             from brz2obsidian.application.update_worker import serve_updates
 
-            return serve_updates(request, sys.stdin.buffer, sys.stdout.buffer)
+            return serve_updates(request, incoming, sys.stdout.buffer)
         # One-shot migrations still require exact EOF before any operation.
-        if sys.stdin.buffer.read(1):
+        if incoming.read(1):
             raise ProtocolFailure("Unexpected request continuation")
     except ProtocolFailure, OSError:
         response = rejected_request_response(data)

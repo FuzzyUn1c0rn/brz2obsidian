@@ -4,10 +4,13 @@ import json
 import unicodedata
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import (
     AssociatedLinkReview,
+    InlineExactContent,
     LinkMeaning,
     LinkQuery,
+    OpaqueContent,
     ProposalAssumption,
     ReferenceTarget,
 )
@@ -19,6 +22,23 @@ def _key(value):
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def _query_matches_target(query, target):
+    if target.canonical_path is None:
+        return False
+    path = _key(target.canonical_path)
+    paths = {path}
+    if target.kind != "resource" and path.endswith(".md"):
+        paths.add(path[:-3])
+    aliases = {_key(name) for name in target.representations}
+    value = _key(query.value)
+    return (
+        value in paths
+        or value in aliases
+        or bool({_key(spelling) for spelling in query.spellings}.intersection(aliases))
+        or (query.mode == "shortened" and any(p.endswith("/" + value) for p in paths))
+    )
+
+
 def resolve_link_meaning(query, display, fragment, targets, target_facts, inventory):
     def result(status, target=None, state=None, matches=()):
         return LinkMeaning(
@@ -28,7 +48,7 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
             path=None if target is None else target.canonical_path,
             target_version=None
             if state is None or state.content is None
-            else sha256(state.content.data).hexdigest(),
+            else content_sha(state.content),
             display_text=display,
             fragment=fragment,
             candidates=tuple(sorted(t.target_id for t in matches)),
@@ -38,28 +58,7 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
         return result("unsupported")
     if inventory != "complete":
         return result("inventory_uncertain")
-    matches = []
-    for target in targets:
-        if target.canonical_path is None:
-            continue
-        path = _key(target.canonical_path)
-        paths = {path}
-        if target.kind != "resource" and path.endswith(".md"):
-            paths.add(path[:-3])
-        aliases = {_key(name) for name in target.representations}
-        value = _key(query.value)
-        if (
-            value in paths
-            or value in aliases
-            or bool(
-                {_key(spelling) for spelling in query.spellings}.intersection(aliases)
-            )
-            or (
-                query.mode == "shortened"
-                and any(p.endswith("/" + value) for p in paths)
-            )
-        ):
-            matches.append(target)
+    matches = [target for target in targets if _query_matches_target(query, target)]
     if not matches:
         return result("missing")
     if len(matches) != 1:
@@ -113,12 +112,101 @@ def resolve_occurrence(occurrence, targets, target_facts, inventory):
     )
 
 
+class _OccurrenceMeanings:
+    """Recomputed meanings retained only for one immutable reconciliation input."""
+
+    def __init__(self, context):
+        self.context = context
+        self._inputs = (
+            {}
+            if context is None
+            else {
+                stage: (
+                    getattr(context, stage + "_targets"),
+                    getattr(context, stage + "_target_facts"),
+                    context.inventory,
+                )
+                for stage in ("current", "incoming")
+            }
+        )
+        self._meanings = {}
+        self._current_scope = None
+
+    def current_scope(self, context, inventory):
+        inputs = (
+            context,
+            context.current_targets,
+            context.current_target_facts,
+            context.current_documents,
+            inventory,
+        )
+        if context is not self.context:
+            return _CurrentScope(*inputs)
+        if self._current_scope is None:
+            self._current_scope = _CurrentScope(*inputs)
+        if all(a is b for a, b in zip(self._current_scope.inputs, inputs, strict=True)):
+            return self._current_scope
+        return _CurrentScope(*inputs)
+
+    def resolve(self, context, stage, occurrence):
+        targets = getattr(context, stage + "_targets")
+        states = getattr(context, stage + "_target_facts")
+        inventory = context.inventory
+        bound = self._inputs.get(stage)
+        if (
+            context is not self.context
+            or bound is None
+            or targets is not bound[0]
+            or states is not bound[1]
+            or inventory != bound[2]
+            or occurrence.query is None
+            and occurrence.meaning.status == "external"
+        ):
+            return resolve_occurrence(occurrence, targets, states, inventory)
+        query = occurrence.query
+        key = (
+            stage,
+            id(occurrence),
+            None if query is None else (query.value, query.mode, query.spellings),
+            occurrence.meaning.display_text,
+            occurrence.meaning.fragment,
+        )
+        if key not in self._meanings:
+            meaning = resolve_occurrence(occurrence, targets, states, inventory)
+            # Hold occurrences and query objects, not only their reusable ids.
+            # An exception above leaves no entry and cannot suppress validation.
+            self._meanings[key] = occurrence, query, meaning
+        return self._meanings[key][2]
+
+
+def _buckets(items, key):
+    result = {}
+    for item in items:
+        result.setdefault(key(item), []).append(item)
+    return {key: tuple(values) for key, values in result.items()}
+
+
+class _CurrentScope:
+    """Ordered exact-key lookup references for one observed current scope."""
+
+    def __init__(self, context, targets, states, documents, inventory):
+        self.inputs = context, targets, states, documents, inventory
+        self.targets_by_id = _buckets(targets, lambda t: t.target_id)
+        self.targets_by_path = _buckets(targets, lambda t: t.canonical_path)
+        self.states_by_id = _buckets(states, lambda s: s.target_id)
+        self.entries_by_path = _buckets(inventory, lambda e: e.current.path)
+        self.documents_by_path = _buckets(documents, lambda d: d.source_path)
+
+
 def _semantic(value):
     if hasattr(value, "model_dump"):
-        if hasattr(value, "data"):
-            return {"available_sha256": sha256(value.data).hexdigest()}
+        if isinstance(value, (InlineExactContent, OpaqueContent)):
+            return {"available_sha256": content_sha(value)}
         result = {
-            name: _semantic(getattr(value, name)) for name in type(value).model_fields
+            name: _semantic(getattr(value, name))
+            for name in type(value).model_fields
+            if name not in ("file_roles", "resource_origin")
+            or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.
         if isinstance(value, ReferenceTarget):
@@ -133,7 +221,7 @@ def _semantic(value):
     return value
 
 
-def associated_link_reviews(facts, subject, subject_id, both_outputs):
+def associated_link_reviews(facts, subject, subject_id, both_outputs, *, _links=None):
     context = facts.link_context
     if context is None:
         return (), (
@@ -159,6 +247,8 @@ def associated_link_reviews(facts, subject, subject_id, both_outputs):
             or any(
                 (
                     meaning := resolve_occurrence(o, targets, states, context.inventory)
+                    if _links is None
+                    else _links.resolve(context, stage, o)
                 ).target_id
                 == association
                 or association in meaning.candidates
@@ -221,7 +311,7 @@ def associated_link_reviews(facts, subject, subject_id, both_outputs):
                     for state in context.incoming_target_facts
                     if state.target_id == association
                     and state.content is not None
-                    and state.content.data == output.content.data
+                    and same_content(state.content, output.content)
                 )
                 slots = tuple(
                     slot
@@ -305,7 +395,7 @@ SAFE_LINK_STATUSES = (
 )
 
 
-def validate_current_link_context(facts, subject):
+def validate_current_link_context(facts, subject, *, _links=None):
     """Bind current observations before any remembered or explicit preservation."""
     from .reversals import cleanup_removal_continuation
 
@@ -316,6 +406,17 @@ def validate_current_link_context(facts, subject):
     if context is None or context.inventory != "complete":
         return "link_context_unavailable"
     association = subject.attachment.current_target_id
+    scope = (
+        _CurrentScope(
+            context,
+            context.current_targets,
+            context.current_target_facts,
+            context.current_documents,
+            facts.identity_inventory,
+        )
+        if _links is None
+        else _links.current_scope(context, facts.identity_inventory)
+    )
 
     def observed_existence(current, state):
         expected = (
@@ -327,49 +428,34 @@ def validate_current_link_context(facts, subject):
 
     # Complete supplied scope is checked against the independently observed inventory.
     for state in context.current_target_facts:
-        records = tuple(
-            t for t in context.current_targets if t.target_id == state.target_id
-        )
+        records = scope.targets_by_id.get(state.target_id, ())
         if len(records) != 1:
             return "link_context_invalid"
         if (
             records[0].kind != "tag"
             and state.existence == "present"
-            and len(
-                tuple(
-                    e
-                    for e in facts.identity_inventory
-                    if e.current.path == records[0].canonical_path
-                )
-            )
-            != 1
+            and len(scope.entries_by_path.get(records[0].canonical_path, ())) != 1
         ):
             return "link_context_invalid"
     for entry in facts.identity_inventory:
-        matching = tuple(
-            t for t in context.current_targets if t.canonical_path == entry.current.path
-        )
+        matching = scope.targets_by_path.get(entry.current.path, ())
         if len(matching) != 1:
             return "link_context_unavailable"
         (record,) = matching
         if record.identity is not None and record.identity != entry.identity:
             return "link_context_invalid"
-        observed = tuple(
-            s for s in context.current_target_facts if s.target_id == record.target_id
-        )
+        observed = scope.states_by_id.get(record.target_id, ())
         if (
             len(observed) != 1
             or not observed_existence(entry.current, observed[0])
-            or (None if observed[0].content is None else observed[0].content.data)
-            != (None if entry.current.content is None else entry.current.content.data)
+            or content_key(observed[0].content) != content_key(entry.current.content)
         ):
             return "link_context_invalid"
         if record.kind != "resource" and entry.current.existence == "present":
             docs = tuple(
                 d
-                for d in context.current_documents
-                if d.source_path == entry.current.path
-                and d.content.data == entry.current.content.data
+                for d in scope.documents_by_path.get(entry.current.path, ())
+                if same_content(d.content, entry.current.content)
             )
             if len(docs) != 1:
                 return "link_context_unavailable"
@@ -391,8 +477,7 @@ def validate_current_link_context(facts, subject):
         target.kind != "resource"
         or target.canonical_path != subject.current.path
         or not observed_existence(subject.current, state)
-        or (None if state.content is None else state.content.data)
-        != (None if subject.current.content is None else subject.current.content.data)
+        or content_key(state.content) != content_key(subject.current.content)
     ):
         return "link_context_invalid"
     from .link_validation import validate_link_target_state
@@ -419,6 +504,8 @@ def validate_current_link_context(facts, subject):
                 context.current_target_facts,
                 context.inventory,
             )
+            if _links is None
+            else _links.resolve(context, "current", o)
             for o in doc.occurrences
         )
         affected |= any(
@@ -432,7 +519,7 @@ def validate_current_link_context(facts, subject):
         if (
             len(entries) != 1
             or entries[0].current.content is None
-            or entries[0].current.content.data != doc.content.data
+            or not same_content(entries[0].current.content, doc.content)
         ):
             return "link_context_invalid"
         if doc.inventory != "complete" or doc.status != "supported":

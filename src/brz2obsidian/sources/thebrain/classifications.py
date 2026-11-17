@@ -15,13 +15,13 @@ def decode_classifications(thoughts, relationships, refuse, uuid):
         if declared:
             definition = uuid(declared)
             if (
-                thought["Kind"] != 1
+                thought["Kind"] not in {1, 2}
                 or definition not in thoughts
                 or thoughts[definition]["Kind"] != 2
             ):
                 refuse(
                     "invalid_reference",
-                    "TypeId must join an ordinary member to a live type definition",
+                    "TypeId must join an ordinary or definition member to a live type definition",
                     (key, definition),
                 )
             if len(links) != 1 or links[0].item_a != definition:

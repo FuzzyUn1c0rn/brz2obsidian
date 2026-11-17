@@ -1,5 +1,6 @@
 """Pure policy-query subjects from current facts and canonical review choices."""
 
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.contracts import reconciliation_subject_id
 from brz2obsidian.core import select_review_effects
 
@@ -34,7 +35,7 @@ def approved_attachment_subjects(plan):
                 document.document_id in explicit
                 and prior is not None
                 and prior.source_path == document.source_path
-                and prior.content != document.content
+                and not canonical_equal(prior.content, document.content)
             ):
                 paths.add((document.source_path, owner))
     return tuple(
@@ -82,9 +83,10 @@ def review_subjects(facts, review=None, *, effects=None):
                     add(output.path, change.subject_id)
                 for document in candidate.documents:
                     prior = documents.get(document.document_id)
-                    if prior is None or (prior.source_path, prior.content) != (
-                        document.source_path,
-                        document.content,
+                    if (
+                        prior is None
+                        or prior.source_path != document.source_path
+                        or not canonical_equal(prior.content, document.content)
                     ):
                         if (
                             prior is not None

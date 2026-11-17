@@ -58,7 +58,7 @@ def test_format_transition_save_load_resume_keeps_old_identity_and_explicit_curr
             and request["identity"].profile_version == "9"
         )
         assert request["review"].facts.format_operation.kind == "format_transition"
-        assert request["source_binding"].incoming_identity.output_format == 7
+        assert request["source_binding"].incoming_identity.output_format == 8
         assert {
             p.relative_to(old_source).as_posix(): hashlib.sha256(
                 p.read_bytes()

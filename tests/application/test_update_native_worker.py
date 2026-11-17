@@ -456,20 +456,42 @@ def test_hidden_worker_real_capture_and_file_stop_reopen_from_exact_native_histo
             saved, physical_capture = controlled(
                 {"command": "save", "binding": chosen.binding}, "capture"
             )
+            # The acknowledged cancellation retires the owned review during its
+            # post-capture handoff. The actual checkpoint remains durable, and
+            # only a fresh observation may recover authority over that review.
             assert (
-                saved.code == "saved"
+                saved.status == "publication_unknown"
+                and saved.code == "saved_context_unavailable"
+                and saved.binding is None
+                and not saved.ready
                 and saved.history_retained
                 and saved.capture.status == "captured"
+                and saved.publication == "not_started"
+                and saved.next_actions == ("inspect_history",)
+                and saved.findings == ()
             )
             assert (
                 saved.capture.commit
                 == physical_capture["commit"]
-                == saved.binding.checkpoint_commit
+                == saved.checkpoint_commit
+                == saved.capture.locator.commit
             )
             assert (
-                saved.capture.object_storage == "verified"
+                saved.capture.objects_written
+                and saved.capture.history_retained
+                and saved.capture.object_storage == "verified"
                 and not saved.capture.authored_files_changed
             )
+            expired = call({"command": "page", "binding": chosen.binding, "limit": 1})
+            assert (
+                expired.status == "refused"
+                and expired.code == "context_changed"
+                and expired.binding is None
+                and not expired.ready
+            )
+            with monkeypatch.context() as independent_git:
+                independent_git.setattr(subprocess, "Popen", launch)
+                assert user_git(vault) == before_git
             assert (vault / "Manual.md").read_bytes() == manual
             closed = call(
                 {"command": "close", "binding": saved.binding, "choice": "discard"}
@@ -495,7 +517,7 @@ def test_hidden_worker_real_capture_and_file_stop_reopen_from_exact_native_histo
                 resumed.ready
                 and resumed.binding.checkpoint_commit == saved.capture.commit
             )
-            assert resumed.binding.context_id != saved.binding.context_id
+            assert resumed.binding.context_id != chosen.binding.context_id
             phase("actual_os_removal_return")
             stopped, physical_remove = controlled(
                 {"command": "apply", "binding": resumed.binding}, "remove"

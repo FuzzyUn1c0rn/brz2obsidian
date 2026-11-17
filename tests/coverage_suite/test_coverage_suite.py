@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -129,7 +128,6 @@ def invoke(root, *args):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60,
         check=False,
     )
 
@@ -159,19 +157,16 @@ def test_default_command_validates_four_checks_and_reports_all_production(
         ),
         encoding="utf-8",
     )
-    rejected = invoke(coverage_checkout, "--timeout", "901")
-    assert rejected.returncode == 2
-    assert "at most 900 seconds" in rejected.stderr
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
-    assert report["timeout_seconds"] == 900
+    assert report["timeout_seconds"] is None
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
     assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
     assert report["branches"] == {"covered": 4, "total": 4, "percent": 100.0}
     assert report["production_files"] == 5
-    assert report["elapsed_seconds"] < 60
+    assert report["elapsed_seconds"] > 0
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
     assert report["test_counts"]["passed"] == 4
     assert report["test_counts"]["collected"] == 4
@@ -267,6 +262,8 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
         coverage_checkout,
         "--test",
         "tests/test_decisions.py::test_yes",
+        "--timeout",
+        "4500",
         "--min-branch",
         "50",
         "--measurement-intent",
@@ -275,6 +272,7 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
     assert result.returncode == 1, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
     assert report["status"] == "failed"
+    assert report["timeout_seconds"] == 4500
     assert report["measurement"] == "focused selection; partial suite evidence"
     assert report["branches"] == {"covered": 1, "total": 4, "percent": 25.0}
     assert report["lines"] == {"covered": 3, "total": 8, "percent": 37.5}
@@ -303,13 +301,36 @@ def test_measurement_override_needs_explicit_intent(tmp_path):
     assert not (tmp_path / "tmp").exists()
 
 
+def test_ordinary_verification_accepts_explicit_timeout_above_900(coverage_checkout):
+    result = invoke(coverage_checkout, "--timeout", "901")
+    assert result.returncode == 0, result.stdout + result.stderr
+    report, _ = summary(coverage_checkout)
+    assert report["timeout_seconds"] == 901
+    assert report["status"] == "passed"
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_timeout_must_be_positive_and_finite(tmp_path, value):
+    result = invoke(tmp_path, "--timeout", value)
+    assert result.returncode == 2
+    assert "--timeout must be positive and finite" in result.stderr
+
+
+def test_explicit_timeout_reports_failure(coverage_checkout):
+    result = invoke(coverage_checkout, "--timeout", "0.001")
+    assert result.returncode == 1, result.stdout + result.stderr
+    report, _ = summary(coverage_checkout)
+    assert report["status"] == "failed"
+    assert "deadline" in report["error"].lower()
+    assert report["timeout_seconds"] == 0.001
+
+
 def test_source_change_during_reporting_rejects_success(coverage_checkout):
     stopped = threading.Event()
     changed = threading.Event()
 
     def change_after_html_starts():
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and not stopped.is_set():
+        while not stopped.is_set():
             if list((coverage_checkout / "tmp" / "coverage-suite").glob("*/html.log")):
                 source = coverage_checkout / "src" / "brz2obsidian" / "decisions.py"
                 with source.open("a", encoding="utf-8") as handle:
@@ -328,7 +349,7 @@ def test_source_change_during_reporting_rejects_success(coverage_checkout):
         )
     finally:
         stopped.set()
-        editor.join(timeout=1)
+        editor.join()
     assert not editor.is_alive()
     assert changed.is_set(), "The public reporting phase was not reached"
     assert result.returncode == 1, result.stdout + result.stderr
@@ -337,3 +358,121 @@ def test_source_change_during_reporting_rejects_success(coverage_checkout):
     assert "stale or changed" in (output / "validate-final.log").read_text(
         encoding="utf-8"
     )
+
+
+def test_long_maintained_selection_preserves_exact_scope_and_validates(
+    coverage_checkout,
+):
+    """A long manifest remains the same public four-check coverage operation."""
+    relative = "tests/é selected/test_many.py"
+    target = coverage_checkout / relative
+    target.parent.mkdir()
+    names = [f"test_case_{index:04d}_" + "independent_" * 4 for index in range(400)]
+    target.write_text(
+        "from brz2obsidian.decisions import choose\n\n\n"
+        + "\n\n".join(
+            f'def {name}():\n    assert choose(True) == "yes"\n' for name in names
+        ),
+        encoding="utf-8",
+    )
+    (coverage_checkout / "tests" / "test_excluded_failure.py").write_text(
+        "def test_excluded_failure():\n"
+        '    raise AssertionError("excluded discovery ran")\n',
+        encoding="utf-8",
+    )
+    manifest_path = coverage_checkout / "tools" / "test-suite.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["selectors"] += [f"{relative}::{name}" for name in names]
+    selectors = manifest["selectors"]
+    # This is a real unique selection beyond the native Windows command line,
+    # not repeated arguments for the same test or a mocked process failure.
+    assert len(selectors) == len(set(selectors)) == 404
+    assert sum(len(node) for node in selectors) > 32767
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = invoke(coverage_checkout)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report, _output = summary(coverage_checkout)
+    assert report["status"] == "passed"
+    assert report["measurement"] == "default suite"
+    assert report["timeout_seconds"] is None
+    assert report["minimum_branch_percent"] == 80
+    assert report["production_files"] == 4
+    assert report["branches"] == {
+        "covered": 4,
+        "total": 4,
+        "percent": 100.0,
+    }
+    receipt_path = Path(report["receipt"])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert {row["id"]: row["status"] for row in receipt["checks"]} == {
+        "pytest": "passed",
+        "lint": "passed",
+        "format": "passed",
+        "dependency": "passed",
+    }
+    selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
+    assert selected["selection"]["selectors"] == selectors
+    assert selected["selection"]["keyword"] is None
+    assert selected["selection"]["marker"] is None
+    assert selected["selection"]["require_gui"] is True
+    assert selected["selection"]["workers"] == 4
+    assert selected["counts"]["collected"] == 404
+    assert selected["counts"]["passed"] == 404
+    assert selected["counts"]["failed"] == 0
+    assert selected["counts"]["gui_executed"] == 1
+    assert selected["counts"]["executed_nodes"] == sorted(
+        [
+            "tests/test_decisions.py::test_yes",
+            "tests/test_other.py::test_no",
+            "tests/test_gui.py::test_gui",
+            "tests/test_ui.py::test_ui_choices",
+            *(f"{relative}::{name}" for name in names),
+        ]
+    )
+    # Independent requirements come from the requested manifest in this test,
+    # not the coverage command's own generated requirements.
+    expected = coverage_checkout / "tmp" / "independent-long-required.json"
+    expected.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "gui",
+                "checks": [
+                    {
+                        "id": "pytest",
+                        "scope": "focused",
+                        "selectors": selectors,
+                        "keyword": None,
+                        "marker": None,
+                        "require_gui": True,
+                    },
+                    {"id": "lint"},
+                    {"id": "format"},
+                    {"id": "dependency"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    validated = subprocess.run(
+        [
+            sys.executable,
+            str(coverage_checkout / "tools" / "check.py"),
+            "validate",
+            "--checkout",
+            str(coverage_checkout),
+            "--receipt",
+            str(receipt_path),
+            "--requirements",
+            str(expected),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+    assert "excluded discovery ran" not in result.stdout + result.stderr

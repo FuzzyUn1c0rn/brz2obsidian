@@ -186,7 +186,7 @@ def test_alternate_external_file_materializes_owner_without_payload_access(tmp_p
     )
 
 
-@pytest.mark.parametrize("brz_version", ["3", "7", "8", "9", "11"])
+@pytest.mark.parametrize("brz_version", ["3", "7", "8", "9", "unreviewed-test-profile"])
 def test_previous_shared_contract_and_unreviewed_brz_profile_refuse_explicitly(
     tmp_path, brz_version
 ):
@@ -436,27 +436,57 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     allowed = {
         "contracts": {"brz2obsidian", "brz2obsidian.contracts"},
         "diagnostics": {"brz2obsidian", "brz2obsidian.contracts"},
-        "core": {"brz2obsidian", "brz2obsidian.contracts", "brz2obsidian.core"},
+        # These inward helpers are checked themselves, including the closed
+        # pure dispatcher; they cannot acquire an outer reader or producer.
+        "content_fingerprints": {
+            "brz2obsidian.contracts",
+            "brz2obsidian.core.attachment_validation",
+            "brz2obsidian.core.reconciliation",
+            "brz2obsidian.core.refresh",
+            "brz2obsidian.core.resolution",
+            "brz2obsidian.core.review_composition",
+            "brz2obsidian.core.selected_effects",
+        },
+        "content_values": {"brz2obsidian.contracts"},
+        "review_codec": {
+            "brz2obsidian.contracts",
+            "brz2obsidian.content_fingerprints",
+        },
+        "obsidian_dialect": {"brz2obsidian.contracts"},
+        "core": {
+            "brz2obsidian",
+            "brz2obsidian.contracts",
+            "brz2obsidian.content_fingerprints",
+            "brz2obsidian.content_values",
+            "brz2obsidian.core",
+        },
         "obsidian": {
             "brz2obsidian",
             "brz2obsidian.contracts",
+            "brz2obsidian.content_values",
             "brz2obsidian.core",
             "brz2obsidian.obsidian",
+            "brz2obsidian.obsidian_dialect",
         },
         "publication": {
             "brz2obsidian",
             "brz2obsidian.contracts",
+            "brz2obsidian.content_fingerprints",
+            "brz2obsidian.content_values",
             "brz2obsidian.publication",
         },
         "application": {
             "brz2obsidian",
             "brz2obsidian.contracts",
+            "brz2obsidian.content_fingerprints",
+            "brz2obsidian.content_values",
             "brz2obsidian.core",
             "brz2obsidian.application.workflow",
         },
         "vault_check": {
             "brz2obsidian",
             "brz2obsidian.contracts",
+            "brz2obsidian.obsidian_dialect",
             "brz2obsidian.vault_check",
         },
     }
@@ -486,7 +516,14 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.vault_contracts",
             "brz2obsidian.application.vault_update_contracts",
         },
-        "application/update_facts.py": {"brz2obsidian.obsidian"},
+        "application/update_facts.py": {
+            # This outer producer reuses attachment interpretation/reference
+            # builders for compatible results; Core still admits the evidence.
+            "brz2obsidian.application.attachment_choices",
+            "brz2obsidian.application.review_choices",
+            "brz2obsidian.obsidian",
+            "brz2obsidian.obsidian_dialect",
+        },
         "application/update_lifecycle.py": {
             "brz2obsidian.application.attachment_cleanup",
             "brz2obsidian.application.checkpoint_payload_contracts",
@@ -500,6 +537,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.vault_contracts",
             "brz2obsidian.application.vault_progress_contracts",
             "brz2obsidian.obsidian",
+            "brz2obsidian.publication.vault_history",
             "brz2obsidian.publication.vault_native",
         },
         "application/checking.py": {
@@ -525,6 +563,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.format_transition",
             "brz2obsidian.application.history_workflow",
             "brz2obsidian.application.onboarding",
+            "brz2obsidian.application.owned_preparation",
             "brz2obsidian.application.review_choices",
             "brz2obsidian.application.update_lifecycle",
             "brz2obsidian.application.update_session",
@@ -540,6 +579,35 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.publication.vault_repair",
             "brz2obsidian.publication.vault_undo",
         },
+        # These lexical owners are outer composition, rather than permissions
+        # for reusable Workflow or package initializers to load the publisher.
+        "application/owned_preparation.py": {
+            "brz2obsidian.application.attachment_cleanup",
+            "brz2obsidian.application.format_configuration",
+            "brz2obsidian.application.format_transition",
+            "brz2obsidian.application.history_workflow",
+            "brz2obsidian.application.onboarding",
+            "brz2obsidian.application.review_choices",
+            "brz2obsidian.application.review_offers",
+            "brz2obsidian.application.review_session",
+            "brz2obsidian.application.update_contracts",
+            "brz2obsidian.application.update_lifecycle",
+            "brz2obsidian.application.vault_progress_contracts",
+            "brz2obsidian.publication.content_session",
+            "brz2obsidian.publication.git_payload",
+            "brz2obsidian.publication.vault_history",
+            "brz2obsidian.publication.vault_native",
+            "brz2obsidian.publication.vault_recovery",
+            "brz2obsidian.publication.vault_undo",
+        },
+        "application/review_session.py": {
+            "brz2obsidian.application.update_facts",
+            "brz2obsidian.application.update_subjects",
+            "brz2obsidian.publication.content_session",
+            "brz2obsidian.publication.legacy_content",
+            "brz2obsidian.publication.vault_history",
+            "brz2obsidian.review_codec",
+        },
         # Vault publication roles consume pure reviewed contracts and inward
         # interpretation; Operations owns their outer composition.
         "publication/source_payload.py": {
@@ -549,12 +617,16 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.checkpoint_contracts",
             "brz2obsidian.application.checkpoint_payload_contracts",
         },
+        "publication/content_session.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+        },
         "publication/vault_admission.py": {
             "brz2obsidian.application.checkpoint_contracts",
             "brz2obsidian.application.vault_contracts",
         },
         "publication/vault_apply.py": {
             "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.review_session",
             "brz2obsidian.application.source_payload_contracts",
             "brz2obsidian.application.vault_contracts",
             "brz2obsidian.application.vault_progress_contracts",
@@ -563,6 +635,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         },
         "publication/vault_history.py": {
             "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.review_session",
             "brz2obsidian.application.source_payload_contracts",
             "brz2obsidian.application.update_subjects",
             "brz2obsidian.application.vault_contracts",
@@ -572,6 +645,8 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         },
         "publication/vault_recovery.py": {
             "brz2obsidian.application.update_facts",
+            "brz2obsidian.application.update_subjects",
+            "brz2obsidian.application.vault_contracts",
             "brz2obsidian.application.vault_progress_contracts",
             "brz2obsidian.application.vault_recovery_contracts",
             "brz2obsidian.application.vault_update_contracts",
@@ -635,6 +710,10 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         "application/history_workflow.py": {
             "brz2obsidian.application.checkpoint_contracts",
             "brz2obsidian.application.history_workflow_contracts",
+            # This Operations facade shares review-reason projection with its
+            # sibling update lifecycle. Generic Workflow and initializers keep
+            # their separate inward-only permissions.
+            "brz2obsidian.application.update_lifecycle",
             "brz2obsidian.application.vault_recovery_contracts",
             "brz2obsidian.application.vault_repair_contracts",
             "brz2obsidian.application.vault_update_contracts",
@@ -663,6 +742,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.vault_update_contracts",
         },
         "application/update_context.py": {
+            "brz2obsidian.application.attachment_choices",
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.operations",
             "brz2obsidian.application.review_choices",
@@ -678,6 +758,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.publication.vault_native",
         },
         "application/update_history_context.py": {
+            "brz2obsidian.application.attachment_choices",
             "brz2obsidian.application.checkpoint_contracts",
             "brz2obsidian.application.contract_values",
             "brz2obsidian.application.history_workflow",
@@ -742,7 +823,15 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     for area, permitted in allowed.items():
         files = (
             [root / (area + ".py")]
-            if area in {"contracts", "diagnostics"}
+            if area
+            in {
+                "contracts",
+                "diagnostics",
+                "content_fingerprints",
+                "content_values",
+                "review_codec",
+                "obsidian_dialect",
+            }
             else sorted((root / area).rglob("*.py"))
         )
         for file in files:
@@ -769,7 +858,12 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
                         if node.level
                         else node.module
                     )
-                    imports = [base] + [base + "." + alias.name for alias in node.names]
+                    # A bare relative import names specific children. Checking
+                    # its package container as a prefix would grant all siblings;
+                    # initializers remain independently checked above.
+                    imports = ([] if node.module is None else [base]) + [
+                        base + "." + alias.name for alias in node.names
+                    ]
                 else:
                     continue
                 for imported in imports:

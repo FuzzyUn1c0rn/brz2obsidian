@@ -139,6 +139,17 @@ thoughts. A forgotten Home prevents conversion.
 
 ## Step by step: convert your archive
 
+An archive can declare a nonzero Type 15 TXT attachment without containing its
+payload. Current BRZ imports retain a validated declaration as an explicit
+warning, including when no companion document survives. The missing TXT bytes
+were not recovered: no empty file, replacement or live download is created.
+Other available notes and files are preserved separately. Review the filename
+and declared length in the migration record and Migration report. Existing
+PDF-associated and zero-length exceptions retain their separate requirements;
+other unavailable required content still refuses import. Local API imports
+preserve successfully retrieved TXT bytes and retain their existing HTTP404/PDF
+rule.
+
 Run the following commands in the same PowerShell window, in order.
 
 ### 1. Download the converter
@@ -325,7 +336,7 @@ does not scan ports or open a Brain for you.
 In the Windows app, choose **TheBrain local API**, enter the address, select
 **Refresh Brains**, then choose the Brain by name and full ID. Duplicate names
 remain separate choices. The app reads the key from its launch environment and
-has no key field. **Advanced search limits** exposes the options below.
+has no key field. **Advanced API limits** exposes the options below.
 
 For the CLI, replace this example with the Brain's exact lowercase, hyphenated,
 nonzero UUID:
@@ -345,6 +356,25 @@ apply to both sources. Use `inspect --help` or `convert --help` for option bound
 | `--api-search-timeout` | 300 | Total wildcard search budget in seconds |
 | `--api-search-max-response-bytes` | 128000000 | Maximum decompressed bytes per wildcard reply |
 | `--api-search-max-results` | disabled | Optional positive result ceiling; saturation refuses import |
+| `--api-max-total-capture-bytes` | 1000000000 | Finite total API capture bound in bytes (1 GB decimal) |
+
+The total capture setting accepts 1–9,223,372,036,854,775,807 bytes, including
+values above 32 bits. It bounds aggregate decompressed API response bodies and
+the stored capture's payload total under the existing acquisition checks. For
+example, append `--api-max-total-capture-bytes 6000000000` to either API command
+for a finite 6 GB decimal limit, or enter `6000000000` in **Maximum total capture
+bytes** in Windows. Changing API settings retires the previous inspection; inspect
+again before converting. API options are refused for BRZ input.
+
+Choose a finite limit with headroom above the expected scoped data. TheBrain's
+aggregate internal-file metadata and BRZ archive size do not exactly predict
+current API capture bytes. Raising the total does not raise the separate
+per-response or per-payload limits (ordinary defaults 16,000,000 and 256,000,000
+bytes; wildcard-response limit shown above). The independent acceptance audit
+recorder has its own budget, configured separately by that test tool. Capture
+success also does not guarantee enough memory or disk space for later Git-backed
+vault review/history operations; qualify that capacity separately before a large
+review. No unlimited mode or automatic retry is enabled.
 
 The supported scope includes public, non-forgotten ordinary thoughts, types and
 tags, a valid ordinary Home, supported relationships, authored raw Markdown,
@@ -355,6 +385,14 @@ references. Formatting adaptations can produce warnings. One reviewed case of a
 missing TXT attachment can warn when a separately preserved PDF from the same
 owner qualifies; this does not claim that the PDF replaces the missing text.
 Other unavailable required content refuses import. No partial vault is published.
+
+Current API imports preserve ordinary internal file attachments byte-for-byte
+with file links, regardless of extension, including extension-free and empty
+files. Stored Markdown, HTML and MHTML remain attachment files; their contents
+are not interpreted as authored notes or followed for embedded resources. Media
+files receive file links. Existing PDF, PNG and ZIP validation still applies;
+ordinary missing files remain required content. Older captured API profiles keep
+their original admission rules when replayed.
 
 Inspection fully acquires content and releases its capture. Conversion acquires
 again; allow for that cost. In the app, changed settings or source invalidate the
@@ -367,21 +405,69 @@ or that the live Brain remained unchanged.
 ### Review an existing vault
 
 In Windows, select **Update vault**, choose the incoming BRZ and existing vault,
-then select **Prepare update review**. The left queue opens compatible comparisons,
-conflicts and other required choices beside the decision workspace. **All changes**
-opens the canonical comparisons, including history reversals. Accept or
-discard edited text and reference drafts explicitly. **Apply update** requires the
-whole review to be resolved. Inputs stay locked to the reviewed target while that
-review is open.
+then select **Prepare update review**. Preparation builds a preview: it preserves
+vault-only edits, accepts safe incoming changes and merges compatible edits
+automatically. It does not write those changes to the vault. The summary shows
+unresolved conflicts and other exceptions that still need attention; compatible
+files do not require individual approval. **All changes** remains available for
+optional comparisons, including history reversals.
 
-Use **Save review** to retain decisions. **Reopen saved review** loads them without
-granting apply readiness; **Resume saved review** rechecks current inputs.
+Resolve remaining conflicts individually or select **Keep current for all
+unresolved conflicts**, checking the displayed affected count. This keeps the
+vault versions only for conflicts still awaiting a decision. Earlier decisions
+remain intact, and automatically merged changes still proceed. Exceptions that
+cannot safely keep the current version remain visible and prevent application.
+Accept or discard edited text and reference drafts explicitly. **Apply update**
+requires the whole review to be resolved and current inputs to pass revalidation.
+Inputs stay locked to the reviewed target while that review is open.
+
+For a ready first setup, **Apply update** creates the required history checkpoint
+as part of the operation before applying the reviewed changes. Saving manually
+first is optional. Original imported versions and current vault files remain
+separate in that history.
+
+For file choices that require reference decisions, open **Review references**,
+choose an offered option for every occurrence, then select **Stage reference
+choices** before choosing the file version. Missing staging alone does not
+require **Refresh review**.
+
+Use **Save review** to retain decisions even while conflicts remain unresolved,
+or **Save review and close** to leave a partly resolved review. **Reopen saved
+review** loads decisions without granting apply readiness; **Resume saved review**
+rechecks current inputs and retains still-valid decisions.
 **Refresh review** reviews changes made between operations and retains unaffected
 decisions. **Review operation** also offers onboarding, separate format transitions
 and attachment-file cleanup. **Inspect history and recovery** opens current setup,
 recovery, latest Undo and matching-history repair actions. Closing an active
 operation offers background/wait/safe-stop choices; a stop request is not a
 completed rollback.
+
+Older BRZ vaults using profile 10/output 7 or recorded profile 9/output 6 need a
+separate format transition to profile 11/output 8. Keep the same unchanged,
+scoped BRZ while reviewing and completing that transition. The transition also
+merges proven-safe changes automatically; unresolved differences and unavailable
+evidence remain for review. Then prepare the changed BRZ as a separate source update. If supported history is missing, review
+onboarding with trustworthy original input when available. Original imported
+versions and current vault edits remain separate. Safe changes merge
+automatically; uncertain differences remain for review. Local notes, aliases,
+category memberships, appearance providers, templates and configuration retain
+their preservation checks.
+
+Attachments participate in automatic merging when their content and reference
+evidence establishes a safe result. For remaining conflicts, the offered file
+versions depend on the validated storage and reference choices; unavailable
+options explain what prevents their use. Some ordinary source-update cases still
+need the separate onboarding or output-format review. Keep-both and reference
+choices remain available only where the review establishes that they are safe.
+
+Saved output 7 reviews retain their recorded interpretation and original-byte
+evidence. Missing originals stay unknown: current vault notes and a new output 8
+render cannot prove the bytes an older renderer produced. Refreshing a review
+rechecks the full selected category/provider chains and their used resources,
+including providers beyond the native eight-link display limit; changes can
+retire dependent approvals while preserving unrelated decisions. After applying
+changes, close and reopen affected category dashboards and the Categories
+overview in Obsidian as described below.
 
 Review preparation currently accepts **BRZ sources**. Start with status, then
 prepare and persist the incoming review:
@@ -428,7 +514,8 @@ reused; it does not report whether Save retained the incoming source.
 
 Use `review --help` and `review prepare --help` for the option reference and
 separate onboarding, format-transition and attachment-cleanup routes.
-Required configuration and consent remain explicit. Keep the vault idle during
+Configuration effects remain visible, and consent requirements outside automatic
+merging remain explicit. Keep the vault idle during
 operations: concurrent editing or syncing by Obsidian, TheBrain or other programs
 is unsupported. Supported Git and current storage policy are checked. Missing
 history cannot prove earlier versions. Retained history grows disk use, and attachment
@@ -454,6 +541,47 @@ originals containing excluded references are omitted explicitly. Present
 attachment bytes are preserved. External URLs and directory links remain
 references; the converter does not download their contents.
 
+Current BRZ11 and local API5 imports preserve unknown, attribute-free delimiters
+such as `<Example>`, `</Example>` and `<Example/>` as visible text. Each token is
+independent: unmatched or mismatched names stay visible, while surrounding
+emphasis, links, images and code retain their normal Markdown behavior. Names
+use ASCII letters followed by ASCII letters, digits or hyphens. After the name,
+spaces/tabs and at most one CR, LF or CRLF line ending are permitted; no spaces
+are allowed before the name or after a self-closing slash. Recognized HTML
+elements and attributes, declarations and processing instructions remain outside
+this literal class. Existing code, comments, escapes, supported line breaks and
+reviewed tables retain their own handling. Retained API4 captures preserve this
+literal-token support. Retained API1/2/3 captures keep their
+earlier grammar even when rendered into output8. Source adaptations record exact
+token spelling and coordinates; unsafe originals containing excluded content
+are still omitted.
+
+Current local API5 imports also accept the reviewed finite ICO/DIB and 32-bit BMP
+owned-icon families. The complete original container is preserved under its
+original `Icon.png` name, including every ICO frame. This does not add those
+formats to ordinary note images or change retained profiles1–4 eligibility.
+
+Current BRZ and local API imports support inline TheBrain links of the form
+`brain://api.thebrain.com/<Brain token>/<thought token>`, with an optional
+descriptive path component. The two canonical identity tokens determine the
+target. Same-Brain links use the corresponding vault target; foreign-Brain links
+retain their exact original Markdown and are never fetched or imported. Existing
+excluded-content safeguards still apply, including refusal when a retained
+foreign link contains an excluded local identity. Unsupported authorities,
+queries, fragments, ambiguous encodings and richer local-link syntax refuse
+with a diagnostic. Descriptive suffixes supply no title lookup or foreign
+target-liveness guarantee.
+
+Reviewed YouTube video attachments in BRZ exports retain their exact original
+resource link alongside a single-video player. Supported watch URLs use `v`,
+`v` with seconds-based `t`, `v` with `list`, or `v` with `list` and `index`.
+Playlist context stays in the original link; `list` and `index` must each be
+nonempty and unique and do not select playlist playback in the embedded player.
+The source video ID must agree with its reviewed player metadata. Playlist-only
+URLs remain ordinary links. Local API imports also retain ordinary links because
+the API does not expose that player metadata. Playback depends on YouTube and
+the network; the converter does not download videos.
+
 Some empty thoughts deliberately remain links to notes that have not yet been
 created. Clicking one in Obsidian lets you create its note later. Conditional
 `Uncreated targets.md` and `Tag memberships.md` files record otherwise hidden
@@ -463,6 +591,23 @@ For certain reviewed missing-note cases, available source images are displayed
 with a notice. **Missing prose, captions and layout are not recovered.** Missing
 category text or icons are also explained in the migration report. Other missing
 required content or unsupported features can prevent conversion.
+
+Current BRZ and local API imports also retain readable notes when a valid inline
+local image reference has no available owned image. Its position shows ordinary
+text such as **Image unavailable: diagram**, while available images and surrounding
+Markdown remain intact. The Migration report retains the exact reference and
+absence evidence; safe original note backups keep their original bytes. No image
+pixels, replacement attachment or actual byte length/hash are invented. This
+includes the reviewed referenced BRZ image declaration with state3 and no archive
+member, and the current API image with agreeing metadata and a classified content
+HTTP404. Malformed references, conflicting ownership or payloads, access denial
+and transport failures retain their refusal/failure behavior. No external recovery
+or signed-image request is made.
+
+Retained API profiles1–3 keep their earlier interpretation and refusal rules.
+Captures containing these new image-notice adaptations require a converter version
+that understands them. Review the notices and warnings before accepting an import
+or applying a source update.
 
 For daily use, start with the generated `Vault guide.md`, whose template links
 use the vault's actual sanitized or disambiguated names.
@@ -492,10 +637,35 @@ icon works. Body-icon references are separate migration-time snapshots: edit
 them separately if changing category or provider metadata. Replacing a shared
 image's bytes can affect every reference to it.
 
+A category note can itself be a direct member of another category. Each category
+has one note and its dashboard lists direct members only, including category
+notes. B's member template initializes B alone; it does not add B's parent A.
+Source-tag tokens remain independent. `Tag memberships.md` records explicit
+nested tag facts, including links to tag targets without created notes; a
+parent tag is not inferred on the child tag's members.
+
+Members, Gallery and the Categories overview first check a note's valid owned
+`icon`, then follow up to eight selected `appearance_category` links. The nearest
+valid owned image wins. If no image is found and a valid unrepeated chain
+continues, the visible status is **Icon lookup exceeds 8 links.** Set a nearer
+category's `icon` or change a selected provider to resolve it. Blank opts out;
+invalid or repeated providers have distinct statuses. Lookup never switches to
+another membership or copies a borrowed image into an owned `icon` property.
+Ordinary body images are full-chain migration-time snapshots and can still show
+an icon when a live dashboard reaches the eight-link limit.
+
+After changing category icons, memberships or appearance providers, **close and
+reopen the affected category dashboard notes and Categories overview**. Open
+views may retain stale or inconsistent icons and statuses until reopened.
+Reopening recalculates the native views. The converter's Update vault
+**Refresh review** action refreshes its saved review separately.
+
 Open Members/Gallery through category dashboards so their contextual queries
 have a category. Hierarchy, prose links and source tags do not create membership.
 Use Obsidian's native rename with automatic internal-link updates enabled;
-prefer qualified links when names collide. Migration records describe the
+prefer qualified links when names collide. For example, `[[Categories/B]]` and
+`[[Categories/B.md]]` identify the same category, while bare `[[B]]` is ambiguous
+to the checker when `Templates/B.md` also exists. Migration records describe the
 original conversion and do not track later edits. Keep pristine output and safe
 `.md.original` backups if you need exact pre-edit bytes: Obsidian can normalize
 frontmatter and line endings when saving.
@@ -520,7 +690,8 @@ maintenance.
 ### Checker diagnostics
 
 The checker reads current vault files without the source archive and never
-repairs or rewrites them. Custom properties are allowed. Fix reported problems
+repairs or rewrites them. It checks full provider chains, including problems
+beyond the native eight-link lookup and declarations hidden by nearer icons. Custom properties are allowed. Fix reported problems
 in Obsidian or your editor, then run it again.
 
 | Finding | What to check |
@@ -529,6 +700,8 @@ in Obsidian or your editor, then run it again.
 | `invalid_category` / `invalid_provider` | Category targets exist, carry the category role, and the provider is a member |
 | `missing_base` / `missing_image` / `invalid_base` | Required files exist; images are nonempty and Base YAML is valid data |
 | `ambiguous_reference` | Use a qualified vault path to distinguish colliding names |
+| `provider_cycle` | Review the full selected provider chain and remove the repeated category; a nearer owned icon does not repair the cycle |
+| `icon_lookup_depth` | Icon lookup exceeds 8 links. Assign a nearer valid icon or change a selected provider; this warning alone does not block import, update or checking. Other review safety requirements still apply |
 | `duplicate_source_identity` | Multiple notes carry the same imported identity pair |
 | `unsafe_reference` | A required reference or filesystem entry cannot be read safely inside the vault |
 | `read_failure` | Access permissions, text encoding or file/directory availability |
@@ -562,6 +735,7 @@ its exit code.
 | An output path is too long | Choose a shorter destination, such as `C:\v\Brain`. |
 | Home is missing or forgotten | Set an included Home thought in TheBrain, export again and inspect the new archive. |
 | Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Follow the stated action: converter limitations need a report; source or access problems have their own guidance. |
+| `source_type_cycle` | Cyclic source type assignments, including self-assignment, refuse import and update. Review the reported chain, correct the assignments in TheBrain, export again for BRZ, then inspect again. Editable vault icon-provider cycles are checked separately as `provider_cycle`. |
 | Conversion succeeds with warnings | Review `MIGRATION REPORT.md`, including any optional source-repair steps. |
 | The checker reports issues | Follow its diagnostics and [checker guidance](#checker-diagnostics). It does not modify the vault. |
 
@@ -654,3 +828,38 @@ for issue in result.issues:
 
 Implementation contracts live in [source code](src/brz2obsidian/);
 [AGENTS.md](AGENTS.md#documentation) defines where project documentation belongs.
+
+### Independent source audits (development support)
+
+Use `python -m tests.local_acceptance.audit_run --help` for one explicitly
+selected BRZ/API source or pair. These independent auditors compare pristine
+outputs with original BRZ bytes or a pinned raw API baseline; the source-free
+vault checker serves a separate purpose. Keep private evidence under an ignored
+`tmp/<effort>/` directory and use new attempt/output paths.
+
+```powershell
+$candidate = (git rev-parse HEAD).Trim()
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run audit --candidate $candidate --brz-source 'source.brz' --brz-vault 'C:\audit\brz-vault' --output 'tmp\source-audit\brz.json'
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run prepare-controls --directory 'tmp\source-audit\controls'
+$pin = (Get-FileHash 'tmp\source-audit\controls\manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run capture-api --candidate $candidate --api-url 'http://localhost:11522/api' --brain $brain --qualification 'tmp\source-audit\controls\manifest.json' --qualification-sha256 $pin --attempt 'tmp\source-audit\api-attempt-001' --vault 'C:\audit\api-vault'
+```
+
+Replace the source, fresh vault paths and Brain selection for the authorized
+rehearsal. `capture-api` uses the configured API-key environment variable,
+records its own public conversion through a bounded loopback recorder, then
+seals and audits those observations. It retains each response occurrence and
+exact transport/content-decoded bytes; supplemental audit reads remain distinct
+from the converter's acquisition. Credentials are never retained. Missing,
+contradictory, interrupted or unsafe evidence refuses qualification and preserves
+the failed attempt. The approved upstream and effective loopback endpoint remain
+bound to the transcript, independently of the proxy's temporary address.
+
+`prepare-controls` reuses the maintained synthetic API3 direction/control
+provenance; it performs no network operation or new native qualification. The
+current capture's schema and source facts are checked separately. Inspect and
+convert are distinct non-atomic acquisitions. Pair comparisons report measured
+byte matches, direct classifications/tags and ordered navigation declarations
+without assuming parity or shared update history. Audit results bind the
+candidate/content, all selected evidence, optional run-result bytes and outputs;
+they never grant complete M5, native, user or delivery acceptance.

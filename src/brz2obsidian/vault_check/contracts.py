@@ -37,6 +37,8 @@ class VaultCheckIssue(Contract):
         "invalid_property",
         "invalid_category",
         "invalid_provider",
+        "icon_lookup_depth",
+        "provider_cycle",
         "missing_base",
         "missing_image",
         "ambiguous_reference",

@@ -8,7 +8,7 @@ from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
 
 from .update_contracts import UpdatePreparation
-from .update_facts import output_identity, record
+from .update_facts import _outputs, output_identity, record
 from .update_lifecycle import (
     _history,
     _materialize,
@@ -33,7 +33,7 @@ def refused(code, history=None, *, action="inspect_history"):
 
 def transition_required(facts):
     old, target = facts.baseline_identity, facts.incoming_identity
-    return old.output_format != 7 or (
+    return old.output_format != 8 or (
         old.output_format,
         old.profile_id,
         old.profile_version,
@@ -63,14 +63,22 @@ def route_onboarding(result):
     )
 
 
-def _recorded_identity(history, incoming_identity, proposal_id=None):
+def _recorded_identity(history, incoming_identity, proposal_id=None, *, _owner=None):
     checkpoint = history.checkpoint
     if (
         history.status == "intact"
         and checkpoint is not None
-        and checkpoint.review is not None
+        and (
+            checkpoint.review is not None
+            or _owner is not None
+            and _owner._tip is not None
+        )
     ):
-        facts = checkpoint.review.saved.plan.producer_facts
+        facts = (
+            _owner._tip.saved.plan.producer_facts
+            if _owner is not None and _owner._tip is not None
+            else checkpoint.review.saved.plan.producer_facts
+        )
         if (
             facts.format_operation.kind == "onboarding"
             and facts.proposal_id == proposal_id
@@ -81,7 +89,9 @@ def _recorded_identity(history, incoming_identity, proposal_id=None):
     )
     try:
         old = (
-            output_identity(record(_read_physical(history.admission.vault, rows)))
+            output_identity(
+                record(_read_physical(history.admission.vault, rows, _owner=_owner))
+            )
             if rows
             else incoming_identity
         )
@@ -95,7 +105,7 @@ def _recorded_identity(history, incoming_identity, proposal_id=None):
     return old
 
 
-def _facts(history, original, incoming, *, proposal_id, generation):
+def _facts(history, original, incoming, *, proposal_id, generation, _owner=None):
     facts = _observed_facts(
         history,
         original or incoming,
@@ -104,8 +114,11 @@ def _facts(history, original, incoming, *, proposal_id, generation):
         generation=generation,
         originals_known=original is not None,
         onboarding=True,
+        _owner=_owner,
     )
-    old = _recorded_identity(history, facts.incoming_identity, proposal_id)
+    old = _recorded_identity(
+        history, facts.incoming_identity, proposal_id, _owner=_owner
+    )
     if old != facts.baseline_identity:
         facts = facts.model_copy(update={"baseline_identity": old})
     if original is None and transition_required(facts):
@@ -125,8 +138,8 @@ def _facts(history, original, incoming, *, proposal_id, generation):
     return facts
 
 
-def _original_payload(operations, history, source):
-    """Reproduce supported historical bytes from an independently bound archive."""
+def _original_payload(operations, history, source, *, _owner=None):
+    """Reproduce exact bytes only under the configured policy and renderer."""
     if source is None:
         return None
     try:
@@ -135,13 +148,13 @@ def _original_payload(operations, history, source):
         )
         if len(rows) != 1:
             return None
-        old = record(_read_physical(history.admission.vault, rows))
+        old = record(_read_physical(history.admission.vault, rows, _owner=_owner))
         identity = SourceIdentity.model_validate(old["source_identity"])
         metadata = RunMetadata.model_validate(old["run_metadata"])
         policy = operations._configured_workflow().binding.policy
         if (
-            old["schema_version"] != 7
-            or metadata.renderer_version != "7"
+            old["schema_version"] != 8
+            or metadata.renderer_version != "8"
             or (
                 identity.module_id,
                 identity.module_version,
@@ -166,6 +179,7 @@ def _original_payload(operations, history, source):
                 {},
                 metadata=metadata,
                 directory=Path(owned) / "incoming",
+                _owner=_owner,
             )
         if observed != identity or record(payload) != old:
             return None
@@ -174,33 +188,109 @@ def _original_payload(operations, history, source):
         return None
 
 
-def _retained_original_payload(history, proposal_id, incoming):
+def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
+    """Recover the saved original catalog independently of the incoming version."""
+    from brz2obsidian.content_values import same_content
+
     checkpoint = history.checkpoint
-    if history.status != "intact" or checkpoint is None or checkpoint.review is None:
+    saved = (
+        _owner._tip
+        if _owner is not None
+        else checkpoint.review
+        if checkpoint is not None
+        else None
+    )
+    if history.status != "intact" or checkpoint is None or saved is None:
         return None
-    facts = checkpoint.review.saved.plan.producer_facts
+    facts = saved.saved.plan.producer_facts
     operation = facts.format_operation
+    baseline = operation.established_baseline
+    incoming_record = record(incoming)
     if (
         facts.proposal_id != proposal_id
         or operation.kind != "onboarding"
         or operation.recorded_generation != "supported"
-        or operation.established_baseline is None
-        or operation.baseline_source_version != operation.target_source_version
-        or output_identity(record(incoming)) != facts.baseline_identity
-        or record(incoming)["source_identity"]["snapshot_digest"]
-        != operation.baseline_source_version
-        or any(
-            s.baseline.content is None
-            or incoming.get(s.path) != s.baseline.content.data
-            for s in facts.subjects
-        )
+        or baseline is None
+        or baseline.identity != facts.baseline_identity
+        or baseline.source_version != operation.baseline_source_version
+        or output_identity(incoming_record) != facts.incoming_identity
+        or incoming_record["source_identity"]["snapshot_digest"]
+        != operation.target_source_version
     ):
         return None
-    return incoming
+    subjects = {(s.item_id, s.facet): s for s in facts.subjects}
+    outputs = {(o.item_id, o.facet): o for o in baseline.outputs}
+    if any(
+        s.baseline.status == "known" and key not in outputs
+        for key, s in subjects.items()
+    ) or any(
+        key not in subjects
+        or subjects[key].baseline.status != "known"
+        or not same_content(subjects[key].baseline.content, output.content)
+        for key, output in outputs.items()
+    ):
+        return None
+    record_key = ("support:migration-record.json", "content")
+    if record_key not in outputs:
+        return None
+    original_record_content = subjects[record_key].baseline.content
+    if _owner is not None:
+        original_record_content = _owner._session._assembly_content(
+            original_record_content, semantic=True
+        )
+    original_record = record({"migration-record.json": original_record_content})
+    if (
+        output_identity(original_record) != baseline.identity
+        or original_record["source_identity"]["snapshot_digest"]
+        != baseline.source_version
+    ):
+        return None
+    # The original migration record owns imported paths. Support paths are
+    # declared by the established original output set, never current filenames.
+    paths = (
+        {
+            row["relative_path"]
+            for row in original_record["item_targets"]
+            if row["created"]
+        }
+        | {
+            row["relative_path"]
+            for row in original_record["asset_targets"]
+            if row["relative_path"] is not None
+        }
+        | {
+            output.item_id.removeprefix("support:")
+            for output in baseline.outputs
+            if output.facet == "content" and output.item_id.startswith("support:")
+        }
+    )
+    catalog = _outputs(original_record, dict.fromkeys(paths))
+    original = {}
+    for key in outputs:
+        if key not in catalog:
+            return None
+        path = catalog[key][0]
+        UpdatePreparation.relative_vault_path(path)
+        if path in original:
+            return None
+        content = (
+            original_record_content
+            if key == record_key
+            else subjects[key].baseline.content
+        )
+        original[path] = content if _owner is not None else content.data
+    # Created items must all be present; absent source assets remain absent.
+    if set(_outputs(original_record, original)) != set(outputs):
+        return None
+    return original
 
 
-def prepare_onboarding(operations, vault, source=None, *, original_source=None):
-    history, stopped = _history(operations, vault)
+def prepare_onboarding(
+    operations, vault, source=None, *, original_source=None, _owner=None
+):
+    history, stopped = _history(
+        operations, vault, _owner.observed if _owner is not None else None
+    )
     if stopped is not None and stopped.status == "recovery_required":
         return stopped.model_copy(update={"kind": "onboarding"})
     if (
@@ -216,6 +306,8 @@ def prepare_onboarding(operations, vault, source=None, *, original_source=None):
         )
     if history.status == "intact":
         return refused("existing_history_requires_update", history)
+    if history.status != "absent":
+        return refused("history_unavailable", history)
     if source is None:
         return refused(
             "onboarding_evidence_required", history, action="choose_source_reference"
@@ -226,28 +318,32 @@ def prepare_onboarding(operations, vault, source=None, *, original_source=None):
             or not history.admission.inventory_complete
         ):
             raise ValueError("current_admission_required")
+        if _owner is not None:
+            _owner._start_session()
         historical_source = original_source if original_source is not None else source
-        original = _original_payload(operations, history, historical_source)
+        original = _original_payload(
+            operations, history, historical_source, _owner=_owner
+        )
         directory, incoming, observed, reused = _render(
-            operations, source, original or {}
+            operations,
+            source,
+            original or {},
+            directory=_owner._directory / "incoming" if _owner is not None else None,
+            _owner=_owner,
         )
-        if (
-            original is not None
-            and record(original)["source_identity"]["snapshot_digest"]
-            != observed.snapshot_digest
-        ):
-            return refused(
-                "source_changes_require_separate_update", history
-            ).model_copy(
-                update={
-                    "next_actions": ("choose_matching_onboarding_source",),
-                }
-            )
         facts = _facts(
-            history, original, incoming, proposal_id=uuid4().hex, generation=1
+            history,
+            original,
+            incoming,
+            proposal_id=uuid4().hex,
+            generation=1,
+            _owner=_owner,
         )
-        history = _scoped(operations, history, facts)
-        review = prepare_review(facts, preflight=history.admission.preflight)
+        if _owner is None:
+            history = _scoped(operations, history, facts)
+            review = prepare_review(facts, preflight=history.admission.preflight)
+        else:
+            history, review = _owner._plan(history, facts)
         binding = operations.observe_reviewed_source(directory, review)
         return _prepared(
             history,
@@ -260,14 +356,48 @@ def prepare_onboarding(operations, vault, source=None, *, original_source=None):
             original_source_ref=str(Path(historical_source).absolute())
             if original is not None
             else None,
+            _owner=_owner,
         )
     except OSError, ValueError, KeyError, TypeError, AttributeError:
         return refused("onboarding_unavailable", history)
 
 
-def reobserve_onboarding(operations, preparation):
-    history = operations.inspect_history(preparation.vault)
+def reobserve_onboarding(operations, preparation, *, _owner=None):
+    history = (
+        operations.inspect_history(preparation.vault)
+        if _owner is None
+        else _owner._observe(
+            preparation.vault,
+            preparation.locator,
+            expected_absent=preparation.locator is None,
+        )
+    )
+    if _owner is not None:
+        _owner._tip = (
+            _owner._load_tip(history.checkpoint) if history.status == "intact" else None
+        )
+        with _owner._session._operation():
+            plan = _owner._session._admit_values(preparation.review)
+            _owner._session._coadmit()
+            preparation = preparation.model_copy(update={"review": plan})
+            return _reobserve_onboarding(
+                operations, preparation, history, _owner=_owner
+            )
+    return _reobserve_onboarding(operations, preparation, history)
+
+
+def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
+    from brz2obsidian.content_fingerprints import canonical_equal
+    from brz2obsidian.core.refresh import RefreshWork
+
     try:
+        retained = (
+            history.checkpoint.review
+            if _owner is None and history.checkpoint is not None
+            else _owner._tip
+            if _owner is not None and history.status == "intact"
+            else None
+        )
         if history.admission.status == "recovery_first":
             return (
                 None,
@@ -285,35 +415,42 @@ def reobserve_onboarding(operations, preparation):
         if locator != preparation.locator or history.status not in ("absent", "intact"):
             raise ValueError("association_or_history_changed")
         if history.status == "intact" and (
-            history.checkpoint.review is None
+            retained is None
             or history.checkpoint.manifest.boundary not in ("local", "prepared")
-            or history.checkpoint.review.saved.plan.facts.format_operation.kind
-            != "onboarding"
-            or history.checkpoint.review.saved.plan.facts.proposal_id
+            or retained.saved.plan.facts.format_operation.kind != "onboarding"
+            or retained.saved.plan.facts.proposal_id
             != preparation.review.proposal.proposal_id
         ):
             raise ValueError("current_onboarding_history_required")
         directory = Path(preparation.payload_directory).absolute()
-        if (
-            directory.name != "incoming"
-            or directory.parent.parent != Path(tempfile.gettempdir())
+        if directory.name != "incoming" or (
+            directory.parent.parent != Path(tempfile.gettempdir())
             or not directory.parent.name.startswith("brz2obsidian-update-")
+            if _owner is None
+            else directory.parent != _owner._directory
         ):
             raise ValueError("owned_payload_required")
-        if validate_review(preparation.review).status != "accepted":
+        if (
+            validate_review(preparation.review).status != "accepted"
+            if _owner is None
+            else _owner._session._replay(preparation.review) is None
+        ):
             raise ValueError("invalid_review")
         actual = operations.observe_reviewed_source(directory, preparation.review)
         if actual != preparation.source_binding:
             raise ValueError("source_payload_changed")
-        incoming = _read_physical(directory, actual.files)
+        incoming = _read_physical(directory, actual.files, _owner=_owner)
+        if _owner is not None:
+            _owner._session._coadmit()
         original = _retained_original_payload(
-            history, preparation.review.proposal.proposal_id, incoming
+            history, preparation.review.proposal.proposal_id, incoming, _owner=_owner
         )
         if original is None and preparation.source_ref is not None:
             original = _original_payload(
                 operations,
                 history,
                 preparation.original_source_ref or preparation.source_ref,
+                _owner=_owner,
             )
         if preparation.source_ref is not None:
             metadata = RunMetadata.model_validate(record(incoming)["run_metadata"])
@@ -326,6 +463,7 @@ def reobserve_onboarding(operations, preparation):
                     original or {},
                     metadata=metadata,
                     directory=Path(owned) / "incoming",
+                    _owner=_owner,
                 )
                 fresh_binding = operations.observe_reviewed_source(
                     fresh, preparation.review
@@ -357,16 +495,42 @@ def reobserve_onboarding(operations, preparation):
             incoming,
             proposal_id=preparation.review.proposal.proposal_id,
             generation=preparation.review.proposal.generation,
+            _owner=_owner,
         )
-        history = _scope_review(operations, history, facts, preparation.review)
+        if _owner is None:
+            history = _scope_review(operations, history, facts, preparation.review)
+        else:
+            facts = _owner._session._admit_values(facts)
+            _owner._session._coadmit()
+            scoped_plan = preparation.review
+            if not canonical_equal(facts, scoped_plan.facts):
+                provisional = _owner._session._drive(
+                    RefreshWork(
+                        scoped_plan,
+                        facts.model_copy(
+                            update={"generation": scoped_plan.proposal.generation + 1}
+                        ),
+                        scoped_plan.preflight,
+                    )
+                )
+                if provisional.status != "accepted":
+                    raise ValueError("current_selected_scope_unavailable")
+                scoped_plan = provisional.plan
+            history = _owner._scoped(history, facts, scoped_plan)
         review = preparation.review
         changed = (
-            facts != review.facts or history.admission.preflight != review.preflight
-        )
+            facts != review.facts
+            if _owner is None
+            else not canonical_equal(facts, review.facts)
+        ) or history.admission.preflight != review.preflight
         if changed:
             facts = facts.model_copy(update={"generation": facts.generation + 1})
-            transition = refresh_review(
-                review, facts, preflight=history.admission.preflight
+            transition = (
+                refresh_review(review, facts, preflight=history.admission.preflight)
+                if _owner is None
+                else _owner._session._drive(
+                    RefreshWork(review, facts, history.admission.preflight)
+                )
             )
             if transition.status != "accepted":
                 raise ValueError("current_review_unavailable")
@@ -383,6 +547,7 @@ def reobserve_onboarding(operations, preparation):
             status="stale_review" if changed else "prepared_review",
             code="current_facts_changed" if changed else "current",
             stale=_stale_slots(preparation.review, review) if changed else 0,
+            _owner=_owner,
         )
         return history, result, incoming
     except OSError, ValueError, KeyError, TypeError, AttributeError:

@@ -69,6 +69,11 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def _new_owned_preparation(self):
+        from .owned_preparation import _OwnedPreparation
+
+        return _OwnedPreparation(self)
+
     def prepare_attachment_cleanup(self, vault):
         """Review recorded attachment ownership and current references explicitly."""
         from .attachment_cleanup import prepare_attachment_cleanup
@@ -144,6 +149,14 @@ class Operations:
             edited=edited,
             selected_entry_id=selected_entry_id,
             disassociate_entry_ids=disassociate_entry_ids,
+        )
+
+    def keep_current_unresolved(self, preparation, *, group_id):
+        """Resolve the exact unresolved content group in one canonical transition."""
+        from .review_choices import keep_current_group_action
+
+        return self.resolve_update(
+            preparation, keep_current_group_action(preparation.review, group_id)
         )
 
     def resolve_update(self, preparation, action, *, edited=None):
@@ -359,6 +372,14 @@ class Operations:
         return self.read_update_details(
             vault, offset=offset, limit=limit, expected=expected
         )
+
+    def inspect_owned_history_status(self, vault):
+        """Inspect current history as scalar admission and retire its owner."""
+        owner = self._new_owned_preparation()
+        try:
+            return owner.inspect_history(vault)
+        finally:
+            owner.close()
 
     def inspect_history_workflow(self, vault):
         """Inspect restart routing from fresh native operation and history facts."""

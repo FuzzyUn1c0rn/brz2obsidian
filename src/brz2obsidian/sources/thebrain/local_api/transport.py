@@ -11,7 +11,7 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 
 from .capture import pairs
-from .errors import failure, refuse
+from .errors import check_cancel, failure, refuse
 
 
 def timestamp():
@@ -27,7 +27,7 @@ class NegativeZeroInteger(int):
 
 
 class LocalHttp:
-    def __init__(self, config, token, brain_id, clock):
+    def __init__(self, config, token, brain_id, clock, *, cancel=None):
         self.config, self._token, self.brain_id, self.clock = (
             config,
             token,
@@ -37,6 +37,7 @@ class LocalHttp:
         self.requests = []
         self._response_bytes = 0
         self.started_at = timestamp()
+        self.cancel = cancel
 
     def ensure_safe(self, value):
         if isinstance(value, str):
@@ -51,6 +52,7 @@ class LocalHttp:
                 self.ensure_safe(child)
 
     def _check(self, deadline):
+        check_cancel(self.cancel)
         if deadline is not None and self.clock() >= deadline:
             refuse("search_timeout wildcard deadline exhausted", "incomplete_source")
 
@@ -63,7 +65,9 @@ class LocalHttp:
         deadline=None,
         allow_tag_error=False,
         allow_missing_txt=False,
+        allow_missing_image=False,
         sink=None,
+        bounded_icon=False,
     ):
         self._check(deadline)
         if len(self.requests) >= self.config.max_requests:
@@ -137,7 +141,7 @@ class LocalHttp:
                     "api_authentication_failed", "The local API denied access"
                 )
             if (
-                allow_missing_txt
+                (allow_missing_txt or allow_missing_image)
                 and operation == "attachment-content"
                 and response.status == 404
             ):
@@ -150,7 +154,9 @@ class LocalHttp:
                         "brain_id": self.brain_id,
                         "subject_id": subject_id,
                         "status": 404,
-                        "outcome": "missing_txt_404",
+                        "outcome": "missing_image_404"
+                        if allow_missing_image
+                        else "missing_txt_404",
                         "started_at": started,
                         "finished_at": timestamp(),
                         "actual_length": 0,
@@ -188,6 +194,7 @@ class LocalHttp:
             )
             chunks = []
             total = compressed = 0
+            icon_prefix = b""
             secret_tail = b""
             secret = self._token.encode("utf-8")
             while True:
@@ -199,7 +206,12 @@ class LocalHttp:
                         )
                     break
                 connected_socket.settimeout(max(0.001, remaining))
-                chunk = response.read1(min(65536, cap + 1))
+                read_limit = (
+                    min(65536, cap - total + 1) if bounded_icon else min(65536, cap + 1)
+                )
+                if bounded_icon and len(icon_prefix) < 4:
+                    read_limit = min(read_limit, 4 - len(icon_prefix))
+                chunk = response.read1(read_limit)
                 remaining_budget()
                 if not chunk:
                     if response.length not in {None, 0}:
@@ -214,9 +226,24 @@ class LocalHttp:
                         "incomplete_source",
                     )
                 while True:
+                    remaining_budget()
+                    decode_limit = cap - total + 1
+                    if bounded_icon:
+                        decode_limit = min(65536, decode_limit)
+                        if len(icon_prefix) < 4:
+                            decode_limit = min(decode_limit, 4 - len(icon_prefix))
                     decoded = (
-                        decoder.decompress(chunk, cap - total + 1) if decoder else chunk
+                        decoder.decompress(chunk, decode_limit) if decoder else chunk
                     )
+                    if bounded_icon and len(icon_prefix) < 4:
+                        from .icons import encoded_limit
+
+                        icon_prefix += decoded[: 4 - len(icon_prefix)]
+                        if len(icon_prefix) == 4:
+                            selected_cap = encoded_limit(icon_prefix, cap)
+                            if selected_cap < cap:
+                                setting = "icon_family"
+                            cap = selected_cap
                     total += len(decoded)
                     if (
                         self._response_bytes + total
@@ -240,6 +267,7 @@ class LocalHttp:
                         chunks.append(decoded)
                     else:
                         sink.write(decoded)
+                    remaining_budget()
                     if decoder and decoder.unconsumed_tail:
                         chunk = decoder.unconsumed_tail
                     else:

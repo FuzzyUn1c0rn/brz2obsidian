@@ -8,6 +8,9 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from uuid import UUID
 
+from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.diagnostics import with_subject
+
 from .relationships import relationship_problem
 
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
@@ -347,11 +350,21 @@ def scope_records(records, physical_members, refuse, uuid):
             )
         if a in excluded or b in excluded:
             omitted.add(record["Id"])
-    for record in thoughts.values():
+    for index, record in enumerate(thoughts.values()):
         if record.get("TypeId"):
             provider = uuid(record["TypeId"])
             if provider not in thoughts:
-                refuse("invalid_reference", "Classification provider is not live")
+                if record["Id"] in diagnostic_omitted or diagnostic_unsafe(record):
+                    refuse("invalid_reference", "Classification provider is not live")
+                try:
+                    refuse(
+                        "invalid_reference",
+                        "Classification TypeId provider is not live",
+                        (record["Id"], provider),
+                        evidence=(f"thoughts.json:{index}",),
+                    )
+                except MigrationRefused as error:
+                    raise with_subject(error, "item", record.get("Name")) from None
     states = records["meta.json"][0].get("AttachmentFileStates")
     if type(states) is not dict:
         refuse("invalid_source", "AttachmentFileStates must be an object")

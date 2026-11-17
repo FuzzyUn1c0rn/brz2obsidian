@@ -25,7 +25,7 @@ def test_recorded_older_format_preserves_review_but_requires_separate_transition
     assert offered.preparation is not None, offered
     facts = offered.preparation.review.facts
     assert facts.baseline_identity.output_format == 6
-    assert facts.incoming_identity.output_format == 7
+    assert facts.incoming_identity.output_format == 8
     assert facts.format_operation.recorded_generation == "unavailable"
     assert all(s.baseline.status == "unknown" for s in facts.subjects)
     assert "review_format_transition" in offered.next_actions
@@ -81,31 +81,36 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
         resolve_review,
         save_review,
     )
-    from brz2obsidian.obsidian import ObsidianRenderer
+    from brz2obsidian.obsidian import (
+        ObsidianRenderer,
+        interpret_link_target,
+        interpret_links,
+    )
     from brz2obsidian.publication import FilesystemPublisher
     from tests.application.test_update_lifecycle_contracts import (
         preparation,
         recorded_history,
     )
-    from tests.reconciliation.test_resolution import action
+    from tests.reconciliation.test_proposals import request
+    from tests.reconciliation.test_resolution import action, with_review_links
     from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
 
-    old = preparation()
-    identity = old.review.facts.incoming_identity.model_copy(
+    facts = request()
+    identity = facts.incoming_identity.model_copy(
         update={
+            "output_format": 8,
             "module_version": "3",
             "profile_id": FOLIO_POLICY.profile_id,
             "profile_version": FOLIO_POLICY.profile_version,
             "settings_digest": hashlib.sha256(b"{}").hexdigest(),
         }
     )
-    history = recorded_history(identity=identity, locator=old.locator)
-    pending = old.review.facts.model_copy(
+    pending = facts.model_copy(
         update={
             "baseline_identity": identity,
             "incoming_identity": identity,
             "subjects": (
-                old.review.facts.subjects[0].model_copy(
+                facts.subjects[0].model_copy(
                     update={
                         "baseline": ContentVersion(
                             status="unknown", content=None, unavailable_digest=None
@@ -113,9 +118,9 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
                     }
                 ),
             ),
-            "format_operation": old.review.facts.format_operation.model_copy(
+            "format_operation": facts.format_operation.model_copy(
                 update={
-                    "kind": "onboarding",
+                    "kind": "source_update",
                     "recorded_generation": "unknown",
                     "baseline_source_version": None,
                     "established_baseline": None,
@@ -123,7 +128,73 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
             ),
         }
     )
-    plan = prepare_review(pending, preflight=old.review.preflight)
+    pending = with_review_links(pending)
+    context = pending.link_context
+    subject = pending.subjects[0]
+    current_target, incoming_target = (
+        context.current_targets[0],
+        context.incoming_targets[0],
+    )
+    current_state = interpret_link_target(
+        subject.current.content,
+        target_id=current_target.target_id,
+        existence="present",
+        memberships=(),
+        source_path=subject.current.path,
+        output_format=8,
+    )
+    incoming_state = interpret_link_target(
+        subject.incoming,
+        target_id=incoming_target.target_id,
+        existence="present",
+        memberships=(),
+        source_path=subject.path,
+        output_format=8,
+    )
+    # This controlled pure fixture represents a current-format pending review;
+    # both byte-bound target interpretations and documents use that generation.
+    pending = pending.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    "current_target_facts": (current_state,),
+                    "incoming_target_facts": (incoming_state,),
+                    "current_documents": (
+                        interpret_links(
+                            subject.current.content,
+                            document_id=current_target.target_id,
+                            source_path=subject.current.path,
+                            path_mode="vault",
+                            targets=context.current_targets,
+                            target_facts=(current_state,),
+                            inventory="complete",
+                        ),
+                    ),
+                    "incoming_documents": (
+                        interpret_links(
+                            subject.incoming,
+                            document_id=incoming_target.target_id,
+                            source_path=subject.path,
+                            path_mode="vault",
+                            targets=context.incoming_targets,
+                            target_facts=(incoming_state,),
+                            inventory="complete",
+                        ),
+                    ),
+                }
+            )
+        }
+    )
+    current = preparation(pending)
+    history = recorded_history(identity=identity, locator=current.locator)
+    pending = pending.model_copy(
+        update={
+            "format_operation": pending.format_operation.model_copy(
+                update={"kind": "onboarding"}
+            )
+        }
+    )
+    plan = prepare_review(pending, preflight=current.review.preflight)
     kept = resolve_review(plan, action(plan, domain="format", choice="current"))
     assert kept.status == "accepted" and kept.plan.ready
     loaded = load_review(save_review(kept.plan).record)

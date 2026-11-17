@@ -19,7 +19,10 @@ def prepare_note(
     pointer,
     member,
     excluded=(),
-    scope_tokens=(),
+    scope_tokens=None,
+    brain_id=None,
+    allow_qualified=False,
+    allow_literal_tokens=False,
     source_refuse,
 ):
     """Return a prepared Document and its formatting-loss findings.
@@ -28,10 +31,31 @@ def prepare_note(
     text afresh. Exact edits describe scoped text; references describe final
     text. Original-copy eligibility is decided before removing references.
     """
+    if allow_qualified and scope_tokens is None:
+        source_refuse(
+            "invalid_source",
+            "Current note binding needs authoritative exclusion context",
+            (owner, asset_id),
+            evidence=(pointer, "meta.json"),
+        )
+    scope_tokens = scope_tokens if scope_tokens is not None else ()
     findings = []
     try:
-        adapted, text_adaptations = adapt_literals(text)
-        references = trace_note_references(adapted, excluded)
+        adapted, text_adaptations = adapt_literals(
+            text, allow_literal_tokens=allow_literal_tokens
+        )
+        references = trace_note_references(
+            adapted, excluded, allow_qualified=allow_qualified
+        )
+        removals = [
+            reference
+            for reference in references
+            if reference.kind == "item"
+            and compact_thought_identity(
+                reference.target, brain_id=brain_id, allow_qualified=allow_qualified
+            )
+            in excluded
+        ]
     except MigrationRefused as error:
         issue = error.issues[0]
         source_refuse(
@@ -41,12 +65,6 @@ def prepare_note(
             evidence=(pointer, "payload:" + member),
             guidance="Review the affected thought-note Markdown and its preserved source evidence; unsupported HTML or reference syntax must be resolved before retrying.",
         )
-    removals = []
-    for reference in references:
-        if reference.kind == "item":
-            target = compact_thought_identity(reference.target)
-            if target in excluded:
-                removals.append(reference)
     unsafe_original = bool(removals) or contains_omitted_identity(text, scope_tokens)
     for reference in reversed(removals):
         begin = source_position(reference.start, text_adaptations)
@@ -61,8 +79,12 @@ def prepare_note(
             guidance="Review this attachment's declared role and owned archive payload.",
         )
     try:
-        adapted, text_adaptations, insert_losses = adapt_note(text)
-        references = trace_adapted_references(adapted, text_adaptations)
+        adapted, text_adaptations, insert_losses = adapt_note(
+            text, allow_literal_tokens=allow_literal_tokens
+        )
+        references = trace_adapted_references(
+            adapted, text_adaptations, allow_qualified=allow_qualified
+        )
     except MigrationRefused as error:
         issue = error.issues[0]
         source_refuse(
@@ -71,6 +93,18 @@ def prepare_note(
             (owner, asset_id),
             evidence=(pointer,),
             guidance=issue.guidance,
+        )
+    if allow_qualified and any(
+        contains_omitted_identity(value, scope_tokens)
+        for reference in references
+        for value in (reference.target, reference.display_text)
+    ):
+        source_refuse(
+            "invalid_reference",
+            "Note contains an excluded association outside removable references",
+            (owner, asset_id),
+            evidence=(pointer, "meta.json"),
+            guidance="Review this attachment's declared role and owned archive payload.",
         )
     for loss in insert_losses:
         findings.append(
@@ -97,7 +131,17 @@ def prepare_note(
     return document, tuple(findings)
 
 
-def bind_prepared_notes(documents, assets, thoughts, source_refuse):
+def bind_prepared_notes(
+    documents,
+    assets,
+    thoughts,
+    source_refuse,
+    *,
+    brain_id=None,
+    allow_qualified=False,
+    image_context=None,
+    findings=None,
+):
     """Bind prepared documents after all owned assets have been inventoried.
 
     Preserve document evidence and fixed binding guidance for typed refusals.
@@ -105,7 +149,22 @@ def bind_prepared_notes(documents, assets, thoughts, source_refuse):
     bound_documents = []
     for document in documents:
         try:
-            bound_documents.append(bind_note_references(document, assets, thoughts))
+            if image_context is not None:
+                from .unavailable_images import adapt_unavailable_images
+
+                document, image_findings = adapt_unavailable_images(
+                    document, assets, **image_context
+                )
+                findings.extend(image_findings)
+            bound_documents.append(
+                bind_note_references(
+                    document,
+                    assets,
+                    thoughts,
+                    brain_id=brain_id,
+                    allow_qualified=allow_qualified,
+                )
+            )
         except MigrationRefused as error:
             issue = error.issues[0]
             source_refuse(
