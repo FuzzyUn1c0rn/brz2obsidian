@@ -1336,20 +1336,29 @@ def test_save_and_apply_reobserve_exact_incoming_authority_before_native_contact
         assert prepared.review.approvals[0].result.data == b"incoming\n"
 
 
-@pytest.mark.parametrize("known_original", (True, False))
+@pytest.mark.parametrize(
+    ("known_original", "unpublished_prepared"),
+    ((True, False), (False, False), (True, True)),
+    ids=("known-saved", "unknown-saved", "unpublished-prepared"),
+)
 def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
-    tmp_path, monkeypatch, known_original
+    tmp_path, monkeypatch, known_original, unpublished_prepared
 ):
     from pathlib import Path
 
     from brz2obsidian.application.checkpoint_contracts import CheckpointResult
     from brz2obsidian.core import load_review, save_review
     from tests.application.test_format_transition import transition_case
-    from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE
+    from tests.application.test_module_seams import METADATA
+    from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE, ORIGINAL
 
     operations, vault, history = transition_case(
         tmp_path, monkeypatch, known_original=known_original
     )
+    if unpublished_prepared:
+        operations.workflow.metadata_factory = lambda: METADATA.model_copy(
+            update={"renderer_version": "9"}
+        )
     before = {
         path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
@@ -1438,6 +1447,21 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     assert loaded.kind == "format_transition" and loaded.code == "revalidation_required"
     assert not loaded.ready and not loaded.loaded.ready
 
+    if unpublished_prepared:
+        # A prepared checkpoint written before the operation ref stores the
+        # target payload. The exact old Original remains in the retained review.
+        checkpoint = history.checkpoint
+        checkpoint.manifest.boundary = "prepared"
+        checkpoint.manifest.identity = (
+            saved.preparation.source_binding.incoming_identity
+        )
+        checkpoint.manifest.source = saved.preparation.source_binding.files
+        directory = Path(saved.preparation.payload_directory)
+        stored_source = {
+            row.path: (directory / row.path).read_bytes()
+            for row in checkpoint.manifest.source
+        }
+
     def unopened_source(*args, **kwargs):
         raise AssertionError("Pending maintenance cannot start ordinary source access")
 
@@ -1470,7 +1494,20 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     )
     assert retained.result.data == CURRENT
     assert resumed.preparation.review.facts.baseline_identity.output_format == 6
-    assert resumed.preparation.review.facts.incoming_identity.output_format == 8
+    assert resumed.preparation.review.facts.incoming_identity.output_format == (
+        9 if unpublished_prepared else 8
+    )
+    if unpublished_prepared:
+        facts = resumed.preparation.review.facts
+        (record,) = [
+            document
+            for document in facts.link_context.current_documents
+            if document.source_path == "migration-record.json"
+        ]
+        assert record.status == "supported"
+        (note,) = [subject for subject in facts.subjects if subject.path == NOTE]
+        assert note.baseline.content.data == ORIGINAL
+        assert note.current.content.data == CURRENT
     assert not resumed.ready and captured == [True]
     assert {
         path.relative_to(vault).as_posix(): path.read_bytes()

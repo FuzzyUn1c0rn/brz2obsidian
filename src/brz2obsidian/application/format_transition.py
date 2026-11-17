@@ -37,10 +37,11 @@ def transition_facts(
         if retained_review is not None
         else None
     )
-    contextual = (
-        prior is not None
-        and checkpoint.manifest.boundary == "local"
+    contextual = prior is not None and (
+        checkpoint.manifest.boundary == "local"
         and prior.format_operation.kind in ("onboarding", "format_transition")
+        or checkpoint.manifest.boundary == "prepared"
+        and prior.format_operation.kind == "format_transition"
     )
     old_identity = (
         prior.baseline_identity if contextual else checkpoint.manifest.identity

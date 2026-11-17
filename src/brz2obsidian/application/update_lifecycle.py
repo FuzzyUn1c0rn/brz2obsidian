@@ -365,15 +365,22 @@ def _observed_facts(
 
 def _baseline(checkpoint, source, *, _owner=None):
     review = _owner._tip if _owner is not None else checkpoint.review
-    if (
-        checkpoint.manifest.boundary != "local"
-        or review is None
-        or checkpoint.manifest.reviewed_source is not None
-    ):
+    if review is None:
         return source
     facts = review.saved.plan.producer_facts
-    # Saved unresolved reviews retain complete exact originals in schema-1
-    # review_content; the source role retains the complete incoming payload.
+    manifest = checkpoint.manifest
+    if (
+        manifest.boundary == "prepared"
+        and facts.format_operation.kind == "format_transition"
+    ):
+        if manifest.identity != facts.incoming_identity:
+            raise ValueError("prepared_source_identity_mismatch")
+        if facts.format_operation.established_baseline is None:
+            return source
+    elif manifest.boundary != "local" or manifest.reviewed_source is not None:
+        return source
+    # The prepared source role holds Incoming. The authenticated review
+    # separately retains the exact old Original for an unpublished transition.
     rows = {(s.item_id, s.facet): s for s in facts.subjects}
     original_record = rows[
         ("support:migration-record.json", "content")
@@ -646,7 +653,8 @@ def _review_explanation(result, *, review=None):
                     "Edit the generated relationship to point to the reviewed note's "
                     "actual path. Keep authored links at their original destinations. "
                     "If an authored section repeats the generated heading and link, "
-                    "give your section a distinct heading and keep its link unchanged."
+                    "give your section a distinct heading and keep its link unchanged. "
+                    "If the generated row is missing, add it in the generated section."
                 ),
             )
     if guidance:
@@ -1466,7 +1474,7 @@ def _resume_update(operations, vault, observed):
 
             facts = transition_facts(
                 history,
-                baseline,
+                _baseline(checkpoint, baseline),
                 incoming,
                 proposal_id=plan.proposal.proposal_id,
                 generation=plan.proposal.generation,
@@ -2178,6 +2186,8 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
             summary=applied.message,
             next_actions=("review_recovery",)
             if applied.recovery_required or stopped_intent
+            else ("resume_update",)
+            if applied.code == "intent_ref_unavailable"
             else (),
             history_retained=current.history_retained or applied.history != "none",
             checkpoint_commit=applied.result_commit or applied.checkpoint_commit,

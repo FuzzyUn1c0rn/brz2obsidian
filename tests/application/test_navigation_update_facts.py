@@ -322,18 +322,31 @@ def test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file():
 
 @pytest.mark.parametrize(
     "placement",
-    ("free", "occupied", "authored-before", "authored-after", "distinct-label"),
+    (
+        "free",
+        "occupied",
+        "authored-before",
+        "authored-after",
+        "distinct-label",
+        "authored-only",
+        "authored-in-slot",
+    ),
 )
 def test_generated_navigation_requires_the_approved_moved_note_destination(placement):
     occupied = placement != "free"
     duplicate = placement in ("authored-before", "authored-after")
-    authored = duplicate or placement == "distinct-label"
+    authored_only = placement in ("authored-only", "authored-in-slot")
+    authored = duplicate or authored_only or placement == "distinct-label"
     canonical, relocated = b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]"
     authored_link = (
         b"[[Notes/Leaf.md|My occupant]]" if placement == "distinct-label" else canonical
     )
     heading = b"## Children\n\n"
     explanation = b"Authored context.\n\n"
+    generated_block = heading + b"- " + canonical + b"\n\n"
+    local_reference = explanation + generated_block
+    if placement == "authored-only":
+        local_reference = b"\n## Local reference\n\n" + local_reference
     authored_block = (
         heading + b"- " + authored_link + b"\n\n" + explanation
         if placement == "authored-before"
@@ -347,6 +360,11 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
             return body.replace(
                 b"## Categories\n", authored_block + b"## Categories\n", 1
             )
+        if authored_only:
+            assert generated_block in body
+            if placement == "authored-in-slot":
+                return body.replace(generated_block, local_reference, 1)
+            return body.replace(generated_block, b"", 1) + local_reference
         if placement == "distinct-label":
             return body.replace(
                 b"- " + canonical, b"- " + authored_link + b"\n- " + canonical, 1
@@ -359,6 +377,11 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
         b'source_item_id: "leaf"\n---\n\n# Leaf\n\nLocal prose.\r\n'
     )
     occupant = b"# Unrelated local file\r\n" if occupied else None
+    if authored_only:
+        occupant = (
+            b'---\nsource_collection_id: "collection"\n'
+            b'source_item_id: "unrelated"\n---\n\n# Local occupant\n'
+        )
     review = navigation_review(
         occupant=occupant,
         observer=LINK if occupied else b"Independent local prose.\r\n",
@@ -403,15 +426,29 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
                 b"## Categories\n", authored_block + b"## Categories\n", 1
             )
         )
-        authored_only = initial.replace(
+        redirected_authored = initial.replace(
             authored_block, authored_block.replace(canonical, relocated), 1
         )
         assert edit_selection(generated_only).status == "refused"
-        assert edit_selection(authored_only).status == "refused"
+        assert edit_selection(redirected_authored).status == "refused"
         assert edit_selection(initial.replace(canonical, relocated)).status == "refused"
         distinguished = authored_block.replace(heading, b"## My links\n\n", 1)
         corrected = generated_only.replace(authored_block, distinguished, 1)
         assert distinguished in corrected and corrected.count(canonical) == 1
+    elif authored_only:
+        assert local_reference in initial and initial.count(canonical) == 1
+        assert entry.original.data.index(canonical) < entry.original.data.index(
+            b"## Categories"
+        )
+        if placement == "authored-only":
+            assert initial.index(canonical) > initial.index(b"## Categories")
+        assert edit_selection(initial.replace(canonical, relocated)).status == "refused"
+        distinguished = local_reference.replace(heading, b"## My links\n\n", 1)
+        restored = generated_block.replace(canonical, relocated, 1)
+        corrected = initial.replace(local_reference, distinguished, 1).replace(
+            b"## Categories\n", restored + b"## Categories\n", 1
+        )
+        assert distinguished in corrected
     else:
         corrected = initial.replace(canonical, relocated, 1)
         if authored:
@@ -448,9 +485,11 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
             if link.raw == authored_link
         ]
         assert retained.meaning.status == "resolved"
-        assert (
-            retained.meaning.path == PATH and retained.meaning.target_identity is None
-        )
+        assert retained.meaning.path == PATH
+        if authored_only:
+            assert retained.meaning.target_identity.item_id == "unrelated"
+        else:
+            assert retained.meaning.target_identity is None
 
     if not occupied:
         source = {s.path: s.incoming.data for s in final.facts.subjects if s.incoming}

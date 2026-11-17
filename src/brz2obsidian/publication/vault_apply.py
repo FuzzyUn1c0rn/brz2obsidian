@@ -2828,6 +2828,33 @@ def _apply_reviewed_update(
                 stop=observed_failure.stop_commit,
                 recovery=True,
             )
+        if (
+            phase == "intent"
+            and intent_commit is None
+            and prepared_commit is not None
+            and published == 0
+            and observed_failure is not None
+            and observed_failure.code == "operation_absent"
+        ):
+            return outcome(
+                "failed",
+                "intent_ref_unavailable",
+                start=start,
+                operation_id=operation_id,
+                generation=operation_generation,
+                phase="prepared",
+                publication="not_published",
+                history="prepared",
+                planned=planned,
+                published=0,
+                changed=False,
+                checkpoint=prepared_commit,
+                recovery=False,
+                message=(
+                    "Git could not record the operation ref. The review was retained. "
+                    "Check write access and path length for Git, then resume the review."
+                ),
+            )
         authority_unknown = phase == "intent" and intent_commit is None
         cleanup_pending = not acquired and _lock_path(root).exists()
         publication_unknown = intent_commit is not None

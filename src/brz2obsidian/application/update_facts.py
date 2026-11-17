@@ -38,6 +38,7 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
+from brz2obsidian.obsidian.sections import retained_relationship_survives
 from brz2obsidian.obsidian_dialect import native_properties
 from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
@@ -649,10 +650,16 @@ def _navigation_edges(source_record):
 
 
 def _retained_navigation_tokens(facts, subject, links, prior):
-    if subject.baseline.content is None or not any(
-        (subject.item_id, ref.identity.item_id, ref.heading, ref.source_path) in prior
-        for ref in links.values()
-    ):
+    original = subject.baseline.content
+    current = subject.current.content
+    if original is None or current is None:
+        return links
+    proven_headings = {
+        heading
+        for heading in {ref.heading for ref in links.values()}
+        if retained_relationship_survives(original.data, current.data, heading)
+    }
+    if not proven_headings:
         return links
     context = facts.link_context
     document = interpret_links(
@@ -668,12 +675,13 @@ def _retained_navigation_tokens(facts, subject, links, prior):
     if document.status != "supported":
         return links
     for key, reference in links.items():
-        if (
+        previous_edge = (
             subject.item_id,
             reference.identity.item_id,
             reference.heading,
             reference.source_path,
-        ) not in prior:
+        )
+        if reference.heading not in proven_headings or previous_edge not in prior:
             continue
         original = tuple(
             link.raw

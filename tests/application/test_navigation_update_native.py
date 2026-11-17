@@ -332,3 +332,76 @@ def test_interrupted_format9_upgrade_finishes_with_authored_reserved_links(case_
     assert b"## Parents" in (vault / LEAF).read_bytes()
     assert (vault / "Manual.md").read_bytes() == authored
     assert json.loads((vault / RECORD).read_bytes())["schema_version"] == 9
+
+
+def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
+    case_path, monkeypatch
+):
+    from brz2obsidian.publication.vault_history import _Git
+
+    source = graph_archive(
+        case_path / "original.brz", {1: "Entry", 2: "Leaf"}, (RELATIONSHIPS[0],)
+    )
+    vault, _, authored = checkpoint(case_path, source, format8_workflow())
+    home = next(vault.glob("Home*.md"))
+    home_before = home.read_bytes()
+    occupant_path = vault / LEAF
+    occupant_path.parent.mkdir(exist_ok=True)
+    occupant = b"# Unrelated occupant\r\n"
+    occupant_path.write_bytes(occupant)
+    moved = vault / "Moved/Leaf.md"
+    moved.parent.mkdir()
+    local = (
+        b'---\nsource_collection_id: "11111111-1111-4111-8111-111111111111"\n'
+        b'source_item_id: "00000000-0000-0000-0000-000000000002"\n'
+        b"---\n\n# Leaf\n\nLocal prose.\r\n"
+    )
+    moved.write_bytes(local)
+    operations = Operations()
+    prepared = review_plan(operations.prepare_format_transition(vault, source))
+    leaf = next(c for c in prepared.review.proposal.changes if c.item_id == identity(2))
+    leaf_result = leaf.incoming.data + b"\nLocal prose.\r\n"
+    with_leaf = choose_text(operations, prepared, leaf, leaf_result)
+    referrer = next(
+        c for c in with_leaf.review.proposal.changes if c.item_id == identity(1)
+    )
+    edited = home_before.replace(b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]")
+    ready = use_incoming(
+        operations, choose_text(operations, with_leaf, referrer, edited)
+    )
+    assert ready.review.ready
+    call = _Git.call
+
+    def refuse_operation_ref(self, *args, **kwargs):
+        if args[0] == "update-ref" and "/operations/" in args[1]:
+            raise OSError("Deterministic failure before the intent ref write")
+        return call(self, *args, **kwargs)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(_Git, "call", refuse_operation_ref)
+        failed = operations.apply_update(ready)
+    assert (failed.status, failed.code, failed.publication) == (
+        "failed",
+        "intent_ref_unavailable",
+        "not_published",
+    ), failed
+    assert failed.next_actions == ("resume_update",)
+    assert failed.application.history == "prepared"
+    assert (
+        not failed.application.recovery_required
+        and not failed.application.intent_commit
+    )
+    assert failed.application.published_files == 0
+    assert Operations().inspect_update_status(vault).code == "operation_absent"
+    assert home.read_bytes() == home_before and moved.read_bytes() == local
+    assert occupant_path.read_bytes() == occupant
+    assert (vault / "Manual.md").read_bytes() == authored
+
+    resumed = review_plan(Operations().resume_update(vault))
+    assert resumed.review.ready
+    assert resumed.review.facts.baseline_identity.output_format == 8
+    assert resumed.review.facts.incoming_identity.output_format == 9
+    assert {approval.result.data for approval in resumed.review.approvals} >= {
+        edited,
+        leaf_result,
+    }
