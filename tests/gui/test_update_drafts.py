@@ -28,7 +28,7 @@ from tests.application.test_update_lifecycle_contracts import preparation
 from tests.gui.test_conversion_window import until, window_text
 from tests.gui.update_worker_fixture import ReviewWorkerTransport
 from tests.reconciliation.test_attachments import linked_attachment_request
-from tests.reconciliation.test_proposals import request
+from tests.reconciliation.test_proposals import request as reconciliation_request
 from tests.reconciliation.test_resolution import with_review_links
 
 pytestmark = pytest.mark.gui
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.gui
 
 @pytest.mark.parametrize("draft_kind", ("edited_text", "binary_references"))
 def test_owned_draft_preserves_review_until_explicit_commit_or_discard(
-    tmp_path, draft_kind
+    tmp_path, draft_kind, request
 ):
     from brz2obsidian_ui.window import MainWindow
 
@@ -47,7 +47,7 @@ def test_owned_draft_preserves_review_until_explicit_commit_or_discard(
     source.write_bytes(b"Controlled preparation input")
     if draft_kind == "edited_text":
         prepared = preparation(
-            with_review_links(request(current=b"Vault writing.\r\n"))
+            with_review_links(reconciliation_request(current=b"Vault writing.\r\n"))
         )
         offer = next(row for row in choice_offers(prepared) if row.domain == "text")
         resolved = Operations().resolve_update_choice(
@@ -312,13 +312,65 @@ def test_owned_draft_preserves_review_until_explicit_commit_or_discard(
                     == 2
                 ),
             )
+            prior_operation = window.runner.session.update_snapshot.last_operation
             click("Keep both versions for attachment choice 1")
-            until(
-                app,
-                lambda: (
-                    selected("both") and window.runner.session.update_snapshot.ready
-                ),
-            )
+            while True:
+                if request.session.shouldstop:
+                    pytest.exit(str(request.session.shouldstop))
+                app.processEvents()
+                state = window.runner.session.update_snapshot
+                operation = state.last_operation
+                if state.needs_inspection or state.transport_phase in (
+                    "not_started",
+                    "may_have_executed",
+                ):
+                    pytest.fail(
+                        "Review worker did not complete safely: "
+                        f"{state.transport_phase}, {state.transport_code}"
+                    )
+                if (
+                    operation is not None
+                    and operation is not prior_operation
+                    and (
+                        operation.code not in ("reference_choices_staged", "accepted")
+                        or operation.status
+                        in (
+                            "refused",
+                            "failed",
+                            "stale_review",
+                            "recovery_required",
+                            "publication_unknown",
+                            "unknown",
+                            "incomplete",
+                            "content_complete",
+                            "cancelled_before_publication",
+                        )
+                    )
+                ):
+                    pytest.fail(
+                        "Attachment choice was not accepted: "
+                        f"{operation.status}, {operation.code}"
+                    )
+                presented = window.workbench.snapshot
+                if (
+                    presented is not None
+                    and presented.revision == state.revision
+                    and not state.active_request_id
+                    and not window.workbench.busy
+                ):
+                    if (
+                        operation is None
+                        or operation is prior_operation
+                        or operation.code != "accepted"
+                    ):
+                        pytest.fail(
+                            "Review became idle without an accepted attachment choice: "
+                            f"operation={operation}, reply={state.reply}"
+                        )
+                    assert selected("both")
+                    assert state.ready
+                    break
+                QTest.qWait(10)
             staged = [
                 row for row in transport.commands if row.command == "stage_references"
             ]
