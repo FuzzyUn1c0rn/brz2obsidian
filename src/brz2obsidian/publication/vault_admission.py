@@ -2243,7 +2243,63 @@ class _Inspection:
             parent, context = role, selected
         return context
 
+    def _format_prepared_parent(self):
+        """Find the physical baseline of an initial unpublished format change."""
+        roles = self.checkpoint_roles
+        if self.operation != "idle" or len(roles) < 2:
+            return None
+        tip, parent = roles[:2]
+        actual = self.history.locator
+        if (
+            tip.commit == actual.commit
+            and tip.generation == actual.generation
+            and tip.boundary == "prepared"
+            and tip.review_kind == "format_transition"
+            and tip.review_baseline_identity is not None
+            and tip.review_baseline_identity == parent.identity
+            and tip.identity != parent.identity
+            and tip.previous == parent.commit
+            and tip.generation == parent.generation + 1
+            and parent.boundary in ("local", "result")
+            and tip.operation_intent_commit is None
+            and tip.undo_of_receipt_commit is None
+            and tip.recovery_direction is None
+        ):
+            return parent
+        return None
+
+    def _prepared_format_context(self, admission, observations):
+        if self.policy_probe or admission is None or not admission.inventory_complete:
+            return None
+        parent = self._format_prepared_parent()
+        if parent is None:
+            return None
+        tip = self.checkpoint_roles[0]
+        policy = tip.policy_context
+        locator = self.history.locator.model_copy(
+            update={"commit": parent.commit, "generation": parent.generation}
+        )
+        if policy is None or tip.review_parent_fingerprint != self._state_fingerprint(
+            locator
+        ):
+            return None
+        try:
+            fresh = self._policy_observation(policy.subjects, admission, observations)
+        except OSError, ValueError, TypeError:
+            return None
+        if (
+            fresh is not None
+            and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
+            == policy.fingerprints
+            and fresh.preflight.consents == policy.requirements
+        ):
+            return locator
+        return None
+
     def _review_context(self, admission=None, observations=None):
+        prepared_parent = self._prepared_format_context(admission, observations)
+        if prepared_parent is not None:
+            return prepared_parent, True
         locator = self._review_locator(admission, observations)
         roles = self.checkpoint_roles
         if (

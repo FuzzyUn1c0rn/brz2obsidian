@@ -1318,7 +1318,7 @@ def save_update(operations, preparation, *, cancel=None, progress=None):
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        history, current, baseline = _reobserve(operations, preparation)
+        history, current, snapshot = _reobserve(operations, preparation, for_save=True)
         if history is None or current.status == "stale_review":
             return current
         prepared = current.preparation
@@ -1337,10 +1337,11 @@ def save_update(operations, preparation, *, cancel=None, progress=None):
 
             return save_onboarding(operations, history, current, progress=progress)
         association = prepared.locator.association
+        baseline, source_files = snapshot
         with tempfile.TemporaryDirectory(prefix="brz2obsidian-baseline-") as owned:
             source = _materialize(
                 baseline,
-                {r.path: r.mode for r in history.checkpoint.manifest.source},
+                {r.path: r.mode for r in source_files},
                 directory=Path(owned) / "incoming",
             )
             captured = operations.capture_checkpoint(
@@ -1788,7 +1789,7 @@ def _prepare_update(operations, vault, source, observed):
         )
 
 
-def _reobserve(operations, preparation):
+def _reobserve(operations, preparation, *, for_save=False):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
         if preparation.kind == "onboarding":
@@ -1801,6 +1802,18 @@ def _reobserve(operations, preparation):
             )
             if result.status == "refused" and result.preparation is None:
                 result = result.model_copy(update={"kind": preparation.kind})
+            if for_save and history is not None:
+                checkpoint = history.checkpoint
+                if (
+                    preparation.kind == "format_transition"
+                    and checkpoint.manifest.boundary == "prepared"
+                ):
+                    baseline = (
+                        _baseline(checkpoint, baseline),
+                        observed.format_baseline_files(),
+                    )
+                else:
+                    baseline = (baseline, checkpoint.manifest.source)
             return history, result, baseline
     except OSError, ValueError, TypeError, AttributeError:
         return (
@@ -2175,6 +2188,7 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
         )
         status = update_application_status(applied)
         stopped_intent = applied.status == "cancelled" and status == "recovery_required"
+        save_review_again = applied.code == "prepare_prepared_review_changed"
         return UpdateResult(
             kind=prepared.kind,
             status=status,
@@ -2188,7 +2202,10 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
             if applied.recovery_required or stopped_intent
             else ("resume_update",)
             if applied.code == "intent_ref_unavailable"
+            else ("save_update",)
+            if save_review_again
             else (),
+            preparation=prepared if save_review_again else None,
             history_retained=current.history_retained or applied.history != "none",
             checkpoint_commit=applied.result_commit or applied.checkpoint_commit,
             publication=applied.publication,

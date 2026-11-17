@@ -130,21 +130,14 @@ def retained_relationship_survives(original, current, heading):
         for line in middle
     ):
         return False
-    observed_headings = [
-        index for index, line in enumerate(middle) if line.rstrip(b"\r\n") == heading
-    ]
-    if len(observed_headings) == 1 and any(
-        line.strip() for line in middle[: observed_headings[0]]
-    ):
+    anchor = next((index for index, line in enumerate(middle) if line.strip()), None)
+    if anchor is None or middle[anchor].rstrip(b"\r\n") != heading:
         return False
     retained = tuple(line for line in original_lines[start + 1 : end] if line.strip())
-    if not retained:
-        return False
-    for index in observed_headings:
-        rows = iter(middle[index + 1 : _relationship_end(middle, index)])
-        if all(any(actual == expected for actual in rows) for expected in retained):
-            return True
-    return False
+    rows = iter(middle[anchor + 1 : _relationship_end(middle, anchor)])
+    return bool(retained) and all(
+        any(actual == expected for actual in rows) for expected in retained
+    )
 
 
 def align_sections(documents, gap_edits):

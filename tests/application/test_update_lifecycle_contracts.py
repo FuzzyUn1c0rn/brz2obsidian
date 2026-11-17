@@ -1350,7 +1350,13 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     from brz2obsidian.core import load_review, save_review
     from tests.application.test_format_transition import transition_case
     from tests.application.test_module_seams import METADATA
-    from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE, ORIGINAL
+    from tests.support.recorded_format6 import (
+        CURRENT,
+        FIXTURE,
+        NOTE,
+        ORIGINAL,
+        historical_payload,
+    )
 
     operations, vault, history = transition_case(
         tmp_path, monkeypatch, known_original=known_original
@@ -1369,23 +1375,28 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     note = next(
         row for row in offered.preparation.review.proposal.changes if row.path == NOTE
     )
+    decision = "saved-format-note"
+    selected_bytes = (
+        note.incoming.data + b"\nEdited approval.\n"
+        if unpublished_prepared
+        else CURRENT
+    )
     kept = operations.resolve_update(
         offered.preparation,
         action(
             offered.preparation.review,
             note,
             domain="format",
-            choice="current",
-            decision_id="saved-format-current",
+            choice="edited" if unpublished_prepared else "current",
+            decision_id=decision,
         ),
+        **({"edited": selected_bytes} if unpublished_prepared else {}),
     )
     assert kept.code == "accepted"
     chosen = next(
-        row
-        for row in kept.preparation.review.approvals
-        if row.decision_id == "saved-format-current"
+        row for row in kept.preparation.review.approvals if row.decision_id == decision
     )
-    assert chosen.result.data == CURRENT
+    assert chosen.result.data == selected_bytes
     captured = []
     stored_source = {}
 
@@ -1448,6 +1459,7 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     assert not loaded.ready and not loaded.loaded.ready
 
     if unpublished_prepared:
+        baseline_files = history.checkpoint.manifest.source
         # A prepared checkpoint written before the operation ref stores the
         # target payload. The exact old Original remains in the retained review.
         checkpoint = history.checkpoint
@@ -1490,9 +1502,9 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     retained = next(
         row
         for row in resumed.preparation.review.approvals
-        if row.decision_id == "saved-format-current"
+        if row.decision_id == decision
     )
-    assert retained.result.data == CURRENT
+    assert retained.result.data == selected_bytes
     assert resumed.preparation.review.facts.baseline_identity.output_format == 6
     assert resumed.preparation.review.facts.incoming_identity.output_format == (
         9 if unpublished_prepared else 8
@@ -1514,6 +1526,59 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
         for path in vault.rglob("*")
         if path.is_file()
     } == before
+
+    if unpublished_prepared:
+        from brz2obsidian.publication.vault_native import observe_file
+
+        updated = CURRENT + b"\nA newer authored edit.\n"
+        (vault / NOTE).write_bytes(updated)
+        info, digest, _, physical = observe_file(vault, vault / NOTE, prefix_limit=0)
+        history.admission.inventory = tuple(
+            row.model_copy(
+                update={"size": info.st_size, "sha256": digest, "identity": physical}
+            )
+            if row.path == NOTE
+            else row
+            for row in history.admission.inventory
+        )
+        stale = operations.apply_update(resumed.preparation)
+        assert stale.status == "stale_review" and stale.preparation is not None
+        assert all(
+            row.decision_id != decision for row in stale.preparation.review.approvals
+        )
+        assert (
+            stale.preparation.review.preflight == resumed.preparation.review.preflight
+        )
+        monkeypatch.setattr(
+            operations,
+            "inspect_update_inputs",
+            lambda root: nullcontext(
+                SimpleNamespace(
+                    history=history,
+                    inspect=lambda **kwargs: history,
+                    read_payload=lambda **kwargs: operations.read_checkpoint_payload(
+                        root, **kwargs
+                    ),
+                    format_baseline_files=lambda: baseline_files,
+                )
+            ),
+        )
+        original, _ = historical_payload()
+
+        def save_again(vault_arg, source_arg, **values):
+            assert values["identity"].output_format == 6
+            assert {
+                path.relative_to(source_arg).as_posix(): path.read_bytes()
+                for path in Path(source_arg).rglob("*")
+                if path.is_file()
+            } == original
+            return retain_description(vault_arg, source_arg, **values)
+
+        monkeypatch.setattr(operations, "capture_checkpoint", save_again)
+        updated_save = operations.save_update(stale.preparation)
+        assert updated_save.code == "saved" and captured == [True, True]
+        assert history.checkpoint.manifest.boundary == "local"
+        assert (vault / NOTE).read_bytes() == updated
 
 
 @pytest.mark.parametrize(
@@ -1628,3 +1693,57 @@ def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
         for path in Path(prepared.payload_directory).rglob("*")
         if path.is_file()
     } == expected_incoming
+
+
+def test_unpublished_format_preparation_keeps_parent_review_authority(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian.publication.vault_admission import _Inspection
+    from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
+
+    inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
+    previous = SimpleNamespace(
+        commit="b" * 40,
+        generation=1,
+        model_dump=lambda **kwargs: {"commit": "b" * 40, "generation": 1},
+    )
+    locator = SimpleNamespace(
+        commit="c" * 40,
+        generation=2,
+        model_copy=lambda **kwargs: previous,
+    )
+    inspection.history = SimpleNamespace(status="valid", locator=locator)
+    inspection.repo = SimpleNamespace(kind="root", git_directory="controlled")
+    inspection.operation = "idle"
+    policy = _RolePolicy((), ("p", "q"), (), (), "", "", None)
+    parent = _CheckpointRole(
+        previous.commit, None, 1, "local", None, None, None, None, None, identity="old"
+    )
+    pending = _CheckpointRole(
+        locator.commit,
+        previous.commit,
+        2,
+        "prepared",
+        None,
+        None,
+        None,
+        None,
+        None,
+        review_parent_fingerprint=inspection._state_fingerprint(previous),
+        policy_context=policy,
+        review_kind="format_transition",
+        identity="new",
+        review_baseline_identity="old",
+    )
+    inspection.checkpoint_roles = [pending, parent]
+    admission = SimpleNamespace(status="supported", inventory_complete=True)
+    fresh = SimpleNamespace(
+        policy_fingerprint="p",
+        policy_continuity_fingerprint="q",
+        preflight=SimpleNamespace(consents=()),
+    )
+    monkeypatch.setattr(inspection, "_policy_observation", lambda *args: fresh)
+    assert inspection._review_context(admission, {}) == (previous, True)
+
+    fresh.policy_continuity_fingerprint = "changed"
+    assert inspection._review_context(admission, {}) == (locator, False)

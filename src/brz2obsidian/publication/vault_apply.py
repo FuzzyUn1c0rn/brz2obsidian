@@ -2202,6 +2202,7 @@ def _apply_reviewed_update(
         else None
     )
     try:
+        format_parent = None
         if undo_target is None:
             inspections = []
             reviewed_observation = _inspect_history(
@@ -2229,6 +2230,12 @@ def _apply_reviewed_update(
                 _metadata_only=_owned_export is not None,
                 _owners=_owners,
             )
+            if (
+                purpose
+                and inspected is not None
+                and reviewed_observation.status == "intact"
+            ):
+                format_parent = inspected._format_prepared_parent()
         else:
             from brz2obsidian.application.checkpoint_contracts import (
                 VaultHistoryInspection,
@@ -2279,12 +2286,17 @@ def _apply_reviewed_update(
             return outcome("refused", "current_review_required", start=start)
         if first.status != "intact" or first.admission.status != "supported":
             return outcome("refused", "scoped_admission_required", start=start)
+        baseline_identity = (
+            format_parent.identity
+            if format_parent is not None
+            else first.checkpoint.manifest.identity
+        )
         if (
             first.checkpoint.locator.commit
             != reviewed_observation.checkpoint.locator.commit
             or first.checkpoint.locator.association.vault_id != vault_id
             or first.checkpoint.locator.association.import_id != import_id
-            or first.checkpoint.manifest.identity != review.facts.baseline_identity
+            or baseline_identity != review.facts.baseline_identity
             and undo_target is None
         ):
             return outcome("refused", "current_review_required", start=start)
@@ -2468,7 +2480,16 @@ def _apply_reviewed_update(
                 and prepared.history_retained
                 and prepared.commit == undo_target.observation.unpublished_prepared
             )
-            if prepared.status != "captured" and not reused_undo_prepared:
+            reused_format_prepared = (
+                format_parent is not None
+                and prepared.status == "unchanged"
+                and prepared.code == "already_retained"
+                and prepared.history_retained
+                and prepared.locator == observed.checkpoint.locator
+            )
+            if prepared.status != "captured" and not (
+                reused_undo_prepared or reused_format_prepared
+            ):
                 return outcome(
                     "refused" if prepared.status == "refused" else "failed",
                     "prepare_" + prepared.code,
@@ -2480,10 +2501,8 @@ def _apply_reviewed_update(
                     checkpoint=prepared.commit,
                 )
             prepared_commit = prepared.commit
-            if reused_undo_prepared:
-                operation_generation = (
-                    undo_target.observation.checkpoint.manifest.generation
-                )
+            if reused_undo_prepared or reused_format_prepared:
+                operation_generation = prepared.locator.generation
             if cancel_requested():
                 return outcome(
                     "cancelled",

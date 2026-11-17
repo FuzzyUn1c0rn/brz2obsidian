@@ -1733,9 +1733,13 @@ class _OwnedPreparation:
                     baseline_directory.mkdir()
                     for path, value in baseline.items():
                         self._write_content(value, baseline_directory / path)
-                    modes = {
-                        row.path: row.mode for row in history.checkpoint.manifest.source
-                    }
+                    source_files = (
+                        self.observed.format_baseline_files()
+                        if current.kind == "format_transition"
+                        and history.checkpoint.manifest.boundary == "prepared"
+                        else history.checkpoint.manifest.source
+                    )
+                    modes = {row.path: row.mode for row in source_files}
                     for path, mode in modes.items():
                         (baseline_directory / path).chmod(
                             0o755 if mode == "100755" else 0o644

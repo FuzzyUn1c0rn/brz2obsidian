@@ -330,12 +330,17 @@ def test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file():
         "distinct-label",
         "authored-only",
         "authored-in-slot",
+        "after-empty-heading",
     ),
 )
 def test_generated_navigation_requires_the_approved_moved_note_destination(placement):
     occupied = placement != "free"
     duplicate = placement in ("authored-before", "authored-after")
-    authored_only = placement in ("authored-only", "authored-in-slot")
+    authored_only = placement in (
+        "authored-only",
+        "authored-in-slot",
+        "after-empty-heading",
+    )
     authored = duplicate or authored_only or placement == "distinct-label"
     canonical, relocated = b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]"
     authored_link = (
@@ -347,6 +352,8 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
     local_reference = explanation + generated_block
     if placement == "authored-only":
         local_reference = b"\n## Local reference\n\n" + local_reference
+    elif placement == "after-empty-heading":
+        local_reference = heading + local_reference
     authored_block = (
         heading + b"- " + authored_link + b"\n\n" + explanation
         if placement == "authored-before"
@@ -362,7 +369,7 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
             )
         if authored_only:
             assert generated_block in body
-            if placement == "authored-in-slot":
+            if placement != "authored-only":
                 return body.replace(generated_block, local_reference, 1)
             return body.replace(generated_block, b"", 1) + local_reference
         if placement == "distinct-label":
@@ -443,11 +450,18 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
         if placement == "authored-only":
             assert initial.index(canonical) > initial.index(b"## Categories")
         assert edit_selection(initial.replace(canonical, relocated)).status == "refused"
-        distinguished = local_reference.replace(heading, b"## My links\n\n", 1)
         restored = generated_block.replace(canonical, relocated, 1)
-        corrected = initial.replace(local_reference, distinguished, 1).replace(
-            b"## Categories\n", restored + b"## Categories\n", 1
+        distinguished = explanation + generated_block.replace(
+            heading, b"## My links\n\n", 1
         )
+        if placement == "authored-only":
+            distinguished = b"\n## Local reference\n\n" + distinguished
+        if placement == "after-empty-heading":
+            corrected = initial.replace(local_reference, restored + distinguished, 1)
+        else:
+            corrected = initial.replace(local_reference, distinguished, 1).replace(
+                b"## Categories\n", restored + b"## Categories\n", 1
+            )
         assert distinguished in corrected
     else:
         corrected = initial.replace(canonical, relocated, 1)
