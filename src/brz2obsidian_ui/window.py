@@ -136,7 +136,8 @@ QScrollArea { border: none; background: white; }
 QListWidget#reviewQueue { background: #f8faf7; border: 2px solid transparent; padding: 2px; }
 QListWidget#reviewQueue:focus { border-color: #315b4c; }
 QListWidget#reviewQueue::item {
-    padding: 10px 8px;
+    /* Leave room for the frame, gutter and accent with a vertical scrollbar. */
+    padding: 10px 3px 10px 2px;
     border-left: 3px solid transparent;
     border-radius: 4px;
 }
