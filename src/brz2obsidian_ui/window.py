@@ -133,11 +133,19 @@ QTabBar, QTabBar::tab { background: #f8faf7; }
 QTabBar:focus { border: 1px solid #315b4c; }
 QTabBar::tab:selected { border-bottom: 3px solid #315b4c; color: #254b3d; }
 QScrollArea { border: none; background: white; }
-QListWidget#reviewQueue { background: #f8faf7; border: none; }
-QListWidget#reviewQueue::item { padding: 10px 8px; border-radius: 4px; }
-QListWidget#reviewQueue::item:selected { background: #e8f0e8; color: #254b3d; }
-QListWidget#reviewQueue::item:hover { background: #f0f4ef; }
-QListWidget#reviewQueue:focus { border: 2px solid #315b4c; }
+QListWidget#reviewQueue { background: #f8faf7; border: 2px solid transparent; padding: 2px; }
+QListWidget#reviewQueue:focus { border-color: #315b4c; }
+QListWidget#reviewQueue::item {
+    padding: 10px 8px;
+    border-left: 3px solid transparent;
+    border-radius: 4px;
+}
+QListWidget#reviewQueue::item:selected {
+    background: #e8f0e8;
+    color: #254b3d;
+    border-left-color: #315b4c;
+}
+QListWidget#reviewQueue::item:hover:!selected { background: #f0f4ef; }
 """.replace(
     "COMBO_CHEVRON", (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
 )
