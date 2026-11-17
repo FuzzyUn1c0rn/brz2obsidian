@@ -24,7 +24,7 @@ def render_link_replacement(
     ):
         raise ValueError("A bound resolved link occurrence is required")
 
-    def agrees(raw, *, output_format=7):
+    def agrees(raw, expected, *, output_format=7, expected_query=None):
         parsed = interpret_links(
             ExactContent(data=raw),
             document_id=document.document_id,
@@ -41,19 +41,34 @@ def render_link_replacement(
             and parsed.occurrences[0].raw == raw
             and parsed.occurrences[0].syntax == occurrence.syntax
             and parsed.occurrences[0].embedded == occurrence.embedded
-            and parsed.occurrences[0].meaning == selected
+            and parsed.occurrences[0].meaning == expected
+            and (
+                expected_query is None or parsed.occurrences[0].query == expected_query
+            )
         )
 
-    if agrees(occurrence.raw) or (
-        occurrence.syntax == "markdown"
+    relative_markdown = (
+        document.path_mode == "vault"
+        and document.status == "supported"
+        and occurrence.syntax == "markdown"
         and occurrence.query is not None
-        and occurrence.meaning == selected
-        and agrees(occurrence.raw, output_format=8)
-    ):
+        and occurrence.meaning.status == "resolved"
+        and agrees(
+            occurrence.raw,
+            occurrence.meaning,
+            output_format=8,
+            expected_query=occurrence.query,
+        )
+        and not agrees(occurrence.raw, occurrence.meaning)
+    )
+    output_format = 8 if relative_markdown else 7
+    if agrees(occurrence.raw, selected, output_format=output_format):
         return occurrence.raw
     path = selected.path
-    if document.path_mode == "relative":
+    if document.path_mode == "relative" or relative_markdown:
         path = posixpath.relpath(path, posixpath.dirname(document.source_path) or ".")
+        if relative_markdown and not path.startswith(("../", "./")):
+            path = "./" + path
     fragment = ""
     if selected.fragment is not None:
         fragment = (
@@ -79,7 +94,7 @@ def render_link_replacement(
         replacement = (
             occurrence.raw[:start] + destination.encode() + occurrence.raw[end:]
         )
-    if not agrees(replacement):
+    if not agrees(replacement, selected, output_format=output_format):
         raise ValueError(
             "The selected destination cannot preserve the offered link meaning"
         )

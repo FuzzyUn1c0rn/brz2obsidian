@@ -90,6 +90,82 @@ def test_unchanged_format8_relative_image_keeps_its_exact_destination():
     )
 
 
+def test_changed_format8_relative_image_keeps_relative_uri_and_other_bytes():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    targets = (
+        target_for_links("old", "Attachments/id/image.webp", kind="resource"),
+        target_for_links("new", "Attachments/id/new asset.webp", kind="resource"),
+        target_for_links("note", "Notes/Other.md"),
+        target_for_links("local", "Notes/local.webp", kind="resource"),
+    )
+    states = tuple(
+        interpret_link_target(
+            ExactContent(data=b"content"),
+            target_id=target.target_id,
+            existence="present",
+            memberships=(),
+        )
+        for target in targets
+    )
+    options = {
+        "document_id": "owner",
+        "source_path": "Notes/note.md",
+        "path_mode": "vault",
+        "targets": targets,
+        "target_facts": states,
+        "inventory": "complete",
+        "output_format": 8,
+    }
+    raw = "É ![](../Attachments/id/image.webp) [[Notes/Other.md]]\n".encode()
+    document = interpret_links(ExactContent(data=raw), **options)
+    occurrence = document.occurrences[0]
+    selected = (
+        interpret_links(
+            ExactContent(data=b"![](../Attachments/id/new%20asset.webp)"), **options
+        )
+        .occurrences[0]
+        .meaning
+    )
+    assert selected.status == "resolved" and selected.target_id == "new"
+    replacement = render_link_replacement(
+        document,
+        occurrence.occurrence_id,
+        selected,
+        targets=targets,
+        target_facts=states,
+    )
+    assert replacement == b"![](../Attachments/id/new%20asset.webp)"
+    changed = raw[: occurrence.span.start] + replacement + raw[occurrence.span.end :]
+    assert (
+        changed
+        == "É ![](../Attachments/id/new%20asset.webp) [[Notes/Other.md]]\n".encode()
+    )
+    parsed = interpret_links(ExactContent(data=changed), **options)
+    image, wiki = parsed.occurrences
+    assert image.meaning == selected
+    assert changed[image.destination_span.start : image.destination_span.end] == (
+        b"../Attachments/id/new%20asset.webp"
+    )
+    assert wiki.meaning.target_id == "note" and wiki.query.value == "Notes/Other.md"
+    local = (
+        interpret_links(ExactContent(data=b"![](./local.webp)"), **options)
+        .occurrences[0]
+        .meaning
+    )
+    assert local.status == "resolved" and local.target_id == "local"
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            local,
+            targets=targets,
+            target_facts=states,
+        )
+        == b"![](./local.webp)"
+    )
+
+
 def test_format8_relative_image_retains_path_and_target_guards():
     def parse(raw, output_format=8):
         return interpret_links(
