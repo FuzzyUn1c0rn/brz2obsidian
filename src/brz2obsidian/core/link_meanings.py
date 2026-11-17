@@ -216,7 +216,7 @@ def _semantic(value):
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
-            if name not in ("file_roles", "resource_origin")
+            if name not in ("file_roles", "resource_origin", "relationship_heading")
             or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.
