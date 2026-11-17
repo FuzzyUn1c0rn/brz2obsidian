@@ -90,6 +90,57 @@ def test_unchanged_format8_relative_image_keeps_its_exact_destination():
     )
 
 
+def test_format8_relative_image_keeps_uri_when_target_bytes_change():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    target = target_for_links("image", "Attachments/id/image.webp", kind="resource")
+    old, new = (
+        interpret_link_target(
+            ExactContent(data=content),
+            target_id="image",
+            existence="present",
+            memberships=(),
+        )
+        for content in (b"old image", b"new image")
+    )
+    raw = b"![](../Attachments/id/image.webp)"
+    options = {
+        "document_id": "owner",
+        "source_path": "Notes/note.md",
+        "path_mode": "vault",
+        "targets": (target,),
+        "inventory": "complete",
+        "output_format": 8,
+    }
+    document = interpret_links(ExactContent(data=raw), target_facts=(old,), **options)
+    selected = (
+        interpret_links(ExactContent(data=raw), target_facts=(new,), **options)
+        .occurrences[0]
+        .meaning
+    )
+    occurrence = document.occurrences[0]
+    assert occurrence.meaning.status == selected.status == "resolved"
+    assert occurrence.meaning.target_version != selected.target_version
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            selected,
+            targets=(target,),
+            target_facts=(new,),
+        )
+        == raw
+    )
+    with pytest.raises(ValueError):
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            occurrence.meaning,
+            targets=(target,),
+            target_facts=(new,),
+        )
+
+
 def test_changed_format8_relative_image_keeps_relative_uri_and_other_bytes():
     from brz2obsidian.obsidian import render_link_replacement
 

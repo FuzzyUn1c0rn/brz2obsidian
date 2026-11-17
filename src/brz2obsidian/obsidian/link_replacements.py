@@ -24,8 +24,8 @@ def render_link_replacement(
     ):
         raise ValueError("A bound resolved link occurrence is required")
 
-    def agrees(raw, expected, *, output_format=7, expected_query=None):
-        parsed = interpret_links(
+    def parse(raw, output_format):
+        return interpret_links(
             ExactContent(data=raw),
             document_id=document.document_id,
             source_path=document.source_path,
@@ -35,6 +35,9 @@ def render_link_replacement(
             inventory=document.inventory,
             output_format=output_format,
         )
+
+    def agrees(raw, expected, *, output_format=7):
+        parsed = parse(raw, output_format)
         return (
             parsed.status == "supported"
             and len(parsed.occurrences) == 1
@@ -42,9 +45,17 @@ def render_link_replacement(
             and parsed.occurrences[0].syntax == occurrence.syntax
             and parsed.occurrences[0].embedded == occurrence.embedded
             and parsed.occurrences[0].meaning == expected
-            and (
-                expected_query is None or parsed.occurrences[0].query == expected_query
-            )
+        )
+
+    def admits_original_query(output_format):
+        parsed = parse(occurrence.raw, output_format)
+        return (
+            parsed.status == "supported"
+            and len(parsed.occurrences) == 1
+            and parsed.occurrences[0].raw == occurrence.raw
+            and parsed.occurrences[0].syntax == occurrence.syntax
+            and parsed.occurrences[0].embedded == occurrence.embedded
+            and parsed.occurrences[0].query == occurrence.query
         )
 
     relative_markdown = (
@@ -53,13 +64,8 @@ def render_link_replacement(
         and occurrence.syntax == "markdown"
         and occurrence.query is not None
         and occurrence.meaning.status == "resolved"
-        and agrees(
-            occurrence.raw,
-            occurrence.meaning,
-            output_format=8,
-            expected_query=occurrence.query,
-        )
-        and not agrees(occurrence.raw, occurrence.meaning)
+        and admits_original_query(8)
+        and not admits_original_query(7)
     )
     output_format = 8 if relative_markdown else 7
     if agrees(occurrence.raw, selected, output_format=output_format):
