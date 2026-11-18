@@ -50,7 +50,9 @@ def candidate(facts, data, *, output_format=7):
     )
 
 
-@pytest.mark.parametrize("version,status", [(7, "safe"), (8, "safe"), (9, "unsafe")])
+@pytest.mark.parametrize(
+    "version,status", [(7, "safe"), (8, "safe"), (9, "safe"), (10, "unsafe")]
+)
 def test_current_and_historical_explicit_candidates_keep_their_recorded_format(
     version, status
 ):

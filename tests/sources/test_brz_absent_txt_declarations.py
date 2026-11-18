@@ -169,7 +169,7 @@ def test_workflow_warns_and_publishes_retained_declaration_without_invented_byte
         record["schema_version"],
         record["profile_version"],
         record["source_identity"]["module_version"],
-    ) == (8, "11", "11")
+    ) == (9, "11", "11")
     assert len(record["asset_targets"]) == present + 1
     absent = next(row for row in record["asset_targets"] if row["asset_id"] == TXT)
     assert (
