@@ -203,6 +203,7 @@
     "tests/application/test_update_worker_protocol.py",
     "tests/gui/test_update_offer_workspace.py",
     "tests/gui/test_update_workbench.py",
+    "tests/gui/test_review_queue.py",
     "tests/application/test_update_history_context.py::test_worker_repair_keeps_matching_target_and_native_object_storage_truth",
     "tests/application/test_update_history_context.py::test_worker_history_recovery_keeps_native_direction_and_distinct_terminal",
     "tests/application/test_update_history_context.py::test_history_prepare_cannot_retarget_an_old_offer_to_a_different_native_operation",
