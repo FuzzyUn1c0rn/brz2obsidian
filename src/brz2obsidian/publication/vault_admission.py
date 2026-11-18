@@ -2134,7 +2134,7 @@ class _Inspection:
         )
 
     def _saved_format_parent(self, role, parent, tip, admission, observations):
-        """A saved format memo may use its actual onboarding LOCAL as storage."""
+        """Prove a format memo's physical source parent and its own current policy."""
         if (
             self.policy_probe
             or admission is None
@@ -2144,9 +2144,9 @@ class _Inspection:
             or role.boundary != "local"
             or role.review_kind != "format_transition"
             or parent.boundary != "local"
-            or parent.review_kind != "onboarding"
-            or role.previous != parent.commit
-            or role.generation != parent.generation + 1
+            or parent.review_kind not in (None, "onboarding", "format_transition")
+            or self._has_operation_lineage(parent)
+            or not self._follows_role(role, parent)
         ):
             return False
         current, previous = role.policy_context, parent.policy_context
@@ -2164,17 +2164,10 @@ class _Inspection:
             or role.review_parent_fingerprint != self._state_fingerprint(physical)
         ):
             return False
-        try:
-            fresh = self._policy_observation(current.subjects, admission, observations)
-        except OSError, ValueError, TypeError:
-            return False
-        # Only the memo's history anchor is proved; no parent grant is borrowed.
-        return (
-            fresh is not None
-            and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
-            == current.fingerprints
-            and fresh.preflight.consents == current.requirements
-        )
+        # The parent supplies the exact old source. The vault topology may
+        # have changed before this review, so use the memo's freshly proved
+        # policy and consent requirements rather than the parent's old policy.
+        return self._current_role_policy_matches(current, admission, observations)
 
     def _review_locator(self, locator, roles, admission, observations):
         """Carry only the review authority proved by each validated checkpoint."""

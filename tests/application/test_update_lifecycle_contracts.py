@@ -1842,3 +1842,67 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
         ),
     )
     assert inspection._review_context(admission, {}) == (next_locator, False)
+
+
+@pytest.mark.parametrize("parent_review", (None, "format_transition"))
+def test_format_save_keeps_current_review_when_parent_inventory_was_different(
+    tmp_path, monkeypatch, parent_review
+):
+    from brz2obsidian.publication.vault_admission import _Inspection
+    from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
+
+    inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
+    baseline = preparation().locator
+    saved = baseline.model_copy(update={"commit": "c" * 40, "generation": 2})
+    inspection.repo = SimpleNamespace(kind="root", git_directory="controlled")
+    inspection.operation = "idle"
+    inspection.history = SimpleNamespace(status="valid", locator=saved)
+    # The move preceded review and Save. Old and new checkpoints retain the
+    # same converter source even though their observed vault policies differ.
+    previous_policy = _RolePolicy(
+        (), ("old", "old"), (), (), "source", "baseline", None
+    )
+    current_policy = previous_policy._replace(fingerprints=("current", "current"))
+    parent = _CheckpointRole(
+        baseline.commit,
+        None,
+        baseline.generation,
+        "local",
+        None,
+        None,
+        None,
+        None,
+        None,
+        memo_fingerprint="old inventory policy",
+        policy_context=previous_policy,
+        review_kind=parent_review,
+    )
+    memo = parent._replace(
+        commit=saved.commit,
+        previous=parent.commit,
+        generation=saved.generation,
+        memo_fingerprint="reviewed inventory policy",
+        review_parent_fingerprint=inspection._state_fingerprint(baseline),
+        policy_context=current_policy,
+        review_kind="format_transition",
+    )
+    inspection.checkpoint_roles = [memo, parent]
+    admission = SimpleNamespace(status="supported", inventory_complete=True)
+    fresh = SimpleNamespace(
+        policy_fingerprint="current",
+        policy_continuity_fingerprint="current",
+        preflight=SimpleNamespace(consents=()),
+    )
+    monkeypatch.setattr(inspection, "_policy_observation", lambda *args: fresh)
+    assert inspection._review_context(admission, {}) == (baseline, True)
+
+    fresh.policy_continuity_fingerprint = "changed after Save"
+    assert inspection._review_context(admission, {}) == (saved, False)
+    fresh.policy_continuity_fingerprint = "current"
+    inspection.checkpoint_roles = [
+        memo._replace(
+            policy_context=current_policy._replace(context_basis="new source")
+        ),
+        parent,
+    ]
+    assert inspection._review_context(admission, {}) == (saved, False)
