@@ -295,6 +295,7 @@ def test_standard5_refuses_profile4_review(tmp_path, source_version):
             source_selection=selection,
             source_identity=inspected.source_identity,
             converter_version=inspected.converter_version,
+            output_format=inspected.inspection.output_format,
             profile_id=inspected.profile_id,
             profile_version=inspected.profile_version,
             outcome="clean",

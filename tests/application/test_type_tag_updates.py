@@ -129,7 +129,7 @@ def seed_current(root, *, source=None, onboarding=False):
         module_version="11",
         profile_id="thebrain-format5-reviewed",
         profile_version="11",
-        output_format=8,
+        output_format=9,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     )
     git(vault, "init", "-q")
@@ -226,8 +226,8 @@ def test_current_type_tag_vault_prepares_same_source_without_format_transition(
         result.preparation.review.blockers,
         result.preparation.review.requirements,
     )
-    assert result.preparation.review.facts.baseline_identity.output_format == 8
-    assert result.preparation.review.facts.incoming_identity.output_format == 8
+    assert result.preparation.review.facts.baseline_identity.output_format == 9
+    assert result.preparation.review.facts.incoming_identity.output_format == 9
     assert result.preparation.retained_source_provenance
     assert all(
         c.disposition == "no_change" for c in result.preparation.review.proposal.changes
@@ -240,7 +240,7 @@ def test_current_type_tag_vault_prepares_same_source_without_format_transition(
     assert (vault / "Categories/B.md").read_bytes() == (
         original / "Categories/B.md"
     ).read_bytes()
-    # The same admitted current8 history must not publish an invalid next source.
+    # The same admitted format-9 history must not publish an invalid next source.
     # B already has type A; adding B -> A closes the independently known loop.
     cyclic = brz_source(
         update_root / "cyclic.brz",

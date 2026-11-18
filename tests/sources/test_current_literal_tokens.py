@@ -209,7 +209,7 @@ def test_historical_constructor_rejects_coherent_new_literal_but_renders_authore
     assert result.outcome == "clean", result.issues
     assert result.source_identity == expected.identity
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 8 and record["renderer_version"] == "8"
+    assert record["schema_version"] == 9 and record["renderer_version"] == "9"
     assert record["profile_version"] == profile
     document = next(d for target in record["item_targets"] for d in target["documents"])
     assert document["text_adaptations"] == []
@@ -217,7 +217,7 @@ def test_historical_constructor_rejects_coherent_new_literal_but_renders_authore
     assert next(vault.rglob("*.original")).read_bytes() == raw
 
     # The public SourceModule composition also renders the unchanged independent
-    # old capture with output8; no parsing capability comes from that renderer.
+    # old capture with output9; source admission still uses the captured profile.
     arguments = {
         "source": original_source,
         "snapshot": original_expected,
@@ -231,7 +231,7 @@ def test_historical_constructor_rejects_coherent_new_literal_but_renders_authore
     assert old_result.outcome == "clean", old_result.issues
     assert old_result.source_identity == original_expected.identity
     old_record = json.loads((old_vault / "migration-record.json").read_bytes())
-    assert old_record["schema_version"] == 8 and old_record["renderer_version"] == "8"
+    assert old_record["schema_version"] == 9 and old_record["renderer_version"] == "9"
     emitted = {
         d["key"]: d
         for target in old_record["item_targets"]

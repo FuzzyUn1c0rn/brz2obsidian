@@ -185,7 +185,7 @@ def audit_selected(
     api_vault=None,
     api_result=None,
     profile_version=_CURRENT_API_PROFILE,
-    output_version=8,
+    output_version=9,
 ):
     """Audit only explicitly complete source/vault selections; retain a verdict.
 
@@ -441,7 +441,7 @@ def main(argv=None):
     audit.add_argument(
         "--profile-version", choices=_API_PROFILE_VERSIONS, default=_CURRENT_API_PROFILE
     )
-    audit.add_argument("--output-version", type=int, choices=(7, 8), default=8)
+    audit.add_argument("--output-version", type=int, choices=(7, 8, 9), default=9)
     capture = commands.add_parser(
         "capture-api",
         help="Explicit authorized loopback conversion/recording; credentials come only from environment",

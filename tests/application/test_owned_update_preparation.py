@@ -13,7 +13,6 @@ import brz2obsidian.publication.vault_history as history
 import brz2obsidian.publication.vault_native as native
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import OutputIdentity
 from brz2obsidian.publication import checkpoint_payload
 from tests.application.test_update_context import worker_context_call
@@ -24,6 +23,7 @@ from tests.application.test_verified_coverage import (
     source_parts,
     write_source,
 )
+from tests.support.recorded_format8 import format8_workflow
 
 
 def _digest(path):
@@ -76,7 +76,7 @@ def test_default_context_prepares_saves_and_pages_binary_attachment(monkeypatch)
         add_attachment(parts, identity, 1, name, raw)
     del raw
     initial_archive = write_source(initial_directory, parts)
-    workflow = default_workflow()
+    workflow = format8_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     vault = root / "vault"

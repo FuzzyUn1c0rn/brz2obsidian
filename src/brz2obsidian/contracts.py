@@ -21,6 +21,11 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
+# Generated output versions and the note grammar shared by recent versions.
+CURRENT_OUTPUT_FORMAT = 9
+QUALIFIED_OUTPUT_FORMATS = (8, 9)
+REVIEWABLE_OUTPUT_FORMATS = (7, *QUALIFIED_OUTPUT_FORMATS)
+
 
 class Contract(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
@@ -425,6 +430,7 @@ class MigrationPlan(Contract):
     source_identity: SourceIdentity
     profile_id: str
     profile_version: str
+    output_format: Literal[8, 9] = 8
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
     tag_targets: tuple[TagTarget, ...] = ()
@@ -505,6 +511,7 @@ class DocumentInspection(Contract):
 
 class Inspection(Contract):
     item_targets: tuple[ItemTarget, ...]
+    output_format: Literal[8, 9] = 8
     classification_assignments: tuple[ClassificationAssignment, ...] = ()
     asset_targets: tuple[AssetTarget, ...] = ()
     assets: tuple[Asset, ...] = ()
@@ -1320,6 +1327,17 @@ class OperationReversalTarget(ReconciliationContract):
         return self
 
 
+class MovedNavigationReference(ReconciliationContract):
+    heading: Literal["Parents", "Children", "Related"]
+    label: str
+    identity: ImportedItemIdentity
+    source_path: str
+    observed_path: str
+    retained_token_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
 class ReconciliationSubject(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
@@ -1333,6 +1351,16 @@ class ReconciliationSubject(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
+    moved_navigation: tuple[MovedNavigationReference, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    prior_reservation: bool = Field(default=False, exclude_if=lambda value: not value)
+    previously_generated: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
+    source_still_reserved: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
     automatic_attachment: AttachmentCandidate | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -1364,6 +1392,9 @@ class ReconciliationInput(ReconciliationContract):
     source_version_memory: tuple[SourceVersionMemory, ...]
     preservation_decisions: tuple[PreservationDecision, ...] = ()
     link_context: LinkContext | None
+    retired_note_ids: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def unique_subjects_and_facts(self):
@@ -1487,6 +1518,7 @@ class ChangeProvenance(ReconciliationContract):
         "onboarding_required",
         "format_review",
         "format_source_uncertain",
+        "moved_navigation",
         "structure_combined",
         "structure_conflict",
         "structure_unbound",
@@ -1725,6 +1757,7 @@ class IdentityReview(ReconciliationContract):
         "association_proposed",
         "target_unsafe",
         "current_mismatch",
+        "reserved_path_adoption",
     ]
     selected_entry_id: str | None
     candidates: tuple[IdentityCandidate, ...]
@@ -2202,6 +2235,9 @@ class LinkOccurrence(ReconciliationContract):
     raw: bytes
     query: LinkQuery | None
     meaning: LinkMeaning
+    relationship_heading: Literal["Parents", "Children", "Related"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class LinkDocument(ReconciliationContract):

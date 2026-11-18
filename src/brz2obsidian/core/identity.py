@@ -514,6 +514,20 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         )
     )
     if (
+        status == "association_proposed"
+        and reason == "association_proposed"
+        and subject.prior_reservation
+        and not subject.previously_generated
+        and facts.format_operation.kind == "format_transition"
+        and facts.incoming_identity.output_format == 9
+        and selected.identity_state == "missing"
+        and selected.current.existence == "present"
+        and selected.current.path == subject.path
+        and not matches
+    ):
+        status, reason = "matched", "reserved_path_adoption"
+        repair_required = False
+    elif (
         selected is not None
         and not repair_required
         and status == "association_proposed"

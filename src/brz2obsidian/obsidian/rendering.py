@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from collections import defaultdict
 from pathlib import PurePosixPath
 
 from brz2obsidian.contracts import (
@@ -18,18 +19,20 @@ from brz2obsidian.core import analyze
 from brz2obsidian.core import plan as build_plan
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.appearance import native_icon_limits
-from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
-from brz2obsidian.core.resources import assign_asset_targets, resource_owners
-from brz2obsidian.core.source_gaps import source_gap_targets
 
 from .bases import CATEGORY_VIEWS, HOME_CATEGORIES, support_files
 from .categories import classification_records
 from .documents import render_document
 from .gaps import gap_report
 from .markdown import append_boundary
-from .properties import property_frontmatter
-from .relationships import note_link, relationship_sections, uncreated_listing
+from .properties import property_frontmatter, property_memberships
+from .relationships import (
+    navigation_index,
+    note_link,
+    relationship_sections,
+    uncreated_listing,
+)
 from .resources import resource_section
 from .tags import tag_listing, tag_records
 from .templates import (
@@ -48,7 +51,8 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "8"
+        plan.output_format not in (8, 9)
+        or run_metadata.renderer_version != str(plan.output_format)
         or snapshot.contract_version != 7
         or plan.analysis.policy.contract_version != 7
     ):
@@ -57,8 +61,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires source contract 7 and renderer metadata 8",
-                    guidance="Use source contract 7 and set renderer_version to 8.",
+                    message="Renderer requires source contract 7 and matching plan and renderer formats (8 or 9).",
+                    guidance="Plan the snapshot for the selected renderer format.",
                 ),
             )
         )
@@ -89,6 +93,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
+    checked_plan = build_plan(checked_analysis, output_format=plan.output_format)
     if (
         plan.counts.text_adaptations != checked_analysis.counts.text_adaptations
         or plan.counts.image_presentation_normalizations
@@ -106,7 +111,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         )
         != tuple(
             a
-            for a in build_plan(checked_analysis).adaptations
+            for a in checked_plan.adaptations
             if a.kind
             in {
                 "literal_text",
@@ -132,16 +137,19 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
-    expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
-    expected_gaps, expected_presentations = source_gap_targets(
-        snapshot, expected_targets, assign_asset_targets(snapshot)
+    expected_targets = checked_plan.item_targets
+    expected_gaps, expected_presentations = (
+        checked_plan.source_gaps,
+        checked_plan.generated_presentations,
     )
     gap_subjects = {g.owner for g in snapshot.source_gaps} | {
         key for g in expected_gaps for key in g.affected_member_keys
     }
     if (
         bool(snapshot.source_gaps)
-        and plan.asset_targets != assign_asset_targets(snapshot)
+        and plan.asset_targets != checked_plan.asset_targets
+        or plan.output_format == 9
+        and plan.item_targets != expected_targets
         or {
             (t.item_key, t.relative_path, t.created)
             for t in plan.item_targets
@@ -188,7 +196,14 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     presentations = {p.presentation.owner: p for p in plan.generated_presentations}
     documents = {document.key: document for document in snapshot.documents}
     icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
-    asset_paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
+    item_targets = {target.item_key: target for target in plan.item_targets}
+    asset_targets = {target.asset_id: target for target in plan.asset_targets}
+    asset_paths = {key: target.relative_path for key, target in asset_targets.items()}
+    neighbors_by_item = navigation_index(snapshot.relationships)
+    category_links, native_tags = property_memberships(plan, item_targets)
+    resources_by_owner = defaultdict(list)
+    for asset in sorted(snapshot.assets, key=lambda asset: asset.asset_id):
+        resources_by_owner[asset.owner].append(asset)
     # Destination eligibility matches the native Base views and source-free
     # checker. A neutral source icon may be valid without being an Obsidian image.
     for selection in plan.icon_snapshots:
@@ -245,14 +260,26 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             continue
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
-        text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
+        text = (
+            property_frontmatter(
+                item,
+                plan.source_identity.source_id,
+                category_links.get(item.key, []),
+                native_tags.get(item.key, []),
+                asset_paths,
+            )
+            + "# "
+            + heading
+            + "\n\n"
+        )
+        neighbors = neighbors_by_item.get(item.key, {})
         presentation = presentations.get(item.key)
         if presentation:
             text += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
         if item.role == "definition":
             hierarchy = relationship_sections(
-                plan, item.key, headings=("Parents", "Children")
+                neighbors, item_targets, items, headings=("Parents", "Children")
             )
             if hierarchy:
                 text += hierarchy + "\n"
@@ -279,9 +306,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 )
             elif item.key in gap.affected_member_keys:
                 provider = items[gap.provider_key]
-                provider_target = next(
-                    t for t in plan.item_targets if t.item_key == provider.key
-                )
+                provider_target = item_targets[provider.key]
                 text += (
                     "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
                     + note_link(provider_target, provider.title)
@@ -297,16 +322,21 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             text += append_boundary(text)
             if index:
                 text += "\n\n"
-            text += render_document(documents[key], target.relative_path, plan)
+            text += render_document(
+                documents[key], target.relative_path, item_targets, asset_targets
+            )
         if presentation:
             text += (
                 "\n\n".join("![[" + path + "]]" for path in presentation.image_paths)
                 + "\n\n"
             )
-        resources = resource_section(plan, item.key)
+        resources = resource_section(
+            resources_by_owner.get(item.key, ()), asset_targets
+        )
         relationships = relationship_sections(
-            plan,
-            item.key,
+            neighbors,
+            item_targets,
+            items,
             headings=("Related",)
             if item.role == "definition"
             else ("Parents", "Children", "Related"),
@@ -488,14 +518,17 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     listing = uncreated_listing(plan)
     if listing:
         add("Uncreated targets.md", listing.encode("utf-8"))
-        report += "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts and Related pairs.\n"
+        report += (
+            "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts"
+            + (" and Related pairs" if plan.output_format == 8 else "")
+            + ".\n"
+        )
     listing = tag_listing(plan)
     if listing:
         add(plan.tag_memberships_path, listing.encode("utf-8"))
         report += "\n[[Tag memberships.md|Tag memberships]] lists assignments on uncreated targets and source tags without assignments.\n"
     add("MIGRATION REPORT.md", report.encode())
     assets = {asset.asset_id: asset for asset in snapshot.assets}
-    item_targets = {target.item_key: target for target in plan.item_targets}
     copies = tuple(
         CopyEntry(
             relative_path=target.relative_path,
@@ -518,7 +551,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 8,
+        "schema_version": plan.output_format,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

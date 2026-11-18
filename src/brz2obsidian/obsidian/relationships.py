@@ -1,6 +1,7 @@
 """Serialize qualified links and focused graph presentations."""
 
 import re
+from collections import defaultdict
 
 
 def note_link(target, title):
@@ -8,25 +9,25 @@ def note_link(target, title):
     return "[[" + target.relative_path + "|" + " ".join(label.split()) + "]]"
 
 
-def relationship_sections(plan, key, *, headings=("Parents", "Children", "Related")):
-    targets = {t.item_key: t for t in plan.item_targets}
-    items = {i.key: i for i in plan.analysis.snapshot.items}
-    sections = {"Parents": set(), "Children": set(), "Related": set()}
-    for relation in plan.analysis.snapshot.relationships:
+def navigation_index(relationships):
+    neighbors = defaultdict(lambda: defaultdict(set))
+    for relation in relationships:
         a, b = relation.item_a, relation.item_b
         if relation.kind == "hierarchy":
-            if key == a:
-                sections["Children"].add(b)
-            if key == b:
-                sections["Parents"].add(a)
+            neighbors[a]["Children"].add(b)
+            neighbors[b]["Parents"].add(a)
         elif relation.kind == "related":
-            if key == a:
-                sections["Related"].add(b)
-            if key == b:
-                sections["Related"].add(a)
+            neighbors[a]["Related"].add(b)
+            neighbors[b]["Related"].add(a)
+    return neighbors
+
+
+def relationship_sections(
+    sections, targets, items, *, headings=("Parents", "Children", "Related")
+):
     text = ""
     for heading in headings:
-        neighbors = sections[heading]
+        neighbors = sections.get(heading)
         if neighbors:
             text += (
                 "## "

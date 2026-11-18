@@ -8,7 +8,6 @@ from uuid import uuid4
 
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
-from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_owned_update_preparation import _digest, _tree
 from tests.application.test_update_context import worker_context_call
 from tests.application.test_vault_checkpoints import git, user_state
@@ -18,6 +17,7 @@ from tests.application.test_verified_coverage import (
     source_parts,
     write_source,
 )
+from tests.support.recorded_format8 import format8_workflow
 
 
 def test_explicit_original_evidence_qualifies_owned_onboarding_bytes(monkeypatch):
@@ -46,7 +46,7 @@ def test_explicit_original_evidence_qualifies_owned_onboarding_bytes(monkeypatch
     parts["22222222-2222-4222-8222-222222222222/payload.bin"] = unrelated
     change_record(parts, asset_id, DataLength=len(unrelated))
     mismatched = write_source(mismatched_directory, parts)
-    workflow = default_workflow()
+    workflow = format8_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     vault = root / "vault"

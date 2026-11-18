@@ -22,13 +22,28 @@ def _key(value):
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def same_canonical_path(left, right):
+    return _key(left) == _key(right)
+
+
+def _path_spellings(path, *, note):
+    normalized = _key(path)
+    if note and normalized.endswith(".md"):
+        return normalized, normalized[:-3]
+    return (normalized,)
+
+
+def matches_exact_note_path(query, path):
+    """Match a canonical note path, without short names or alias resolution."""
+    return query.mode == "exact" and _key(query.value) in _path_spellings(
+        path, note=True
+    )
+
+
 def _query_matches_target(query, target):
     if target.canonical_path is None:
         return False
-    path = _key(target.canonical_path)
-    paths = {path}
-    if target.kind != "resource" and path.endswith(".md"):
-        paths.add(path[:-3])
+    paths = _path_spellings(target.canonical_path, note=target.kind != "resource")
     aliases = {_key(name) for name in target.representations}
     value = _key(query.value)
     return (
@@ -205,7 +220,7 @@ def _semantic(value):
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
-            if name not in ("file_roles", "resource_origin")
+            if name not in ("file_roles", "resource_origin", "relationship_heading")
             or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.

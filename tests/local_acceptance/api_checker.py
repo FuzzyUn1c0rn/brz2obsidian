@@ -32,8 +32,8 @@ from .api_note_text import (
 from .api_scope import qualify_scope, strict
 from .api_svg import qualify_svg
 from .appearance import source_icon
-from .checker import contender_keys, escaped, source_references, wiki
-from .facts import assert_acyclic
+from .checker import contender_keys, escaped, expected_names, source_references, wiki
+from .facts import assert_acyclic, navigation_selection
 from .images import AuditUnavailable, decode_image
 from .support import CATEGORY_VIEWS, CATEGORY_VIEWS_8
 from .text import active_mask, inline_candidates
@@ -654,22 +654,11 @@ def check_new_image_preservation(
     materialized.update(
         row["item_b"] for row in relations.values() if row["kind"] == "classification"
     )
-    edges = [
-        (row["item_a"], row["item_b"])
-        for row in relations.values()
-        if row["kind"] == "hierarchy"
-    ]
-    pending = [
-        (a, b) for a, b in edges if a not in materialized and b not in materialized
-    ]
-    while pending:
-        parents = {a for a, _ in pending}
-        materialized.add(
-            min(parents, key=lambda key: (-sum(key in {a, b} for a, b in pending), key))
-        )
-        pending = [
-            (a, b) for a, b in edges if a not in materialized and b not in materialized
-        ]
+    materialized = navigation_selection(
+        materialized,
+        [(row["kind"], row["item_a"], row["item_b"]) for row in relations.values()],
+        record.get("schema_version", 7),
+    )
     for owner, target in targets.items():
         assert type(target.get("created")) is bool and target["created"] == (
             owner in materialized
@@ -1305,7 +1294,7 @@ def audit_baseline(baseline, *, profile_version="1"):
     return summary
 
 
-def check_reverse_navigation(
+def check_navigation(
     baseline,
     vault,
     thoughts,
@@ -1316,21 +1305,33 @@ def check_reverse_navigation(
     assets,
     *,
     profile_version="3",
+    output_version=7,
 ):
-    """Audit every generated navigation section after the trusted authored region."""
-    owners = {
-        owner
-        for row in raw_links.values()
-        if tuple(row[k] for k in ("kind", "relation", "meaning", "direction"))
-        == (1, 1, 1, 3)
-        for owner in (row["thoughtIdA"], row["thoughtIdB"])
-    }
+    """Audit raw-source destinations at their generated positions in the notes."""
+    navigation = defaultdict(lambda: defaultdict(set))
+    for row in expected.values():
+        a, b = row["item_a"], row["item_b"]
+        if row["kind"] == "hierarchy":
+            navigation[a]["Children"].add(b)
+            navigation[b]["Parents"].add(a)
+        elif row["kind"] == "related":
+            navigation[a]["Related"].add(b)
+            navigation[b]["Related"].add(a)
+    owners = (
+        navigation.keys()
+        if output_version == 9
+        else {
+            owner
+            for row in raw_links.values()
+            if tuple(row[k] for k in ("kind", "relation", "meaning", "direction"))
+            == (1, 1, 1, 3)
+            for owner in (row["thoughtIdA"], row["thoughtIdB"])
+        }
+    )
     if not owners:
         return
-    # Source facts establish mandatory notes before deterministic edge coverage.
-    # This audit remains scoped to new reverse endpoints; all hierarchy edges
-    # participate because another edge can determine which empty parent is chosen.
-    selected = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
+    home = baseline.json(baseline.data["brain"])["homeThoughtId"]
+    selected = {home}
     selected.update(key for key, row in thoughts.items() if row["kind"] == 2)
     selected.update(
         row["item_b"] for row in expected.values() if row["kind"] == "classification"
@@ -1357,20 +1358,12 @@ def check_reverse_navigation(
                 and asset["actual_length"] > 0
             ):
                 selected.add(attachment["sourceId"])
-    edges = [
-        (row["item_a"], row["item_b"])
-        for row in expected.values()
-        if row["kind"] == "hierarchy"
-    ]
-    pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
-    while pending:
-        # Most uncovered incident edges first, then canonical parent identity.
-        counts = {
-            parent: sum(parent in {a, b} for a, b in pending)
-            for parent in {a for a, b in pending}
-        }
-        selected.add(min(counts, key=lambda key: (-counts[key], key)))
-        pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
+    selected = navigation_selection(
+        selected,
+        [(row["kind"], row["item_a"], row["item_b"]) for row in expected.values()],
+        output_version,
+    )
+    names = {key: value["relative_path"] for key, value in targets.items()}
     pattern = re.compile(
         r"^## (Parents|Children|Related)\n\n((?:- \[\[[^\n]+\]\]\n)+)", re.MULTILINE
     )
@@ -1378,22 +1371,37 @@ def check_reverse_navigation(
         target = targets[owner]
         assert type(target.get("created")) is bool and target["created"] == (
             owner in selected
-        ), "reverse hierarchy note materialization"
+        ), "source-bound navigation note materialization"
         path = safe_path(vault, target["relative_path"])
         if owner not in selected:
             assert not path.exists(), "uncreated reverse hierarchy note exists"
             continue
-        assert path.is_file(), "reverse hierarchy generated note unavailable"
+        assert path.is_file(), "generated navigation note unavailable"
         body = path.read_text(encoding="utf-8")
         title = "# " + escaped(thoughts[owner]["name"]) + "\n"
         title = title.replace("\r\n", "\n").replace("\r", "\n")
         start = body.find(title)
         assert start >= 0, "reverse hierarchy generated note title unavailable"
         cursor = start + len(title)
+        required = {
+            heading: "".join(
+                "- " + wiki(names[key], thoughts[key]["name"]) + "\n"
+                for key in sorted(neighbors)
+            )
+            for heading, neighbors in navigation[owner].items()
+        }
+        if output_version == 9 and thoughts[owner]["kind"] == 2:
+            prefix = "\n"
+            for heading in ("Parents", "Children"):
+                if rows := required.pop(heading, ""):
+                    prefix += "## " + heading + "\n\n" + rows + "\n"
+            assert body[cursor:].startswith(prefix + CATEGORY_VIEWS_8), (
+                "generated category hierarchy navigation"
+            )
+            cursor += len(prefix + CATEGORY_VIEWS_8)
         authored = []
         if thoughts[owner].get("label"):
             authored.append(thoughts[owner]["label"])
-        names = {key: value.get("relative_path") for key, value in targets.items()}
         for attachment in attachments.values():
             if attachment["sourceId"] == owner and attachment["isNotes"]:
                 note = scoped_note_text(
@@ -1424,14 +1432,13 @@ def check_reverse_navigation(
         # Authored labels/prose/headings cannot stand in for generated links.
         body = body[cursor:]
         footer = "## Categories\n\n[[Categories.md|Browse categories]]"
-        if owner == baseline.json(baseline.data["brain"])[
-            "homeThoughtId"
-        ] and body.rstrip().endswith(footer):
+        if owner == home and body.rstrip().endswith(footer):
             body = body.rstrip()[: -len(footer)] + "\n"
         matches = list(pattern.finditer(body))
-        assert matches and not body[matches[-1].end() :].strip(), (
-            "reverse hierarchy generated navigation unavailable"
-        )
+        if matches:
+            assert not body[matches[-1].end() :].strip(), (
+                "generated navigation must precede only the Home footer"
+            )
         headings = list(
             re.finditer(
                 r"^ {0,3}#{1,6}[ \t]+(?:Parents|Children|Related)\b[^\n]*",
@@ -1452,19 +1459,14 @@ def check_reverse_navigation(
             heading = match.group(1)
             assert heading not in sections, "duplicate generated relationship section"
             sections[heading] = match.group(2)
-        for heading in ("Parents", "Children"):
-            wanted = {
-                r["item_a"] if heading == "Parents" else r["item_b"]
-                for r in expected.values()
-                if r["kind"] == "hierarchy"
-                and r["item_b" if heading == "Parents" else "item_a"] == owner
-            }
-            required = "".join(
-                "- " + wiki(targets[key]["relative_path"], thoughts[key]["name"]) + "\n"
-                for key in sorted(wanted)
-            )
-            assert sections.get(heading, "") == required, (
-                "reverse hierarchy generated Parents/Children navigation"
+        headings_to_check = (
+            ("Parents", "Children", "Related")
+            if output_version == 9
+            else ("Parents", "Children")
+        )
+        for heading in headings_to_check:
+            assert sections.get(heading, "") == required.get(heading, ""), (
+                "source-bound generated navigation destination"
             )
 
 
@@ -2179,7 +2181,9 @@ def check_scope_memberships(
         expected = {
             "categories": categories,
             "appearance_category": categories[0] if categories else None,
-            "tags": sorted(native, key=str.casefold),
+            "tags": sorted(native, key=lambda tag: (tag.casefold(), tag))
+            if record.get("schema_version") == 9
+            else sorted(native, key=str.casefold),
             "aliases": [],
             "source_collection_id": brain,
             "source_item_id": key,
@@ -2447,14 +2451,14 @@ def check_scoped_output_content(
                 assert (
                     text.count(
                         CATEGORY_VIEWS_8
-                        if record.get("schema_version") == 8
+                        if record.get("schema_version") in (8, 9)
                         else CATEGORY_VIEWS
                     )
                     == 1
                 ), "complete category dashboard protocol spans"
             chunks.append(
                 CATEGORY_VIEWS_8
-                if record.get("schema_version") == 8
+                if record.get("schema_version") in (8, 9)
                 else CATEGORY_VIEWS
             )
         else:
@@ -2675,6 +2679,17 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
             row["original_identity"] == key
             and row["original_title"] == thoughts[key]["name"]
         ), "thought identity/title"
+    if record.get("schema_version") == 9:
+        names = expected_names(
+            {
+                key: {"Name": row["name"], "Kind": row["kind"]}
+                for key, row in thoughts.items()
+            },
+            baseline.json(baseline.data["brain"])["homeThoughtId"],
+        )
+        assert {key: row["relative_path"] for key, row in targets.items()} == names, (
+            "source-bound item filename assignment"
+        )
     assignments = identities(
         record["classification_assignments"], "relationship_key", "classification"
     )
@@ -2789,7 +2804,7 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
     check_external_resources(
         baseline, vault, thoughts, attachments, targets, assets, profile_version
     )
-    check_reverse_navigation(
+    check_navigation(
         baseline,
         vault,
         thoughts,
@@ -2799,6 +2814,7 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
         targets,
         assets,
         profile_version=profile_version,
+        output_version=record.get("schema_version", 7),
     )
     check_svg_notes(
         baseline,

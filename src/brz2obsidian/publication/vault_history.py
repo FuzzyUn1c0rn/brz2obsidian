@@ -941,12 +941,12 @@ def _review_queries(review):
     )
 
 
-def _role_policy(association, manifest, queries):
-    if manifest.boundary not in ("local", "result") or (
+def _role_policy(association, manifest, queries, *, pending_format=False):
+    if (manifest.boundary not in ("local", "result") and not pending_format) or (
         manifest.boundary == "local" and manifest.proposed
     ):
         return None
-    if manifest.boundary == "result" and (queries is None or queries.selected is None):
+    if manifest.boundary != "local" and (queries is None or queries.selected is None):
         return None
     # These bases never replace the ordinary policy-bearing fingerprints.
     # Policy equivalence requires separate fresh proof of BOTH stored policies.
@@ -1016,6 +1016,10 @@ class _CheckpointRole(NamedTuple):
     review_context_fingerprint: str | None = None
     policy_context: _RolePolicy | None = None
     review_kind: str | None = None
+    identity: OutputIdentity | None = None
+    review_baseline_identity: OutputIdentity | None = None
+    baseline_source: tuple | None = None
+    reviewed_payload: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1444,6 +1448,26 @@ def _read(
                 and manifest.review_object is not None
             )
         if checkpoint_roles is not None:
+            format_review = (
+                manifest.reviewed_source is not None
+                and review_metadata[10] == "format_transition"
+                and manifest.preimage == manifest.vault
+            )
+            if tip_manifest is None:
+                format_roles = format_review and manifest.boundary in (
+                    "local",
+                    "prepared",
+                )
+            pending_format = (
+                format_roles
+                and format_review
+                and manifest.boundary == "prepared"
+                and manifest.undo_of_receipt_commit is None
+                and manifest.recovery_direction is None
+            )
+            # An unpublished format change may follow a LOCAL review memo
+            # whose authority still resides in its validated history.
+            memo_roles = memo_roles or pending_format
             checkpoint_roles.append(
                 _CheckpointRole(
                     current,
@@ -1491,9 +1515,25 @@ def _read(
                         review_metadata[9]
                         if manifest.review_object is not None
                         else None,
+                        pending_format=pending_format,
                     ),
                     review_kind=review_metadata[10]
                     if manifest.review_object is not None
+                    else None,
+                    identity=manifest.identity,
+                    review_baseline_identity=review_metadata[6]
+                    if pending_format
+                    else None,
+                    baseline_source=manifest.source
+                    if len(checkpoint_roles) == 1
+                    and checkpoint_roles[0].review_baseline_identity is not None
+                    else None,
+                    reviewed_payload=digest(
+                        manifest.reviewed_source.model_dump(
+                            mode="json", exclude={"source_anchor", "generation"}
+                        )
+                    )
+                    if pending_format or format_review and manifest.boundary == "local"
                     else None,
                 )
             )
@@ -1999,6 +2039,14 @@ class _UpdateRead:
         self._check()
         return self._bound_history
 
+    def format_baseline_files(self):
+        """Return the original source inventory bound to the observed preparation."""
+        self._check()
+        parent = self._inspection._format_prepared_parent()
+        if parent is None or parent.baseline_source is None:
+            raise OSError("Current format preparation has no qualified baseline")
+        return parent.baseline_source
+
     def content_session(self, *, scratch_parent):
         """Own disposable exact content after this observation's full admission."""
         from .content_session import ContentSession
@@ -2316,6 +2364,12 @@ def capture_checkpoint(
             return result("refused", "current_history_unavailable")
         if prior.status == "valid" and prior.locator.association != association:
             return result("refused", "association_mismatch")
+        format_parent = (
+            captured_inspections[0]._format_prepared_parent()
+            if new_operation is not None and captured_inspections
+            else None
+        )
+        retry_format = boundary == "prepared" and format_parent is not None
         recovery_target = None
         recovery_origin_plan = None
         recovery_origin_effects = None
@@ -2543,7 +2597,10 @@ def capture_checkpoint(
                 return result("refused", "local_review_source_required")
             if (
                 prior.status != "valid"
-                or review.facts.baseline_identity != prior.manifest.identity
+                or review.facts.baseline_identity
+                != (
+                    format_parent.identity if format_parent else prior.manifest.identity
+                )
                 or review.preflight != current.preflight
             ):
                 return result("refused", "current_baseline_review_required")
@@ -2832,7 +2889,11 @@ def capture_checkpoint(
                 row[:4] for row in source_files
             ) != tuple(
                 (row.path, row.mode, row.size, row.sha256)
-                for row in prior.manifest.source
+                for row in (
+                    format_parent.baseline_source
+                    if format_parent is not None
+                    else prior.manifest.source
+                )
             ):
                 return result("refused", "source_baseline_changed")
             if recovery_target is not None and tuple(
@@ -3031,6 +3092,22 @@ def capture_checkpoint(
             gaps = tuple(
                 path for path in current.recovery_gaps if path not in included_paths
             )
+            if retry_format:
+                old_binding = prior.manifest.reviewed_source
+                if (
+                    saved is None
+                    or prior.review is None
+                    or not canonical_equal(saved.plan, prior.review.saved.plan)
+                    or reviewed_source is None
+                    or old_binding is None
+                    or reviewed_source.model_copy(
+                        update={"source_anchor": old_binding.source_anchor}
+                    )
+                    != old_binding
+                ):
+                    return result("refused", "prepared_review_changed")
+                # The retry materializes the same qualified payload at a new path.
+                reviewed_source = old_binding
             semantic = _semantic(
                 association,
                 identity,
@@ -3078,6 +3155,8 @@ def capture_checkpoint(
                     ref=ref,
                     retained=True,
                 )
+            if retry_format:
+                return result("refused", "prepared_review_changed")
             if stale_history and not retaining_prepared:
                 return result("refused", "current_history_review_required")
             if (

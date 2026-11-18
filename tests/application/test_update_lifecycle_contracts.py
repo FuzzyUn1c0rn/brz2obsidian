@@ -756,7 +756,7 @@ def test_unavailable_recorded_generation_routes_before_payload_access(
         module_version="11",
         profile_id="thebrain-format5-reviewed",
         profile_version="11",
-        output_format=8,
+        output_format=9,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     ).model_copy(update=difference)
     history = SimpleNamespace(
@@ -888,7 +888,7 @@ def current_source_refresh_preparation(tmp_path):
     from brz2obsidian.application.wiring import default_workflow
     from tests.support.type_tag_sources import brz_source
 
-    vault = tmp_path / "current8"
+    vault = tmp_path / "current9"
     converted = default_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
     assert converted.outcome == "clean" and converted.receipt is not None
     payload = {
@@ -896,7 +896,7 @@ def current_source_refresh_preparation(tmp_path):
         for row in converted.receipt.manifest
     }
     prepared = source_refresh_preparation(payload, vault)
-    assert prepared.review.facts.baseline_identity.output_format == 8
+    assert prepared.review.facts.baseline_identity.output_format == 9
     assert prepared.review.facts.baseline_identity.profile_version == "11"
     return prepared
 
@@ -1336,20 +1336,35 @@ def test_save_and_apply_reobserve_exact_incoming_authority_before_native_contact
         assert prepared.review.approvals[0].result.data == b"incoming\n"
 
 
-@pytest.mark.parametrize("known_original", (True, False))
+@pytest.mark.parametrize(
+    ("known_original", "unpublished_prepared"),
+    ((True, False), (False, False), (True, True)),
+    ids=("known-saved", "unknown-saved", "unpublished-prepared"),
+)
 def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
-    tmp_path, monkeypatch, known_original
+    tmp_path, monkeypatch, known_original, unpublished_prepared
 ):
     from pathlib import Path
 
     from brz2obsidian.application.checkpoint_contracts import CheckpointResult
     from brz2obsidian.core import load_review, save_review
     from tests.application.test_format_transition import transition_case
-    from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE
+    from tests.application.test_module_seams import METADATA
+    from tests.support.recorded_format6 import (
+        CURRENT,
+        FIXTURE,
+        NOTE,
+        ORIGINAL,
+        historical_payload,
+    )
 
     operations, vault, history = transition_case(
         tmp_path, monkeypatch, known_original=known_original
     )
+    if unpublished_prepared:
+        operations.workflow.metadata_factory = lambda: METADATA.model_copy(
+            update={"renderer_version": "9"}
+        )
     before = {
         path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
@@ -1360,23 +1375,28 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     note = next(
         row for row in offered.preparation.review.proposal.changes if row.path == NOTE
     )
+    decision = "saved-format-note"
+    selected_bytes = (
+        note.incoming.data + b"\nEdited approval.\n"
+        if unpublished_prepared
+        else CURRENT
+    )
     kept = operations.resolve_update(
         offered.preparation,
         action(
             offered.preparation.review,
             note,
             domain="format",
-            choice="current",
-            decision_id="saved-format-current",
+            choice="edited" if unpublished_prepared else "current",
+            decision_id=decision,
         ),
+        **({"edited": selected_bytes} if unpublished_prepared else {}),
     )
     assert kept.code == "accepted"
     chosen = next(
-        row
-        for row in kept.preparation.review.approvals
-        if row.decision_id == "saved-format-current"
+        row for row in kept.preparation.review.approvals if row.decision_id == decision
     )
-    assert chosen.result.data == CURRENT
+    assert chosen.result.data == selected_bytes
     captured = []
     stored_source = {}
 
@@ -1438,6 +1458,22 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     assert loaded.kind == "format_transition" and loaded.code == "revalidation_required"
     assert not loaded.ready and not loaded.loaded.ready
 
+    if unpublished_prepared:
+        baseline_files = history.checkpoint.manifest.source
+        # A prepared checkpoint written before the operation ref stores the
+        # target payload. The exact old Original remains in the retained review.
+        checkpoint = history.checkpoint
+        checkpoint.manifest.boundary = "prepared"
+        checkpoint.manifest.identity = (
+            saved.preparation.source_binding.incoming_identity
+        )
+        checkpoint.manifest.source = saved.preparation.source_binding.files
+        directory = Path(saved.preparation.payload_directory)
+        stored_source = {
+            row.path: (directory / row.path).read_bytes()
+            for row in checkpoint.manifest.source
+        }
+
     def unopened_source(*args, **kwargs):
         raise AssertionError("Pending maintenance cannot start ordinary source access")
 
@@ -1466,17 +1502,83 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     retained = next(
         row
         for row in resumed.preparation.review.approvals
-        if row.decision_id == "saved-format-current"
+        if row.decision_id == decision
     )
-    assert retained.result.data == CURRENT
+    assert retained.result.data == selected_bytes
     assert resumed.preparation.review.facts.baseline_identity.output_format == 6
-    assert resumed.preparation.review.facts.incoming_identity.output_format == 8
+    assert resumed.preparation.review.facts.incoming_identity.output_format == (
+        9 if unpublished_prepared else 8
+    )
+    if unpublished_prepared:
+        facts = resumed.preparation.review.facts
+        (record,) = [
+            document
+            for document in facts.link_context.current_documents
+            if document.source_path == "migration-record.json"
+        ]
+        assert record.status == "supported"
+        (note,) = [subject for subject in facts.subjects if subject.path == NOTE]
+        assert note.baseline.content.data == ORIGINAL
+        assert note.current.content.data == CURRENT
     assert not resumed.ready and captured == [True]
     assert {
         path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
         if path.is_file()
     } == before
+
+    if unpublished_prepared:
+        from brz2obsidian.publication.vault_native import observe_file
+
+        updated = CURRENT + b"\nA newer authored edit.\n"
+        (vault / NOTE).write_bytes(updated)
+        info, digest, _, physical = observe_file(vault, vault / NOTE, prefix_limit=0)
+        history.admission.inventory = tuple(
+            row.model_copy(
+                update={"size": info.st_size, "sha256": digest, "identity": physical}
+            )
+            if row.path == NOTE
+            else row
+            for row in history.admission.inventory
+        )
+        stale = operations.apply_update(resumed.preparation)
+        assert stale.status == "stale_review" and stale.preparation is not None
+        assert all(
+            row.decision_id != decision for row in stale.preparation.review.approvals
+        )
+        assert (
+            stale.preparation.review.preflight == resumed.preparation.review.preflight
+        )
+        monkeypatch.setattr(
+            operations,
+            "inspect_update_inputs",
+            lambda root: nullcontext(
+                SimpleNamespace(
+                    history=history,
+                    inspect=lambda **kwargs: history,
+                    read_payload=lambda **kwargs: operations.read_checkpoint_payload(
+                        root, **kwargs
+                    ),
+                    format_baseline_files=lambda: baseline_files,
+                )
+            ),
+        )
+        original, _ = historical_payload()
+
+        def save_again(vault_arg, source_arg, **values):
+            assert values["identity"].output_format == 6
+            assert {
+                path.relative_to(source_arg).as_posix(): path.read_bytes()
+                for path in Path(source_arg).rglob("*")
+                if path.is_file()
+            } == original
+            return retain_description(vault_arg, source_arg, **values)
+
+        monkeypatch.setattr(operations, "capture_checkpoint", save_again)
+        updated_save = operations.save_update(stale.preparation)
+        assert updated_save.code == "saved" and captured == [True, True]
+        assert history.checkpoint.manifest.boundary == "local"
+        assert (vault / NOTE).read_bytes() == updated
 
 
 @pytest.mark.parametrize(
@@ -1591,3 +1693,216 @@ def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
         for path in Path(prepared.payload_directory).rglob("*")
         if path.is_file()
     } == expected_incoming
+
+
+@pytest.mark.parametrize("baseline_kind", ("direct", "saved-memo", "onboarding-memo"))
+def test_unpublished_format_preparation_keeps_parent_review_authority(
+    tmp_path, monkeypatch, baseline_kind
+):
+    from brz2obsidian.publication.vault_admission import _Inspection
+    from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
+
+    saved_first = baseline_kind != "direct"
+    inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
+    anchor = preparation().locator
+    locator = anchor.model_copy(update={"commit": "d" * 40, "generation": 3})
+    inspection.repo = SimpleNamespace(kind="root", git_directory="controlled")
+    inspection.operation = "idle"
+    authority = inspection._state_fingerprint(anchor)
+    policy = _RolePolicy((), ("p", "q"), (), (), "", "", None)
+    baseline = _CheckpointRole(
+        anchor.commit,
+        None,
+        1,
+        "local",
+        None,
+        None,
+        None,
+        None,
+        None,
+        identity="old",
+        memo_fingerprint="same-source-and-policy",
+        policy_context=policy,
+    )
+    parent = baseline
+    if saved_first:
+        saved_locator = anchor.model_copy(update={"commit": "c" * 40, "generation": 2})
+        parent = baseline._replace(
+            commit=saved_locator.commit,
+            previous=baseline.commit,
+            generation=saved_locator.generation,
+            review_parent_fingerprint=authority,
+            review_kind="format_transition",
+        )
+        if baseline_kind == "onboarding-memo":
+            baseline = baseline._replace(review_kind="onboarding")
+            parent = parent._replace(memo_fingerprint="first-format-memo")
+    else:
+        locator = locator.model_copy(update={"generation": 2})
+    pending = _CheckpointRole(
+        locator.commit,
+        parent.commit,
+        locator.generation,
+        "prepared",
+        None,
+        None,
+        None,
+        None,
+        None,
+        review_parent_fingerprint=authority,
+        policy_context=policy._replace(context_basis="incoming-format-context"),
+        review_kind="format_transition",
+        identity="new",
+        review_baseline_identity="old",
+        reviewed_payload="same-incoming",
+    )
+    admission = SimpleNamespace(status="supported", inventory_complete=True)
+    fresh = SimpleNamespace(
+        policy_fingerprint="p",
+        policy_continuity_fingerprint="q",
+        preflight=SimpleNamespace(consents=()),
+    )
+    monkeypatch.setattr(inspection, "_policy_observation", lambda *args: fresh)
+
+    parents = [parent, baseline] if saved_first else [baseline]
+    if saved_first:
+        inspection.history = SimpleNamespace(status="valid", locator=saved_locator)
+        inspection.checkpoint_roles = parents
+        assert inspection._review_context(admission, {}) == (anchor, True)
+    inspection.history = SimpleNamespace(status="valid", locator=locator)
+    inspection.checkpoint_roles = [pending, *parents]
+    assert inspection._format_prepared_parent() == parent
+    assert inspection._review_context(admission, {}) == (anchor, True)
+
+    if saved_first:
+        foreign_memo = parent._replace(
+            memo_fingerprint="different-source", policy_context=None
+        )
+        inspection.checkpoint_roles = [pending, foreign_memo, baseline]
+        assert inspection._review_context(admission, {}) == (locator, False)
+        inspection.checkpoint_roles = [pending, *parents]
+    fresh.policy_continuity_fingerprint = "changed"
+    assert inspection._review_context(admission, {}) == (locator, False)
+
+    fresh.policy_continuity_fingerprint = "q"
+    saved_again = locator.model_copy(
+        update={"commit": "e" * 40, "generation": locator.generation + 1}
+    )
+    local = parent._replace(
+        commit=saved_again.commit,
+        previous=pending.commit,
+        generation=saved_again.generation,
+        review_parent_fingerprint=authority,
+        review_kind="format_transition",
+        reviewed_payload=pending.reviewed_payload,
+    )
+    inspection.history = SimpleNamespace(status="valid", locator=saved_again)
+    inspection.checkpoint_roles = [local, pending, *parents]
+    assert inspection._review_context(admission, {}) == (anchor, True)
+    inspection.checkpoint_roles = [
+        local._replace(reviewed_payload="different-incoming"),
+        pending,
+        *parents,
+    ]
+    assert inspection._review_context(admission, {}) == (saved_again, False)
+
+    roles = [local, pending, *parents]
+    previous = local
+    for template in (local, pending, local, pending, local, local):
+        next_locator = locator.model_copy(
+            update={
+                "commit": f"{previous.generation + 1:040x}",
+                "generation": previous.generation + 1,
+            }
+        )
+        next_role = template._replace(
+            commit=next_locator.commit,
+            previous=previous.commit,
+            generation=next_locator.generation,
+        )
+        roles.insert(0, next_role)
+        inspection.history = SimpleNamespace(status="valid", locator=next_locator)
+        inspection.checkpoint_roles = roles
+        assert inspection._review_context(admission, {}) == (anchor, True)
+        if next_role.boundary == "prepared":
+            assert inspection._format_prepared_parent() == previous
+        previous = next_role
+
+    inspection.checkpoint_roles = [
+        role._replace(operation_intent_commit="1" * 40) if role == pending else role
+        for role in roles
+    ]
+    assert inspection._review_context(admission, {}) == (next_locator, False)
+
+    inspection.checkpoint_roles = roles
+    inspection.recovery_observation = SimpleNamespace(
+        graphs=(),
+        graph=SimpleNamespace(
+            authorities=((None, SimpleNamespace(prepared_commit=pending.commit)),)
+        ),
+    )
+    assert inspection._review_context(admission, {}) == (next_locator, False)
+
+
+@pytest.mark.parametrize("parent_review", (None, "format_transition"))
+def test_format_save_keeps_current_review_when_parent_inventory_was_different(
+    tmp_path, monkeypatch, parent_review
+):
+    from brz2obsidian.publication.vault_admission import _Inspection
+    from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
+
+    inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
+    baseline = preparation().locator
+    saved = baseline.model_copy(update={"commit": "c" * 40, "generation": 2})
+    inspection.repo = SimpleNamespace(kind="root", git_directory="controlled")
+    inspection.operation = "idle"
+    inspection.history = SimpleNamespace(status="valid", locator=saved)
+    # The move preceded review and Save. Old and new checkpoints retain the
+    # same converter source even though their observed vault policies differ.
+    previous_policy = _RolePolicy(
+        (), ("old", "old"), (), (), "source", "baseline", None
+    )
+    current_policy = previous_policy._replace(fingerprints=("current", "current"))
+    parent = _CheckpointRole(
+        baseline.commit,
+        None,
+        baseline.generation,
+        "local",
+        None,
+        None,
+        None,
+        None,
+        None,
+        memo_fingerprint="old inventory policy",
+        policy_context=previous_policy,
+        review_kind=parent_review,
+    )
+    memo = parent._replace(
+        commit=saved.commit,
+        previous=parent.commit,
+        generation=saved.generation,
+        memo_fingerprint="reviewed inventory policy",
+        review_parent_fingerprint=inspection._state_fingerprint(baseline),
+        policy_context=current_policy,
+        review_kind="format_transition",
+    )
+    inspection.checkpoint_roles = [memo, parent]
+    admission = SimpleNamespace(status="supported", inventory_complete=True)
+    fresh = SimpleNamespace(
+        policy_fingerprint="current",
+        policy_continuity_fingerprint="current",
+        preflight=SimpleNamespace(consents=()),
+    )
+    monkeypatch.setattr(inspection, "_policy_observation", lambda *args: fresh)
+    assert inspection._review_context(admission, {}) == (baseline, True)
+
+    fresh.policy_continuity_fingerprint = "changed after Save"
+    assert inspection._review_context(admission, {}) == (saved, False)
+    fresh.policy_continuity_fingerprint = "current"
+    inspection.checkpoint_roles = [
+        memo._replace(
+            policy_context=current_policy._replace(context_basis="new source")
+        ),
+        parent,
+    ]
+    assert inspection._review_context(admission, {}) == (saved, False)

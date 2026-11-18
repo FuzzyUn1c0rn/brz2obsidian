@@ -2,8 +2,8 @@
 
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import same_content
-from brz2obsidian.contracts import LinkTargetFacts
-from brz2obsidian.core.link_meanings import resolve_occurrence
+from brz2obsidian.contracts import QUALIFIED_OUTPUT_FORMATS, LinkTargetFacts
+from brz2obsidian.core.link_meanings import matches_exact_note_path, resolve_occurrence
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.review_appearance import provider_chain_blockers
 from brz2obsidian.core.review_composition import (
@@ -27,6 +27,38 @@ from .reversals import (
     selected_reversal_outputs,
 )
 from .text_candidates import validate_text_candidate
+
+
+def _promoted_reservation(occurrence, actual, adopted_ids):
+    before = occurrence.meaning
+    query = occurrence.query
+    if (
+        query is None
+        or before.path is None
+        or not matches_exact_note_path(query, before.path)
+        or actual.status != "resolved"
+        or actual.target_identity is None
+    ):
+        return False
+    identity = before.target_identity
+    if (
+        before.status == "resolved"
+        and identity is None
+        and before.target_id in adopted_ids
+    ):
+        identity = actual.target_identity
+    elif before.status != "intentionally_uncreated":
+        return False
+    return (
+        before.model_copy(
+            update={
+                "status": "resolved",
+                "target_identity": identity,
+                "target_version": actual.target_version,
+            }
+        )
+        == actual
+    )
 
 
 def _onboarding_current_effects(facts, proposal, actions, approvals):
@@ -191,6 +223,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     explicit_documents = set()
     operation_documents = set()
     changed_ids = set()
+    adopted_ids = set()
+    edited_navigation_ids = set()
     blockers = []
     composed_documents = dict(composition.documents)
     composition_conflict = composition.conflict
@@ -515,6 +549,20 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
         )
         if len(own) == 1:
             target = own[0]
+            if change.identity_review.reason == "reserved_path_adoption":
+                promoted = tuple(
+                    t
+                    for t in source_targets
+                    if t.target_id == target.target_id
+                    and t.canonical_path == selected_path
+                    and candidate is not None
+                    and t.identity == candidate.identity
+                )
+                if len(promoted) != 1:
+                    add("selected_link_context_conflict")
+                    continue
+                target = promoted[0]
+                adopted_ids.add(target.target_id)
             if selected_path != target.canonical_path:
                 supplied = tuple(
                     t
@@ -548,6 +596,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                     None,
                 )
             write(target, content, selected_path, state)
+            if subject.moved_navigation and approval is not None:
+                edited_navigation_ids.add(target.target_id)
         if document is None:
             if (
                 any(
@@ -620,7 +670,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
     # Historical7 persisted reviews retain their qualified replay semantics.
-    if facts.incoming_identity.output_format == 8:
+    if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS:
         for code in provider_chain_blockers(
             context.current_target_facts,
             final_states,
@@ -674,6 +724,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
             ordinary_renewal
             or operation_renewal
             or document.document_id in attachment_documents
+            or any(m.target_id in edited_navigation_ids for m in resolved)
         ):
             # A proven reversal document can also retain a destination's later prose.
             # A retained note's unrelated prose version is not a link redirect. Resource choices
@@ -687,6 +738,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                     and (
                         ordinary_renewal
                         or operation_renewal
+                        or actual.target_id in edited_navigation_ids
                         or prior is not None
                         and (document.document_id, occurrence.occurrence_id)
                         not in attachment_links
@@ -702,10 +754,14 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                             for old in prior.occurrences
                         )
                     )
-                    and occurrence.meaning.model_copy(
-                        update={"target_version": actual.target_version}
+                    and (
+                        occurrence.meaning.model_copy(
+                            update={"target_version": actual.target_version}
+                        )
+                        == actual
+                        or facts.incoming_identity.output_format == 9
+                        and _promoted_reservation(occurrence, actual, adopted_ids)
                     )
-                    == actual
                 ):
                     occurrence = occurrence.model_copy(update={"meaning": actual})
                 occurrences.append(occurrence)

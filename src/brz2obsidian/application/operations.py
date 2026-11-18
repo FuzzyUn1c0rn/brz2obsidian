@@ -489,6 +489,7 @@ class Operations:
                 source_selection=selection,
                 source_identity=raw.source_identity,
                 converter_version=raw.converter_version,
+                output_format=raw.inspection.output_format,
                 profile_id=raw.profile_id,
                 profile_version=raw.profile_version,
                 outcome=outcome,

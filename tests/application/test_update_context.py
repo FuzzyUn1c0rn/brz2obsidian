@@ -38,7 +38,7 @@ def worker_context_call(producer, arguments):
 def context_case(tmp_path):
     from brz2obsidian.application.update_context import UpdateContext
 
-    case = literal_cleanup_case(tmp_path, independent_keep=True, output_format=8)
+    case = literal_cleanup_case(tmp_path, independent_keep=True)
     operations_type = type(case.operations)
 
     class NativeInputs(operations_type):

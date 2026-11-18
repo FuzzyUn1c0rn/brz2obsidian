@@ -1373,6 +1373,7 @@ class _OwnedPreparation:
                 self.observed,
                 maintenance=maintenance,
                 new_operation="format_transition" if maintenance else None,
+                recorded_output_format=preparation.source_binding.incoming_identity.output_format,
             )
             if stopped is not None:
                 raise OSError(stopped.code)
@@ -1586,12 +1587,14 @@ class _OwnedPreparation:
     def _replace_source(self, preparation, source):
         history = self._observe(preparation.vault)
         maintenance = preparation.kind == "format_transition"
+        output_format = preparation.source_binding.incoming_identity.output_format
         history, stopped = lifecycle._history(
             self.operations,
             preparation.vault,
             self.observed,
             maintenance=maintenance,
             new_operation="format_transition" if maintenance else None,
+            recorded_output_format=output_format,
         )
         if stopped is not None:
             return stopped.model_copy(update={"kind": preparation.kind})
@@ -1613,6 +1616,7 @@ class _OwnedPreparation:
                 self.operations,
                 source,
                 baseline,
+                output_format=output_format,
                 directory=self._directory / ("incoming-" + uuid4().hex),
                 _owner=self,
             )
@@ -1645,6 +1649,7 @@ class _OwnedPreparation:
                     proposal_id=old.proposal.proposal_id,
                     generation=old.proposal.generation + 1,
                     source_memory=memory,
+                    retained_review=tip,
                     _owner=self,
                 )
             facts = self._session._admit_values(facts)
@@ -1728,9 +1733,13 @@ class _OwnedPreparation:
                     baseline_directory.mkdir()
                     for path, value in baseline.items():
                         self._write_content(value, baseline_directory / path)
-                    modes = {
-                        row.path: row.mode for row in history.checkpoint.manifest.source
-                    }
+                    source_files = (
+                        self.observed.format_baseline_files()
+                        if current.kind == "format_transition"
+                        and history.checkpoint.manifest.boundary == "prepared"
+                        else history.checkpoint.manifest.source
+                    )
+                    modes = {row.path: row.mode for row in source_files}
                     for path, mode in modes.items():
                         (baseline_directory / path).chmod(
                             0o755 if mode == "100755" else 0o644

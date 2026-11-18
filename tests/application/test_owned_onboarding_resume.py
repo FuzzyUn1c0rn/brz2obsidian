@@ -12,7 +12,6 @@ import brz2obsidian.publication.vault_history as history
 import brz2obsidian.publication.vault_native as native
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.publication import checkpoint_payload
 from tests.application.test_owned_update_preparation import _digest, _tree
 from tests.application.test_update_context import worker_context_call
@@ -22,6 +21,7 @@ from tests.application.test_verified_coverage import (
     source_parts,
     write_source,
 )
+from tests.support.recorded_format8 import format8_workflow
 
 
 def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
@@ -47,7 +47,7 @@ def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
     add_attachment(parts, item_id, 1, "large.bin", raw)
     archive = write_source(source_directory, parts)
     del parts, raw
-    workflow = default_workflow()
+    workflow = format8_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     rendered = root / "rendered"

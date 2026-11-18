@@ -275,7 +275,7 @@ def test_fresh_history_context_undo_restores_large_retained_preimage(monkeypatch
             module_version="11",
             profile_id="thebrain-format5-reviewed",
             profile_version="11",
-            output_format=8,
+            output_format=9,
             settings_digest=hashlib.sha256(b"{}").hexdigest(),
         ),
         admission=operations.inspect_history(vault).admission,

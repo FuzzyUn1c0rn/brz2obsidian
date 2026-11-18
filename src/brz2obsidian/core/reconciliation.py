@@ -90,7 +90,11 @@ def _assumptions(facts, subject, subject_id, safety, *, reversal_fingerprint=Non
                 _content_identity(subject.current.content),
             ),
         ),
-        ("incoming", (subject.path, _content_identity(subject.incoming))),
+        (
+            "incoming",
+            (subject.path, _content_identity(subject.incoming))
+            + tuple(ref.model_dump(mode="json") for ref in subject.moved_navigation),
+        ),
         ("interpretation", subject.interpretation),
         ("format", format_assumption(facts, subject)),
         ("structure", structure_assumption(subject.structure)),
@@ -345,6 +349,14 @@ def _reconcile_subject(
             "unresolved",
             None,
             structure_problem,
+            True,
+        )
+    if subject.moved_navigation and not any(problem.blocking for problem in problems):
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "unresolved",
+            None,
+            "moved_navigation",
             True,
         )
     if binding.review.status != "matched":

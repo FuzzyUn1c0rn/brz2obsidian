@@ -145,6 +145,12 @@ def _choices(facts, change, domain):
         return ("keep_path", "source_path")
     if domain == "restoration":
         return ("decline_restoration", "restore_incoming")
+    if change.provenance.rule == "moved_navigation":
+        return ("edited",)
+    if domain == "format" and change.identity_review.reason == "reserved_path_adoption":
+        return (
+            ("incoming", "edited") if content_size(change.current) == 0 else ("edited",)
+        )
     if change.attachment_review is not None:
         choices = tuple(
             a.choice for a in change.attachment_review.alternatives if a.eligible

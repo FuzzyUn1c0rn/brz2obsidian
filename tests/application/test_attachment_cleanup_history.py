@@ -18,7 +18,7 @@ from tests.application.test_update_lifecycle_admission import NOTE, payload
 from tests.application.test_vault_checkpoints import git, user_state
 
 
-def owned_history_case():
+def owned_history_case(*, output_format=8):
     root = Path(tempfile.mkdtemp(prefix="brz2obsidian-283-"))
     owner = uuid4().hex
     marker = {
@@ -38,6 +38,7 @@ def owned_history_case():
     original = payload("a", "Original independently generated A.")
     original["Assets/remove.bin"] = b"\x00historical source A\xff"
     record = json.loads(original["migration-record.json"])
+    record["schema_version"] = output_format
     record["asset_targets"] = [
         {"asset_id": "remove-asset", "relative_path": "Assets/remove.bin"}
     ]
@@ -908,7 +909,7 @@ def test_removal_continuation_requires_exact_native_origin_and_absent_state():
 
 
 def test_native_cleanup_capture_rederives_witness_before_any_history_write():
-    vault, source, original = owned_history_case()
+    vault, source, original = owned_history_case(output_format=9)
     operations = Operations()
     first = operations.capture_checkpoint(
         vault,

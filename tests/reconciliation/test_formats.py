@@ -1,5 +1,7 @@
 """Format-operation review at the public pure reconciliation seam."""
 
+import pytest
+
 from brz2obsidian.contracts import FormatOperation
 from brz2obsidian.core import reconcile
 from tests.reconciliation.test_proposals import request
@@ -64,9 +66,22 @@ def test_format_declarations_retain_opaque_generated_versions():
     assert declared.choices == ("keep_current", "use_target", "edit_result")
 
 
-def test_new_converter_retains_recorded_supported_format_and_profile():
+@pytest.mark.parametrize("generation", (7, 8, 9))
+def test_new_converter_retains_recorded_supported_format_and_profile(generation):
     facts = request()
-    facts = facts.model_copy(update={"format_operation": operation()})
+    generation_identity = facts.baseline_identity.model_copy(
+        update={"output_format": generation}
+    )
+    baseline = facts.format_operation.established_baseline.model_copy(
+        update={"identity": generation_identity}
+    )
+    facts = facts.model_copy(
+        update={
+            "baseline_identity": generation_identity,
+            "incoming_identity": generation_identity,
+            "format_operation": operation(established_baseline=baseline),
+        }
+    )
     result = reconcile(facts)
     assert result.operation == "source_update"
     assert result.changes[0].result.data == b"incoming\n"
@@ -357,7 +372,7 @@ def test_unsupported_target_and_duplicate_establishment_records_are_rejected():
     from pydantic import ValidationError
 
     facts = request()
-    unsupported = facts.incoming_identity.model_copy(update={"output_format": 9})
+    unsupported = facts.incoming_identity.model_copy(update={"output_format": 10})
     result = reconcile(
         facts.model_copy(
             update={
