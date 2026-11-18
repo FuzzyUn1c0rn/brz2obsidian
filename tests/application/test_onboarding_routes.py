@@ -98,7 +98,7 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
     facts = request()
     identity = facts.incoming_identity.model_copy(
         update={
-            "output_format": 8,
+            "output_format": 9,
             "module_version": "3",
             "profile_id": FOLIO_POLICY.profile_id,
             "profile_version": FOLIO_POLICY.profile_version,
@@ -141,7 +141,7 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
         existence="present",
         memberships=(),
         source_path=subject.current.path,
-        output_format=8,
+        output_format=9,
     )
     incoming_state = interpret_link_target(
         subject.incoming,
@@ -149,7 +149,7 @@ def test_prepared_onboarding_reference_is_not_a_completed_update_baseline(monkey
         existence="present",
         memberships=(),
         source_path=subject.path,
-        output_format=8,
+        output_format=9,
     )
     # This controlled pure fixture represents a current-format pending review;
     # both byte-bound target interpretations and documents use that generation.

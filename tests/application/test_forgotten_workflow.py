@@ -518,7 +518,7 @@ def test_current_public_envelopes_reserve_empty_gap_and_presentation_facts(tmp_p
     converted = default_workflow().convert(source, vault)
     assert converted.outcome == "clean"
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 8 and record["renderer_version"] == "8"
+    assert record["schema_version"] == 9 and record["renderer_version"] == "9"
     assert record["source_gaps"] == record["generated_presentations"] == []
 
 

@@ -1,7 +1,11 @@
 """Selected explicit candidate consistency; no YAML, Markdown or path parsing."""
 
+from collections import Counter
+from hashlib import sha256
+
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ReferenceTarget
+from brz2obsidian.core.link_meanings import matches_exact_note_path, same_canonical_path
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.reference_targets import validate_targets
 
@@ -96,6 +100,85 @@ def _known_memberships(subject, document, choice, *, mapping_choice):
     return True
 
 
+def _navigation_entries(reference, occurrences):
+    return tuple(
+        link
+        for link in occurrences
+        if link.relationship_heading == reference.heading
+        and not link.embedded
+        and link.meaning.display_text == reference.label
+        and (
+            link.meaning.target_identity == reference.identity
+            or link.query is not None
+            and (
+                matches_exact_note_path(link.query, reference.source_path)
+                or matches_exact_note_path(link.query, reference.observed_path)
+            )
+        )
+    )
+
+
+def _other_destination_links(reference, occurrences):
+    # Include local links outside the generated heading and with other labels.
+    return [
+        link
+        for link in occurrences
+        if link.meaning.target_identity != reference.identity
+        and (
+            link.meaning.path is not None
+            and same_canonical_path(link.meaning.path, reference.source_path)
+            or link.query is not None
+            and matches_exact_note_path(link.query, reference.source_path)
+        )
+    ]
+
+
+def _link_meaning_counts(occurrences):
+    return Counter(
+        (link.raw, link.meaning.model_copy(update={"target_version": None}))
+        for link in occurrences
+    )
+
+
+def moved_navigation_valid(references, occurrences, current_occurrences):
+    for reference in references:
+        after = _navigation_entries(reference, occurrences)
+        if len(after) != 1:
+            return False
+        (generated,) = after
+        meaning = generated.meaning
+        if (
+            meaning.status != "resolved"
+            or meaning.target_identity != reference.identity
+            or meaning.path is None
+            or generated.query is None
+            or not matches_exact_note_path(generated.query, meaning.path)
+        ):
+            return False
+        current = _link_meaning_counts(
+            _other_destination_links(reference, current_occurrences)
+        )
+        selected = _link_meaning_counts(
+            _other_destination_links(reference, occurrences)
+        )
+        # Exact retained output authorizes replacement of one generated token.
+        # Identical copies have no positional proof. The edited result must
+        # distinguish their roles and retain every other observed link.
+        prior = _link_meaning_counts(
+            _navigation_entries(reference, current_occurrences)
+        )
+        if reference.retained_token_sha256 is not None and len(prior) == 1:
+            (slot,) = prior
+            if (
+                current[slot]
+                and sha256(slot[0]).hexdigest() == reference.retained_token_sha256
+            ):
+                current[slot] -= 1
+        if current != selected:
+            return False
+    return True
+
+
 def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=False):
     subject = next(
         s
@@ -165,6 +248,25 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
         baseline=baseline,
     ).valid:
         return False
+    if subject.moved_navigation:
+        current_documents = (
+            tuple(
+                doc
+                for doc in context.current_documents
+                if doc.source_path == change.path
+                and same_content(doc.content, change.current)
+            )
+            if context is not None and change.current is not None
+            else ()
+        )
+        if change.current is not None and len(current_documents) != 1:
+            return False
+        if not moved_navigation_valid(
+            subject.moved_navigation,
+            candidate.links.occurrences,
+            current_documents[0].occurrences if current_documents else (),
+        ):
+            return False
     if any(
         t.identity is not None and t.identity != candidate.identity
         for t in candidate.link_targets
@@ -227,6 +329,15 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
                     )
         if not _known_memberships(
             subject, document, choice, mapping_choice=mapping_choice
+        ):
+            return False
+        if (
+            change.identity_review.reason == "reserved_path_adoption"
+            and not {
+                ("source_collection_id", "collection"),
+                ("source_item_id", "item"),
+            }
+            <= declared
         ):
             return False
         if subject.structure is not None:

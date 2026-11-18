@@ -81,8 +81,8 @@ def test_current_paired_outputs_are_source_bound(paired_outputs):
     assert brz and raw_api and api
     for vault in (brz_vault, api_vault):
         record = json.loads((vault / "migration-record.json").read_bytes())
-        assert record["schema_version"] == 8
-        assert record["renderer_version"] == "8"
+        assert record["schema_version"] == 9
+        assert record["renderer_version"] == "9"
         assert len(record["classification_assignments"]) == 17
         assert len({a["item_key"] for a in record["classification_assignments"]}) == 17
         assert (

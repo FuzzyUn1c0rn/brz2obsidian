@@ -1,13 +1,11 @@
 """Pure normalized format/onboarding policy; no parsing or output generation."""
 
 from brz2obsidian.content_values import content_key, content_sha, same_content
-from brz2obsidian.contracts import FormatReview
+from brz2obsidian.contracts import REVIEWABLE_OUTPUT_FORMATS, FormatReview
+
 
 # Historical review replay retains its recorded generation. Application admission
 # separately selects the current format for new source-update operations.
-REVIEW_FORMATS = frozenset({7, 8})
-
-
 def output_semantics(identity):
     """Compatibility meaning excludes informational source-module release metadata."""
     return identity.model_dump(mode="json", exclude={"module_version"})
@@ -27,12 +25,14 @@ def format_findings(facts):
         if output_semantics(baseline) != output_semantics(target):
             return ("profile_transition_required",)
         return (
-            () if baseline.output_format in REVIEW_FORMATS else ("unsupported_format",)
+            ()
+            if baseline.output_format in REVIEWABLE_OUTPUT_FORMATS
+            else ("unsupported_format",)
         )
     if operation.kind != "source_update":
         if not facts.subjects:
             return ("format_outputs_unavailable",)
-        if target.output_format not in REVIEW_FORMATS:
+        if target.output_format not in REVIEWABLE_OUTPUT_FORMATS:
             return ("format_target_unsupported",)
         if (
             operation.baseline_source_version is not None
@@ -50,7 +50,7 @@ def format_findings(facts):
         return ()
     if baseline.output_format != target.output_format:
         return ("format_transition_required",)
-    if baseline.output_format not in REVIEW_FORMATS:
+    if baseline.output_format not in REVIEWABLE_OUTPUT_FORMATS:
         return ("unsupported_format",)
     if (baseline.profile_id, baseline.profile_version, baseline.settings_digest) != (
         target.profile_id,
@@ -69,7 +69,7 @@ def established_original(facts, subject):
         baseline is None
         or output_semantics(baseline.identity)
         != output_semantics(facts.baseline_identity)
-        or baseline.identity.output_format not in REVIEW_FORMATS
+        or baseline.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
         or baseline.source_version != operation.baseline_source_version
         or subject.baseline.content is None
     ):
@@ -160,6 +160,17 @@ def automatic_transition(facts, subject):
     )
 
 
+def obsolete_support_listing(facts, subject):
+    return (
+        facts.incoming_identity.output_format == 9
+        and facts.format_operation.kind == "format_transition"
+        and subject.baseline.status == "known"
+        and subject.incoming is None
+        and subject.item_id
+        in ("support:Uncreated targets.md", "support:Tag memberships.md")
+    )
+
+
 def format_proposal(facts, subject):
     """Retain explicit choices where the selected operation lacks safe evidence."""
     operation = facts.format_operation
@@ -167,6 +178,7 @@ def format_proposal(facts, subject):
         operation.kind == "attachment_cleanup"
         or automatic_onboarding(facts, subject)
         or automatic_transition(facts, subject)
+        or obsolete_support_listing(facts, subject)
         or (operation.automatic_merge and _new_source_output(facts, subject))
     ):
         return None
@@ -195,7 +207,7 @@ def _new_source_output(facts, subject):
         operation.kind in ("source_update", "onboarding")
         and operation.recorded_generation == "supported"
         and baseline is not None
-        and baseline.identity.output_format in REVIEW_FORMATS
+        and baseline.identity.output_format in REVIEWABLE_OUTPUT_FORMATS
         and output_semantics(baseline.identity)
         == output_semantics(facts.baseline_identity)
         and output_semantics(facts.baseline_identity)
@@ -205,6 +217,7 @@ def _new_source_output(facts, subject):
         and facts.inventory == "complete"
         and (subject.output_role != "configuration" or operation.automatic_merge)
         and subject.baseline.status == "unknown"
+        and not subject.previously_generated
         and subject.baseline.content is None
         and subject.baseline.unavailable_digest is None
         and subject.current.existence == "absent"
@@ -222,6 +235,13 @@ def review_facts(facts, subject):
         or automatic_onboarding(facts, subject)
         or automatic_transition(facts, subject)
         or automatic_configuration(facts, subject)
+        or obsolete_support_listing(facts, subject)
+        or (
+            subject.previously_generated
+            and facts.format_operation.kind == "source_update"
+            and facts.format_operation.recorded_generation == "supported"
+            and facts.incoming_identity.output_format == 9
+        )
         or (
             facts.format_operation.automatic_merge
             and _new_source_output(facts, subject)
@@ -246,7 +266,7 @@ def review_facts(facts, subject):
         target_generated=subject.incoming,
         target_eligible=(
             subject.incoming is not None
-            and facts.incoming_identity.output_format in REVIEW_FORMATS
+            and facts.incoming_identity.output_format in REVIEWABLE_OUTPUT_FORMATS
             and (
                 (
                     facts.format_operation.kind == "source_update"
@@ -285,6 +305,14 @@ def format_assumption(facts, subject):
             ),
         ),
         subject.output_role,
+    ) + (
+        (
+            subject.prior_reservation,
+            subject.previously_generated,
+            subject.source_still_reserved,
+        )
+        if facts.incoming_identity.output_format == 9
+        else ()
     )
 
 

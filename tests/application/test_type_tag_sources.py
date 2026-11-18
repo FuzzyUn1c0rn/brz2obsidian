@@ -76,7 +76,7 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(
         assert converted.outcome == "clean", converted.issues
         record = json.loads((destination / "migration-record.json").read_bytes())
         targets = {t["item_key"]: t for t in record["item_targets"]}
-        assert sum(t["created"] for t in record["item_targets"]) == 8
+        assert sum(t["created"] for t in record["item_targets"]) == 9
         assert {targets[IDS[n]]["relative_path"] for n in "ABCDEFG"} == {
             "Categories/A.md",
             "Categories/B.md",
@@ -301,9 +301,9 @@ def test_deep_type_chain_counts_are_direct_and_navigation_cycles_remain_allowed(
     selected = {
         t.original_title for t in targets if t.created and t.original_title != "Entry"
     }
-    assert selected == set("ABCDEFG") | {f"H{i}" for i in range(10)} | {"N8", "N9"}
-    assert len(selected) == 19
-    assert sum(t.created for t in targets) == 20
+    assert selected == set("ABCDEFGT") | {f"H{i}" for i in range(10)} | {"N8", "N9"}
+    assert len(selected) == 20
+    assert sum(t.created for t in targets) == 21
     assert result.counts.present_assets == 2
     names = {t.item_key: t.original_title for t in targets}
     assert {

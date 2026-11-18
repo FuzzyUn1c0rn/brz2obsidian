@@ -381,12 +381,14 @@ def test_alternate_public_modules_and_another_presentation_need_no_cli(
 
 
 @pytest.mark.parametrize(
-    "source_factory,notes", [(paired_sources, 3), (paired_v2_sources, 5)]
+    "source_factory,notes,category_notes",
+    [(paired_sources, 7, 0), (paired_v2_sources, 9, 1)],
 )
 def test_generic_package_initializers_and_workflow_operate_with_source_and_cli_imports_blocked(
     tmp_path,
     source_factory,
     notes,
+    category_notes,
 ):
     _, source = source_factory(tmp_path)
     code = """
@@ -406,10 +408,10 @@ from tests.support.folio_source import FolioSourceModule, FOLIO_POLICY
 result = Workflow(SourceModuleBinding(FolioSourceModule(), FOLIO_POLICY), ObsidianRenderer(), FilesystemPublisher()).convert(sys.argv[1], sys.argv[2])
 assert result.outcome == "clean" and result.receipt.verified
 assert result.counts.actual_notes == int(sys.argv[3])
-if int(sys.argv[3]) == 5:
+assert result.counts.actual_category_notes == int(sys.argv[4])
+if int(sys.argv[4]):
     from pathlib import Path
     root = Path(sys.argv[2])
-    assert result.counts.actual_category_notes == 1
     for name in ('Categories/Concept.md', 'Templates/Concept.md', 'Templates/Bases/Members.base', '.obsidian/templates.json'):
         assert (root / name).is_file()
     assert 'appearance_category: "[[Categories/Concept.md]]"' in (root / 'Notes/Empty.md').read_text()
@@ -422,6 +424,7 @@ if int(sys.argv[3]) == 5:
             str(source),
             str(tmp_path / "isolated"),
             str(notes),
+            str(category_notes),
         ],
         capture_output=True,
         text=True,

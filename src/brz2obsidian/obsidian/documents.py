@@ -8,9 +8,7 @@ from brz2obsidian.contracts import Issue, MigrationRefused
 from .relationships import note_link
 
 
-def render_document(document, note_path, plan):
-    items = {t.item_key: t for t in plan.item_targets}
-    assets = {t.asset_id: t for t in plan.asset_targets}
+def render_document(document, note_path, items, assets):
     text = document.text
     for span in sorted(document.references, key=lambda s: s.start, reverse=True):
         assigned = (items if span.kind == "item" else assets).get(span.target)

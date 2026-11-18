@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 
 from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     MembershipEntry,
     MembershipSet,
     StructureByteEdit,
@@ -144,7 +145,7 @@ def interpret_structure(
     fields, body_start, status, issues = (), 0, "supported", ()
     memberships, appearance, sections = (), None, ()
     try:
-        if output_format not in (7, 8):
+        if output_format not in REVIEWABLE_OUTPUT_FORMATS:
             raise _Unsupported("format_unsupported")
         try:
             raw.decode("utf-8")

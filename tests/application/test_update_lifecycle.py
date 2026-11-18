@@ -160,7 +160,7 @@ def _seed(case_path, *, two_notes=False, capture_history=True):
         module_version="11",
         profile_id="thebrain-format5-reviewed",
         profile_version="11",
-        output_format=8,
+        output_format=9,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     )
     result = Operations().capture_checkpoint(

@@ -7,6 +7,7 @@ from typing import NamedTuple
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     AttachmentRemovalContinuation,
     ExactContent,
     ImportedItemIdentity,
@@ -809,7 +810,7 @@ def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None
             else _manifest(git, association, role)
         )
         if (
-            manifest.identity.output_format not in (7, 8)
+            manifest.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
             or manifest.identity.settings_digest != hashlib.sha256(b"{}").hexdigest()
         ):
             # An unqualified old format cannot establish an origin. It also

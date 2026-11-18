@@ -5,7 +5,11 @@ from hashlib import sha256
 
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_key, content_sha, same_content
-from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
+from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
+    LinkValidationBaseline,
+    ProposalAssumption,
+)
 
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import (
@@ -21,7 +25,10 @@ from .reference_targets import validate_targets
 def provider_documents(facts):
     """New reviews consume owned-icon links; recorded7 replay keeps its meaning."""
     context = facts.link_context
-    if facts.incoming_identity.output_format != 8 or context is None:
+    if (
+        facts.incoming_identity.output_format not in QUALIFIED_OUTPUT_FORMATS
+        or context is None
+    ):
         return ()
     return context.current_documents + context.incoming_documents
 
@@ -521,7 +528,7 @@ def _relocated_current_states(facts, candidate, owner, selected_path):
     prior = facts.link_context.current_target_facts
     if candidate.link_target_facts == prior:
         return True
-    if facts.incoming_identity.output_format != 8 or len(
+    if facts.incoming_identity.output_format not in QUALIFIED_OUTPUT_FORMATS or len(
         candidate.link_target_facts
     ) != len(prior):
         return False

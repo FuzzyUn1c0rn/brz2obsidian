@@ -6,6 +6,7 @@ from urllib.parse import unquote_to_bytes
 import yaml
 
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     ExactContent,
     LinkAnchor,
     LinkDocument,
@@ -125,7 +126,8 @@ def interpret_link_target(
             existence=existence,
             reference_query=reference_query,
         )
-        if (output_format == 8 or qualify_roles) and source_path is not None
+        if (output_format in QUALIFIED_OUTPUT_FORMATS or qualify_roles)
+        and source_path is not None
         else None
     )
 
@@ -226,6 +228,26 @@ def interpret_link_target(
     )
 
 
+def _relationship_entries(text):
+    headings = {
+        "## Parents": "Parents",
+        "## Children": "Children",
+        "## Related": "Related",
+    }
+    offset, heading = 0, None
+    entries = {}
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if body in headings:
+            heading = headings[body]
+        elif heading is not None and body.startswith("- "):
+            entries[offset + 2, offset + len(body)] = heading
+        elif body:
+            heading = None
+        offset += len(line)
+    return entries
+
+
 def interpret_links(
     content,
     *,
@@ -236,7 +258,7 @@ def interpret_links(
     target_facts,
     inventory,
     output_format=7,
-    record_format=8,
+    record_format=None,
 ):
     occurrences, issues, consumed = [], [], []
 
@@ -259,14 +281,20 @@ def interpret_links(
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
-    if output_format == 8 and source_path == "migration-record.json":
+    if (
+        output_format in QUALIFIED_OUTPUT_FORMATS
+        and source_path == "migration-record.json"
+    ):
+        if record_format is None:
+            record_format = output_format
         if not migration_record_data(text, source_path, record_format=record_format):
             issues.append("record_data_unsupported")
         return document()
     masked, code_issues = _code_ranges(text)
-    if output_format == 8:
+    if output_format in QUALIFIED_OUTPUT_FORMATS:
         masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
+    relationship_entries = _relationship_entries(text) if output_format == 9 else {}
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
     )
@@ -299,7 +327,7 @@ def interpret_links(
             # A literal drive-rooted path is outside managed-vault resolution.
             # Preserve its spelling; percent signs and fragments are opaque here.
             external = (
-                output_format == 8
+                output_format in QUALIFIED_OUTPUT_FORMATS
                 and not wiki
                 and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
                 and not any(ord(c) < 32 for c in semantic_destination)
@@ -344,10 +372,16 @@ def interpret_links(
                     target_text,
                     source_path,
                     "relative"
-                    if output_format == 8
+                    if output_format in QUALIFIED_OUTPUT_FORMATS
                     and path_mode == "vault"
                     and not wiki
                     and target_text.startswith(("./", "../"))
+                    else "shortened"
+                    if output_format == 9
+                    and path_mode == "vault"
+                    and wiki
+                    and target_text
+                    and "/" not in target_text
                     else path_mode,
                     (f"[[{target_text}]]", f"[[{target_text}|{display}]]")
                     if wiki
@@ -386,6 +420,7 @@ def interpret_links(
                 raw=content.data[start:end],
                 query=query,
                 meaning=meaning,
+                relationship_heading=relationship_entries.get(match.span()),
             )
         )
     residue = list(text)

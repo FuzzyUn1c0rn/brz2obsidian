@@ -65,10 +65,11 @@ def note(body):
 
 
 def payload(version, body, *, output_format=8):
+    profile_version = "11" if output_format in (8, 9) else "10"
     identity = SourceIdentity(
         source_id=COLLECTION,
         module_id="thebrain-brz",
-        module_version="11" if output_format == 8 else "10",
+        module_version=profile_version,
         format_version="5",
         source_sha256=version * 64,
         snapshot_digest=version * 64,
@@ -78,7 +79,7 @@ def payload(version, body, *, output_format=8):
         "schema_version": output_format,
         "source_identity": identity.model_dump(),
         "profile_id": "thebrain-format5-reviewed",
-        "profile_version": "11" if output_format == 8 else "10",
+        "profile_version": profile_version,
         "item_targets": [
             {
                 "created": True,

@@ -15,6 +15,7 @@ from brz2obsidian.content_fingerprints import (
 )
 from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     LinkDocument,
     LinkTargetFacts,
     StructureSpan,
@@ -433,7 +434,7 @@ def automatic_composed_document(facts, change, approval, composed):
 def automatic_reference_document(facts, change, approval, approvals):
     """A current8 explicit reference choice outranks only an automatic keep."""
     if (
-        facts.incoming_identity.output_format != 8
+        facts.incoming_identity.output_format not in QUALIFIED_OUTPUT_FORMATS
         or facts.format_operation.kind != "source_update"
         or approval is not None
         or change.requires_decision

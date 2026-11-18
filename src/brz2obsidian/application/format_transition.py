@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
-from brz2obsidian.contracts import SourceIdentity
+from brz2obsidian.contracts import REVIEWABLE_OUTPUT_FORMATS, SourceIdentity
 from brz2obsidian.core import prepare_review
 
 from .update_facts import automatic_merge_facts, record
@@ -36,14 +36,22 @@ def transition_facts(
         if retained_review is not None
         else None
     )
-    contextual = (
-        prior is not None
-        and checkpoint.manifest.boundary == "local"
+    contextual = prior is not None and (
+        checkpoint.manifest.boundary == "local"
         and prior.format_operation.kind in ("onboarding", "format_transition")
+        or checkpoint.manifest.boundary == "prepared"
+        and prior.format_operation.kind == "format_transition"
     )
     old_identity = (
         prior.baseline_identity if contextual else checkpoint.manifest.identity
     )
+    incoming_record = record(incoming)
+    incoming_source = incoming_record["source_identity"]
+    if (incoming_source["source_id"], incoming_source["module_id"]) != (
+        old_identity.collection_id,
+        old_identity.module_id,
+    ):
+        raise ValueError("format_source_association_changed")
     known = not contextual or prior.format_operation.established_baseline is not None
     facts = _observed_facts(
         history,
@@ -76,7 +84,7 @@ def transition_facts(
         raise ValueError("format_source_changed")
     purposes = {
         row["relative_path"]: row["purpose"]
-        for row in record(incoming).get("support_artifacts", ())
+        for row in incoming_record.get("support_artifacts", ())
     }
     roles = {
         "overview": "dashboard",
@@ -84,7 +92,11 @@ def transition_facts(
         "starter": "template",
         "configuration": "configuration",
     }
-    unavailable = old_identity.output_format != 7
+    unavailable = (
+        old_identity.output_format != 7
+        if facts.incoming_identity.output_format == 8
+        else old_identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
+    )
     subjects = tuple(
         subject.model_copy(
             update={
@@ -144,6 +156,8 @@ def prepare_format_transition(operations, vault, source=None, *, _owner=None):
             or not history.admission.inventory_complete
         ):
             return refused("onboarding_required", history, action="review_onboarding")
+        if stopped is None and history.checkpoint.manifest.boundary == "result":
+            return refused("format_transition_not_required", history)
         if source is None:
             return refused(
                 "format_transition_evidence_required",
@@ -196,10 +210,11 @@ def prepare_format_transition(operations, vault, source=None, *, _owner=None):
                 _owner=_owner,
             )
     except ValueError as error:
-        if error.args == ("format_source_changed",):
-            return refused(
-                "format_source_changed", history, action="choose_source_reference"
-            )
+        if error.args in (
+            ("format_source_changed",),
+            ("format_source_association_changed",),
+        ):
+            return refused(error.args[0], history, action="choose_source_reference")
         return refused("format_transition_unavailable", history)
     except OSError, TypeError, AttributeError, KeyError:
         return refused("format_transition_unavailable", history)

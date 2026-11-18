@@ -12,7 +12,6 @@ import brz2obsidian.publication.vault_history as history
 import brz2obsidian.publication.vault_native as native
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.cli import main
 from brz2obsidian.cli_review import CliReviewResult
 from brz2obsidian.contracts import OutputIdentity
@@ -26,6 +25,7 @@ from tests.application.test_verified_coverage import (
     source_parts,
     write_source,
 )
+from tests.support.recorded_format8 import format8_workflow
 
 
 def test_fresh_context_resumes_saved_binary_original_source_update(monkeypatch, capsys):
@@ -52,7 +52,7 @@ def test_fresh_context_resumes_saved_binary_original_source_update(monkeypatch, 
     add_attachment(parts, item_id, 1, "large.bin", raw)
     initial_archive = write_source(initial_directory, parts)
     del raw
-    workflow = default_workflow()
+    workflow = format8_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     vault = root / "vault"

@@ -26,6 +26,7 @@ from brz2obsidian.application.vault_update_contracts import (
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     ContentVersion,
     CurrentContent,
     ExactContent,
@@ -402,10 +403,14 @@ def _review_observation(
                 continue
             old = state_by_id[target.target_id]
             observed_target = current.get(target.canonical_path)
+            retained_absence = old.existence == "missing" or (
+                original_facts.incoming_identity.output_format == 9
+                and old.existence == "intentionally_uncreated"
+            )
             if observed_target is None or (
                 observed_target.content == old.content
                 and observed_target.existence
-                == ("absent" if old.existence == "missing" else old.existence)
+                == ("absent" if retained_absence else old.existence)
             ):
                 target_facts.append(old)
             else:
@@ -424,7 +429,7 @@ def _review_observation(
                         if original_facts.baseline_identity.output_format == 6
                         else original_facts.baseline_identity.output_format,
                         qualify_roles=original_facts.incoming_identity.output_format
-                        == 8,
+                        in QUALIFIED_OUTPUT_FORMATS,
                         _owner=None if _owner is None else _owner._session,
                     )
                 )
@@ -1143,7 +1148,8 @@ def _restore_link_context(original, facts, before, affected, git, *, _owner=None
                     output_format=7
                     if original.facts.baseline_identity.output_format == 6
                     else original.facts.baseline_identity.output_format,
-                    qualify_roles=original.facts.incoming_identity.output_format == 8,
+                    qualify_roles=original.facts.incoming_identity.output_format
+                    in QUALIFIED_OUTPUT_FORMATS,
                 )
             )
         elif target.target_id in current_states:
@@ -1276,7 +1282,10 @@ def _unaffected_attachment_context(original, intent, subject, change, approval):
 
 def _protected_resource_context(facts, subjects, context, retained, git):
     """Keep exact historical associations for resources outside reversal writes."""
-    if context is None or facts.incoming_identity.output_format != 8:
+    if (
+        context is None
+        or facts.incoming_identity.output_format not in QUALIFIED_OUTPUT_FORMATS
+    ):
         return context
     included = {(subject.item_id, subject.facet) for subject in subjects}
     protected = {

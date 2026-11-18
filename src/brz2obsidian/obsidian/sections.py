@@ -1,4 +1,4 @@
-"""Outer format-7 known section interpretation; headings grant no ownership."""
+"""Interpret generated sections and their retained layout."""
 
 import re
 from itertools import pairwise
@@ -82,6 +82,62 @@ def interpret_sections(content, bases, body_start, targets):
     if any(a.span.end > b.span.start for a, b in pairwise(sections)):
         raise SectionUnsupported("section_boundary_ambiguous")
     return tuple(sections)
+
+
+def _relationship_end(lines, heading_index):
+    return next(
+        (
+            index
+            for index in range(heading_index + 1, len(lines))
+            if lines[index].strip() and not lines[index].startswith(b"- ")
+        ),
+        len(lines),
+    )
+
+
+def retained_relationship_survives(original, current, heading):
+    """Prove the generated section survives an insertion-only local edit."""
+    if original == current or (
+        original.endswith(b"\n") and current.startswith(original)
+    ):
+        return True
+    heading = b"## " + heading.encode()
+    original_lines = original.splitlines(keepends=True)
+    starts = [
+        index
+        for index, line in enumerate(original_lines)
+        if line.rstrip(b"\r\n") == heading
+    ]
+    if len(starts) != 1:
+        return False
+    (start,) = starts
+    end = _relationship_end(original_lines, start)
+    prefix = b"".join(original_lines[:start])
+    suffix = b"".join(original_lines[end:])
+    if (
+        not prefix.strip()
+        or not suffix.strip()
+        or not current.startswith(prefix)
+        or not current.endswith(suffix)
+        or current.count(prefix) != 1
+        or current.count(suffix) != 1
+    ):
+        return False
+    middle = current[len(prefix) : -len(suffix)].splitlines(keepends=True)
+    # A different section in this interval breaks the original section order.
+    if any(
+        line.lstrip().startswith(b"#") and line.rstrip(b"\r\n") != heading
+        for line in middle
+    ):
+        return False
+    anchor = next((index for index, line in enumerate(middle) if line.strip()), None)
+    if anchor is None or middle[anchor].rstrip(b"\r\n") != heading:
+        return False
+    retained = tuple(line for line in original_lines[start + 1 : end] if line.strip())
+    rows = iter(middle[anchor + 1 : _relationship_end(middle, anchor)])
+    return bool(retained) and all(
+        any(actual == expected for actual in rows) for expected in retained
+    )
 
 
 def align_sections(documents, gap_edits):

@@ -27,6 +27,7 @@ from .api_note_text import (
 from .api_scope import strict
 from .appearance import check_depth_warnings, source_icon
 from .checker import contender_keys, escaped, wiki
+from .facts import navigation_selection
 from .support import REOPEN_GUIDANCE, check_support_content, tag_listing
 from .unavailable_images import (
     api_document_text as image_api_document_text,
@@ -48,7 +49,7 @@ def versioned_static(output_version):
     Source profile/capture versions do not select the renderer generation.
     These presentation literals are independent of production imports.
     """
-    assert output_version in {7, 8}, "reviewed output generation"
+    assert output_version in {7, 8, 9}, "reviewed output generation"
     result = dict(STATIC)
     if output_version == 7:
         return result
@@ -100,6 +101,10 @@ body from images or declared length. Source repair and re-export are optional.
         'unambiguously; blank appearance providers opt out. provider_cycle reports the\nfull repeated provider chain, including cycles beyond the native search.\ninvalid_provider also identifies affected chains reaching invalid declarations,\neven when a nearer owned icon displays. icon_lookup_depth reports the affected\nchain with "Icon lookup exceeds 8 links."; it is a nonblocking warning. Results are clean/issues/failed\n',
     )
     result["GP05-GUIDE-00"] = guide
+    if output_version == 9:
+        result["GP05-REPORT-13"] = (
+            "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts.\n"
+        )
     return result
 
 
@@ -140,6 +145,7 @@ def check_complete_shape(record):
         assert type(record["schema_version"]) is int and record["schema_version"] in {
             7,
             8,
+            9,
         }, "generated output format version"
     identity = record["source_identity"]
     assert type(identity) is dict and set(identity) == {
@@ -538,7 +544,7 @@ def check_warning_records(
                 "leftover_path": None,
             }
         )
-    if record.get("schema_version") == 8:
+    if record.get("schema_version") in (8, 9):
         thoughts = {key: row["activeThought"] for key, row in scoped.graphs.items()}
         providers = {
             key: row["typeId"] for key, row in thoughts.items() if row["typeId"]
@@ -855,6 +861,13 @@ def check_projection_protocol(
         and row["role"] in {"file", "image"}
         and row["actual_length"] > 0
     )
+    output_version = record.get("schema_version", 7)
+    definitions = {key for key, row in thoughts.items() if row["kind"] == 2}
+    created = navigation_selection(
+        content | classified | definitions | {home},
+        [(row["kind"], row["item_a"], row["item_b"]) for row in relationships.values()],
+        output_version,
+    )
     item_fields = {
         "creation_reasons",
         "calendar_dates",
@@ -862,6 +875,10 @@ def check_projection_protocol(
         "vault_tag_token",
     }
     for key, target in targets.items():
+        if output_version == 9:
+            assert target["created"] == (key in created), (
+                "source-bound note materialization"
+            )
         reasons = [
             reason
             for condition, reason in (
@@ -872,8 +889,8 @@ def check_projection_protocol(
             )
             if condition
         ]
-        if not reasons and target["created"]:
-            reasons = ["hierarchy"]
+        if not reasons and key in created:
+            reasons = ["navigation" if output_version == 9 else "hierarchy"]
         calendar = {
             field: datetime.fromisoformat(thoughts[key][source]).date().isoformat()
             if thoughts[key].get(source)
@@ -1120,7 +1137,7 @@ def check_adaptation_records(
                     if icons.get(key)
                     else (
                         " through the selected appearance-category chain starting at "
-                        if record.get("schema_version") == 8
+                        if record.get("schema_version") in (8, 9)
                         else constants["GP07-DESCRIPTION-25"]
                     )
                     + providers[key]
@@ -1321,7 +1338,7 @@ def check_support(
             )
     assert (vault / "Categories.md").read_bytes() == (
         "# Categories\n\n"
-        + (REOPEN_GUIDANCE if record["schema_version"] == 8 else "")
+        + (REOPEN_GUIDANCE if record["schema_version"] in (8, 9) else "")
         + "![[Templates/Bases/Categories.base]]\n"
     ).encode(), "closed categories overview"
     home = baseline.json(baseline.data["brain"])["homeThoughtId"]
