@@ -1,5 +1,0 @@
-interface:
-  display_name: "Implement Spec Enhanced"
-  short_description: "Implement tickets with scoped checks and independent review."
-policy:
-  allow_implicit_invocation: false
