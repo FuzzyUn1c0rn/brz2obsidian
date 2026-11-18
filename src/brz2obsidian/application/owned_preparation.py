@@ -614,13 +614,15 @@ class _OwnedPreparation:
                 _cancel=self._cancel,
             )
 
-    def restore(self, vault, *, resume=False, cancel=None):
-        """Project saved history lexically, or retain a freshly resumed owner."""
+    def restore(self, vault, *, resume=False, cancel=None, check_saved=None):
+        """Read saved history, optionally checking identity before resuming it."""
         from .update_contracts import UpdateResult
 
         self._cancel.probe = cancel
         history = None
         kind = None
+        # Guarded Resume begins with Load's refusal semantics.
+        resuming = resume and check_saved is None
         try:
             history = self._observe(vault)
             history, stopped = lifecycle._history(
@@ -651,8 +653,8 @@ class _OwnedPreparation:
             self._start_session()
             self._tip = self._load_tip(checkpoint)
             plan = self._tip.saved.plan
-            if not resume:
-                return UpdateResult(
+            if not resume or check_saved is not None:
+                saved = UpdateResult(
                     kind=plan.facts.format_operation.kind,
                     status="unresolved",
                     code="revalidation_required",
@@ -666,6 +668,14 @@ class _OwnedPreparation:
                     checkpoint=checkpoint.locator,
                     vault=history.admission.vault,
                 )
+                if not resume:
+                    return saved
+                # Apply checks the verified identity before using this same
+                # owner to restore Incoming and revalidate Current.
+                stopped = check_saved(saved)
+                if stopped is not None:
+                    return stopped
+                resuming = True
             if plan.facts.format_operation.kind in (
                 "source_update",
                 "format_transition",
@@ -725,11 +735,11 @@ class _OwnedPreparation:
                         action="review_tracking",
                     )
                 return refused(
-                    "resume_unavailable" if resume else "saved_update_unavailable",
+                    "resume_unavailable" if resuming else "saved_update_unavailable",
                     history,
                 )
             return lifecycle._refused(
-                "resume_unavailable" if resume else "saved_update_unavailable",
+                "resume_unavailable" if resuming else "saved_update_unavailable",
                 history,
             )
         finally:

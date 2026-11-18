@@ -549,29 +549,34 @@ def _apply_context(args, operations):
 
     context = UpdateContext(operations=operations)
     selection = str(uuid4())
-    try:
-        context.load(args.vault, selection_id=selection)
-        loaded = context._last_result
-        if loaded.status != "unresolved" or loaded.code != "revalidation_required":
-            return _update_result(loaded, command="apply")
-        if _requested_identity_changed(args, loaded):
-            return _update_result(
-                loaded,
-                command="apply",
-                status="stale_review",
-                code="review_identity_changed",
-                ready=False,
-                next_actions=("inspect_saved_review",),
+    saved_identity = None
+
+    def check_saved(saved):
+        nonlocal saved_identity
+        if _requested_identity_changed(args, saved):
+            return saved.model_copy(
+                update={
+                    "status": "stale_review",
+                    "code": "review_identity_changed",
+                    "ready": False,
+                    "next_actions": ("inspect_saved_review",),
+                }
             )
-        opened = context.resume(args.vault, selection_id=selection)
+        saved_identity = (saved.operation_id, saved.generation, saved.checkpoint)
+        return None
+
+    try:
+        opened = context.resume(
+            args.vault, selection_id=selection, _check_saved=check_saved
+        )
         current = context._last_result
         if current.preparation is None:
             return _update_result(current, command="apply")
-        if (current.operation_id, current.generation, current.preparation.locator) != (
-            loaded.operation_id,
-            loaded.generation,
-            loaded.checkpoint,
-        ):
+        if (
+            current.operation_id,
+            current.generation,
+            current.preparation.locator,
+        ) != saved_identity:
             return _update_result(
                 current,
                 command="apply",
