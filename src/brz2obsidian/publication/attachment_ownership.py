@@ -7,13 +7,13 @@ from typing import NamedTuple
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     AttachmentRemovalContinuation,
     ExactContent,
     ImportedItemIdentity,
     RetainedAttachmentOwnership,
 )
 from brz2obsidian.obsidian import interpret_attachment_mapping
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_native import available_memory
 

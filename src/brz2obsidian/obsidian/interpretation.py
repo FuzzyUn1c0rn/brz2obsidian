@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 
 from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     MembershipEntry,
     MembershipSet,
     StructureByteEdit,
@@ -23,7 +24,6 @@ from brz2obsidian.obsidian.sections import (
     align_sections,
     interpret_sections,
 )
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 
 class _Unsupported(ValueError):

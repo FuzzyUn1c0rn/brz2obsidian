@@ -15,11 +15,11 @@ from brz2obsidian.content_fingerprints import (
 )
 from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     LinkDocument,
     LinkTargetFacts,
     StructureSpan,
 )
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 
 def _shift(span, edits):

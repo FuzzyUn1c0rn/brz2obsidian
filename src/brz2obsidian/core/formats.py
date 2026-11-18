@@ -1,8 +1,7 @@
 """Pure normalized format/onboarding policy; no parsing or output generation."""
 
 from brz2obsidian.content_values import content_key, content_sha, same_content
-from brz2obsidian.contracts import FormatReview
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
+from brz2obsidian.contracts import REVIEWABLE_OUTPUT_FORMATS, FormatReview
 
 
 # Historical review replay retains its recorded generation. Application admission

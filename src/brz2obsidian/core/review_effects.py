@@ -2,7 +2,7 @@
 
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import same_content
-from brz2obsidian.contracts import LinkTargetFacts
+from brz2obsidian.contracts import QUALIFIED_OUTPUT_FORMATS, LinkTargetFacts
 from brz2obsidian.core.link_meanings import matches_exact_note_path, resolve_occurrence
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.review_appearance import provider_chain_blockers
@@ -18,7 +18,6 @@ from brz2obsidian.core.review_links import (
     known_result_document,
     onboarding_current_context,
 )
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .reversals import (
     content_bytes,

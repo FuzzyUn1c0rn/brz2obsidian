@@ -5,12 +5,12 @@ from hashlib import sha256
 import yaml
 
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     ReviewedProperty,
     ReviewedTextCandidate,
     StructureSpan,
     TextCandidateDocument,
 )
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 from .links import interpret_links
 

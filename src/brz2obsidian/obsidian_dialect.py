@@ -9,12 +9,12 @@ from pathlib import PurePosixPath
 import yaml
 
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     FileRoleFacts,
     MembershipDeclarationFacts,
     ReferenceDeclarationFacts,
     SourceIdentity,
 )
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 IMAGE_EXTENSIONS = frozenset(
     (".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp")

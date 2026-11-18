@@ -4,9 +4,8 @@ from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
-from brz2obsidian.contracts import SourceIdentity
+from brz2obsidian.contracts import REVIEWABLE_OUTPUT_FORMATS, SourceIdentity
 from brz2obsidian.core import prepare_review
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 from .update_facts import automatic_merge_facts, record
 from .update_lifecycle import (

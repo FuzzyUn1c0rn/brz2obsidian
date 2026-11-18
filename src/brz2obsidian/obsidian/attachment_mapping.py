@@ -6,13 +6,13 @@ import unicodedata
 from itertools import pairwise
 
 from brz2obsidian.contracts import (
+    REVIEWABLE_OUTPUT_FORMATS,
     AssetTarget,
     ExactContent,
     OutputIdentity,
     ReconciliationContract,
     SourceIdentity,
 )
-from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 
 def interpret_attachment_mapping(content: ExactContent, *, identity: OutputIdentity):

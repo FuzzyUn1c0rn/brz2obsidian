@@ -6,6 +6,7 @@ from urllib.parse import unquote_to_bytes
 import yaml
 
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     ExactContent,
     LinkAnchor,
     LinkDocument,
@@ -21,7 +22,6 @@ from brz2obsidian.obsidian_dialect import (
     file_roles,
     migration_record_data,
 )
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .base_views import view_anchors
 

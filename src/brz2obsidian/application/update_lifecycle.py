@@ -13,6 +13,7 @@ from uuid import uuid4
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     ExactContent,
     ImportedItemIdentity,
     RunMetadata,
@@ -31,7 +32,6 @@ from brz2obsidian.core import (
 from brz2obsidian.core.formats import obsolete_support_listing
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 from brz2obsidian.publication.vault_native import available_memory, observe_file
 
 from .update_contracts import (

@@ -26,6 +26,7 @@ from brz2obsidian.application.vault_update_contracts import (
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     ContentVersion,
     CurrentContent,
     ExactContent,
@@ -53,7 +54,6 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,

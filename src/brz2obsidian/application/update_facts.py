@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
     AttachmentDestination,
     AttachmentFacts,
     ContentVersion,
@@ -40,7 +41,6 @@ from brz2obsidian.obsidian import (
 )
 from brz2obsidian.obsidian.sections import retained_relationship_survives
 from brz2obsidian.obsidian_dialect import native_properties
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 
 def digest(value):

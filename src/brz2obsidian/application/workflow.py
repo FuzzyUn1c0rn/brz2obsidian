@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from brz2obsidian import __version__
 from brz2obsidian.contracts import (
+    CURRENT_OUTPUT_FORMAT,
     Counts,
     DocumentInspection,
     Inspection,
@@ -23,7 +24,6 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core import analyze, plan
 from brz2obsidian.diagnostics import contextual_issue
-from brz2obsidian.output_formats import CURRENT_OUTPUT_FORMAT
 
 
 @dataclass(frozen=True)

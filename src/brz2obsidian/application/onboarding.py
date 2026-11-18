@@ -4,9 +4,8 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
-from brz2obsidian.contracts import RunMetadata, SourceIdentity
+from brz2obsidian.contracts import QUALIFIED_OUTPUT_FORMATS, RunMetadata, SourceIdentity
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .update_contracts import UpdatePreparation
 from .update_facts import _outputs, output_identity, record

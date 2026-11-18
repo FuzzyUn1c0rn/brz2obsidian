@@ -5,8 +5,11 @@ from hashlib import sha256
 
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_key, content_sha, same_content
-from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
-from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
+from brz2obsidian.contracts import (
+    QUALIFIED_OUTPUT_FORMATS,
+    LinkValidationBaseline,
+    ProposalAssumption,
+)
 
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import (
