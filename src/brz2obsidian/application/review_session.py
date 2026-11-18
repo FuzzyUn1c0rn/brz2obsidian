@@ -1325,6 +1325,27 @@ class ReviewSession:
                 )
             return _load_result("loaded", saved, effects).loaded
 
+    def _verify_retained_backings(self):
+        """Recheck the registrations that support this retained review."""
+        self._check()
+        # Each inspection has its own verification budget. The proof's ledger
+        # stays live and retains its original registrations and charges.
+        ledger = _Ledger(self._ledger.budget)
+        try:
+            with self._content._operation(ledger) as scope:
+                for record in self._closure.view.records.values():
+                    self._content._check_prepared(record, scope)
+                    with closing(
+                        self._content._read_owned(
+                            record.backing, record.reference, ledger, scope
+                        )
+                    ) as chunks:
+                        for _ in chunks:
+                            pass
+        finally:
+            ledger.retire()
+        self._check()
+
     def load_review(self, raw):
         with self._operation():
             self._check()

@@ -2,17 +2,24 @@
 
 import hashlib
 import json
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 import pytest
 
+from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 from brz2obsidian.application.checkpoint_payload_contracts import (
     CheckpointPayloadRequest,
 )
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.vault_contracts import VaultSubject
 from brz2obsidian.core import prepare_review, resolve_review
+from brz2obsidian.publication.vault_history import (
+    CheckpointReviewMemo,
+    _ApplyReviewOwners,
+    _Git,
+)
 from tests.application.test_vault_checkpoint_integrity import _blob, _call, _git, _state
 from tests.application.test_vault_checkpoints import fixture_case
 from tests.reconciliation.test_proposals import request
@@ -63,6 +70,53 @@ def _assert_intact(case):
     )
     assert (case.vault / "Notes/Opening.md").read_bytes() == _CURRENT
     assert (case.source / "Notes/Opening.md").read_bytes() == _INCOMING
+
+
+def test_repeated_apply_review_requires_live_backings(
+    compact_checkpoint, tmp_path, monkeypatch
+):
+    case = compact_checkpoint
+    manifest = CheckpointManifest.model_validate_json(case.manifest)
+    payload = manifest.review_content[0].object_id
+    loose_object = case.vault / ".git" / "objects" / payload[:2] / payload[2:]
+
+    def read(owners, *, include_review=True):
+        return CheckpointReviewMemo().read(
+            _Git(case.vault),
+            manifest,
+            set(),
+            include_review=include_review,
+            commit=case.result.commit,
+            _owners=owners,
+        )
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with _ApplyReviewOwners() as owners:
+        metadata, expected = read(owners)
+        assert expected.saved.plan.approvals[0].result.identity.sha256 == (
+            hashlib.sha256(_CURRENT).hexdigest()
+        )
+        assert id(read(owners)[1]) == id(expected)
+        assert read(owners, include_review=False) == (metadata, None)
+        hidden = loose_object.with_suffix(".test-held")
+        loose_object.rename(hidden)
+        try:
+            assert _git(case.vault, "rev-parse", case.result.ref).decode().strip() == (
+                case.result.commit
+            )
+            with pytest.raises(OSError):
+                read(owners)
+        finally:
+            hidden.rename(loose_object)
+        backing = next(
+            path
+            for path in tmp_path.glob("content-*/*")
+            if path.read_bytes() == _BASELINE
+        )
+        backing.write_bytes(b"x" * len(_BASELINE))
+        with pytest.raises(OSError, match="Registered content integrity failed"):
+            read(owners)
+    assert not tuple(tmp_path.glob("content-*"))
 
 
 @pytest.fixture(scope="module")

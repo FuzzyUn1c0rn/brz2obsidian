@@ -10,6 +10,7 @@ import tempfile
 import zlib
 from contextlib import ExitStack
 from dataclasses import dataclass
+from itertools import batched, chain
 from pathlib import Path
 from typing import NamedTuple
 
@@ -679,6 +680,64 @@ def _restore_review(record, payloads, manifest):
     return restored.loaded
 
 
+class _ApplyReviewOwners(ExitStack):
+    """Keep one parsed local review across fresh inspections in owned Apply."""
+
+    def __init__(self):
+        super().__init__()
+        self._local_review = None
+
+    def read(self, git, manifest, verified, *, commit, include_review):
+        if self._local_review is None:
+            if not include_review or manifest.boundary != "local" or manifest.proposed:
+                return None
+            review, references, session = _read_owned_checkpoint_review(
+                git, manifest, verified, commit=commit, owners=self
+            )
+            metadata = _checkpoint_review_metadata(
+                manifest, review, frozenset(references)
+            )
+            self._local_review = (git.root, commit, manifest, session, metadata, review)
+            self.callback(self._forget_review)
+            return metadata, review
+
+        root, retained_commit, retained_manifest, session, metadata, review = (
+            self._local_review
+        )
+        if (git.root, commit) != (root, retained_commit):
+            return None
+        if manifest != retained_manifest:
+            raise OSError("Repeated checkpoint has a different manifest")
+
+        # Reuse the parse and replay only. The current traversal still owns
+        # admission and checks all role edges, declarations and lineage.
+        references = metadata[3]
+        available = _review_role_objects(manifest, references)
+        envelope = (
+            manifest.review_object,
+            manifest.review_size,
+            manifest.review_sha256,
+            None,
+        )
+        payloads = (
+            (available[sha][0], available[sha][1], sha, None)
+            for sha in sorted(references)
+        )
+        for batch in batched(chain((envelope,), payloads), 32):
+            verify_blobs(
+                [*git.prefix, "cat-file", "--batch"],
+                env=git.env,
+                objects=batch,
+                timeout=120,
+            )
+        session._verify_retained_backings()
+        verified.update(available[sha][0] for sha in references)
+        return metadata, review if include_review else None
+
+    def _forget_review(self):
+        self._local_review = None
+
+
 class CheckpointReviewMemo:
     """Per-traversal review metadata with at most one retained parsed tip.
 
@@ -701,6 +760,12 @@ class CheckpointReviewMemo:
         commit=None,
         _owners=None,
     ):
+        if type(_owners) is _ApplyReviewOwners and commit is not None:
+            retained = _owners.read(
+                git, manifest, verified, commit=commit, include_review=include_review
+            )
+            if retained is not None:
+                return retained
         key = (
             manifest.review_object,
             manifest.boundary == "local" and not manifest.proposed,
@@ -713,7 +778,7 @@ class CheckpointReviewMemo:
                     if _owners is None
                     else _read_owned_checkpoint_review(
                         git, manifest, verified, commit=commit, owners=_owners
-                    )
+                    )[:2]
                 )
                 self._entries[key] = _checkpoint_review_metadata(
                     manifest, review, references
@@ -754,7 +819,7 @@ class CheckpointReviewMemo:
                     if _owners is None
                     else _read_owned_checkpoint_review(
                         git, manifest, verified, commit=commit, owners=_owners
-                    )
+                    )[:2]
                 )
             if self._tip_review is None:
                 self._tip_key, self._tip_review = key, review
@@ -781,7 +846,7 @@ def _checkpoint_review_metadata(manifest, review, references):
 
 def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
     with ExitStack() as owners:
-        review, references = _read_owned_checkpoint_review(
+        review, references, _ = _read_owned_checkpoint_review(
             git, manifest, verified, commit=commit, owners=owners
         )
         return _checkpoint_review_metadata(manifest, review, references)
@@ -790,7 +855,7 @@ def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
 def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
     from brz2obsidian.application.review_session import ReviewSession
 
-    if type(owners) is not ExitStack:
+    if type(owners) not in (ExitStack, _ApplyReviewOwners):
         raise OSError("Lexical retained review ownership required")
     record, references, available = _review_reference_graph(git, manifest)
     session = owners.enter_context(
@@ -808,7 +873,7 @@ def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
         local=manifest.boundary == "local" and not manifest.proposed,
     )
     verified.update(available[sha][0] for sha in references)
-    return review, references
+    return review, references, session
 
 
 def _review_reference_graph(git, manifest):
@@ -833,6 +898,10 @@ def _review_reference_graph(git, manifest):
         record, references = _review_references(raw)
     except RecursionError as error:
         raise OSError("Saved review envelope exceeds its bounded nesting") from error
+    return record, references, _review_role_objects(manifest, references)
+
+
+def _review_role_objects(manifest, references):
     all_roles = (
         *manifest.source,
         *manifest.vault,
@@ -857,7 +926,7 @@ def _review_reference_graph(git, manifest):
         )
     }:
         raise OSError("Saved review references are not closed over the owned graph")
-    return record, references, available
+    return available
 
 
 def read_checkpoint_review(git, manifest, verified):

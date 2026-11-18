@@ -25,6 +25,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultUpdateDetailPage,
 )
 from brz2obsidian.content_values import content_sha, content_size
+from brz2obsidian.contracts import ReviewPlan
 from brz2obsidian.core import review_owned_targets, select_review_effects
 from brz2obsidian.core.reversals import (
     _owned_documents,
@@ -35,6 +36,7 @@ from brz2obsidian.core.reversals import (
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import _safe_relative
 from brz2obsidian.publication.vault_history import (
+    _ApplyReviewOwners,
     _control_objects,
     _Git,
     _inspect_history,
@@ -2971,7 +2973,13 @@ def apply_reviewed_update(
 ):
     """Retain intent before exact selected publication and verify terminal history."""
     try:
-        with ExitStack() as owners:
+        reusable_local_review = (
+            _owned_export is not None
+            and type(review) is ReviewPlan
+            and review.facts.format_operation.kind == "source_update"
+        )
+        owners = _ApplyReviewOwners() if reusable_local_review else ExitStack()
+        with owners:
             return _apply_reviewed_update(
                 vault,
                 source,
