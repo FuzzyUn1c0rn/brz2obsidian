@@ -443,12 +443,28 @@ operation offers background/wait/safe-stop choices; a stop request is not a
 completed rollback.
 
 Tracked BRZ vaults using profile 11/output 8, profile 10/output 7 or recorded
-profile 9/output 6 can review a separate format transition to profile 11/output 9.
-Use the same scoped BRZ source that established the vault. The transition adds
-generated notes for connected empty thoughts and reconciles the active listings.
-It preserves retained obsolete listings and shows them in the review summary.
-Review any unresolved identities, local edits and links before applying. Then
-prepare a changed BRZ as a separate source update.
+profile 9/output 6 can upgrade to profile 11/output 9. In **Review operation**,
+select **Review an output-format transition** and use the same scoped BRZ source
+that established the vault. The review shows newly generated notes and changes
+to the active listings. It preserves retained obsolete listings and shows them
+in the summary. Prepare a changed BRZ as a separate source update after the
+transition.
+
+If the review flags a vault file at a proposed note path, review which thought
+the file belongs to and which text to keep. A matching filename or a blank file
+still needs identity review. When an imported note has moved, edit generated
+navigation to the approved location and preserve authored links to their own
+destinations. When identical links under duplicate headings make the authored
+link ambiguous, give its section a distinct heading and keep the authored
+link unchanged.
+
+On Windows, Git can reach its path limit while creating an operation ref lock
+under a deeply nested vault. If Apply reports `intent_ref_unavailable`, the
+review was retained and no vault files were published. Check Git write access
+and path length, then use **Resume saved review**. It rechecks Current and
+retains decisions whose inputs still match. If the review reports affected
+choices, resolve them before trying Apply again. Use **Inspect history and
+recovery** when the outcome is unknown or recovery is required.
 
 If supported history is missing, review onboarding with trustworthy original
 input when available. Original imported versions and current vault edits remain
@@ -484,6 +500,13 @@ prepare and persist the incoming review:
 .\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --source 'C:\exports\Work-updated.brz' --json
 ```
 
+To prepare and save a format transition from the original scoped BRZ, use
+`--kind format-transition` with that archive.
+
+```powershell
+.\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --kind format-transition --source 'C:\exports\Work-original.brz' --json
+```
+
 Resolve the review in the Windows editor or a shared lifecycle client, then
 choose **Save review**. The CLI has no interactive editor and does not approve pending
 choices or consent. Inspect the saved review to obtain its current identities:
@@ -501,6 +524,10 @@ require further review before application. Inspection pages are bounded;
 `--byte-limit 0` requests metadata only. Counts describe review changes, and
 omission fields identify details absent from the output, including attachment
 alternative outputs.
+
+After `intent_ref_unavailable`, run `review inspect` again to revalidate the retained
+review. Use the newly reported identities to retry only if it reports
+`ready: true`. Use the Windows editor for any remaining choices.
 
 `stale` counts prior accepted choice slots invalidated by that operation that
 still need review. Each affected bulk member and required consent counts
@@ -551,8 +578,8 @@ references; the converter does not download their contents.
 Fresh conversions record output format 9. Both endpoints of every included
 parent/child or jump relationship have a note, even when the source thought
 note is empty. Use **Parents**, **Children**, and **Related** to browse from
-either endpoint. **Uncreated targets** lists isolated empty thoughts when
-applicable.
+either endpoint. Isolated empty thoughts without another reason for a note keep
+their reserved paths and appear in **Uncreated targets** when applicable.
 
 Current BRZ11 and local API5 imports preserve unknown, attribute-free delimiters
 such as `<Example>`, `</Example>` and `<Example/>` as visible text. Each token is
@@ -595,10 +622,9 @@ URLs remain ordinary links. Local API imports also retain ordinary links because
 the API does not expose that player metadata. Playback depends on YouTube and
 the network; the converter does not download videos.
 
-Some empty thoughts deliberately remain links to notes that have not yet been
-created. Clicking one in Obsidian lets you create its note later. Conditional
-`Uncreated targets.md` and `Tag memberships.md` files record otherwise hidden
-items or memberships.
+Following a link to a still-uncreated target in Obsidian can create its note.
+When present, `Tag memberships.md` lists assignments on uncreated targets and
+source tags without assignments.
 
 For certain reviewed missing-note cases, available source images are displayed
 with a notice. **Missing prose, captions and layout are not recovered.** Missing

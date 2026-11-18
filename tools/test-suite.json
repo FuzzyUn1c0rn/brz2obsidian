@@ -41,6 +41,8 @@
     "tests/gui/test_readable_errors_window.py",
     "tests/gui/test_validation_feedback.py",
     "tests/application/test_graph_modules.py",
+    "tests/application/test_navigation_update_facts.py::test_promotion_keeps_the_reserved_identity_of_an_unchanged_authored_exact_link",
+    "tests/application/test_navigation_update_facts.py::test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file",
     "tests/application/test_connected_empty_thoughts_format8.py",
     "tests/application/test_connected_empty_thoughts_format9.py",
     "tests/reconciliation/test_connected_empty_thoughts_history.py",
