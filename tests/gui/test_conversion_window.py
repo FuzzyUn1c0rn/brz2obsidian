@@ -17,7 +17,33 @@ def until(app, condition):
     while not condition():
         app.processEvents()
         if monotonic() > deadline:
-            pytest.fail("GUI condition did not complete")
+            if not condition():
+                pytest.fail("GUI condition did not complete")
+            return
+
+
+@pytest.mark.parametrize("ready", (True, False), ids=("completed", "unmet"))
+def test_until_checks_condition_after_deadline_event_pump(monkeypatch, ready):
+    elapsed = 0
+
+    class EventPump:
+        def processEvents(self):
+            nonlocal elapsed
+            elapsed += 11
+
+    monkeypatch.setitem(globals(), "monotonic", lambda: elapsed)
+
+    def condition():
+        return ready and elapsed > 0
+
+    if ready:
+        until(EventPump(), condition)
+    else:
+        with pytest.raises(
+            pytest.fail.Exception, match="GUI condition did not complete"
+        ):
+            until(EventPump(), condition)
+    assert elapsed == 11
 
 
 def button(window, accessible):
