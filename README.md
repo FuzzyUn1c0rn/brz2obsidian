@@ -444,11 +444,12 @@ completed rollback.
 
 Tracked BRZ vaults using profile 11/output 8, profile 10/output 7 or recorded
 profile 9/output 6 can upgrade to profile 11/output 9. In **Review operation**,
-select **Review an output-format transition** and use the same scoped BRZ source
-that established the vault. The review shows newly generated notes and changes
-to the active listings. It preserves retained obsolete listings and shows them
-in the summary. Prepare a changed BRZ as a separate source update after the
-transition.
+select **Review an output-format transition** and use the scoped BRZ that
+matches the source snapshot the vault currently retains. This may be the
+archive from a later applied source update. The review shows newly generated
+notes and changes to the active listings. It preserves retained obsolete
+listings and shows them in the summary. Prepare a changed BRZ as a separate
+source update after the transition.
 
 If the review flags a vault file at a proposed note path, review which thought
 the file belongs to and which text to keep. A matching filename or a blank file
@@ -500,11 +501,11 @@ prepare and persist the incoming review:
 .\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --source 'C:\exports\Work-updated.brz' --json
 ```
 
-To prepare and save a format transition from the original scoped BRZ, use
-`--kind format-transition` with that archive.
+To prepare and save a format transition, use `--kind format-transition` with
+the scoped BRZ that matches the vault’s current retained source snapshot.
 
 ```powershell
-.\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --kind format-transition --source 'C:\exports\Work-original.brz' --json
+.\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --kind format-transition --source 'C:\exports\Work-retained-baseline.brz' --json
 ```
 
 Resolve the review in the Windows editor or a shared lifecycle client, then
