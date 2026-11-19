@@ -10,7 +10,7 @@ import tempfile
 import zlib
 from contextlib import ExitStack
 from dataclasses import dataclass
-from itertools import batched, chain
+from itertools import batched
 from pathlib import Path
 from typing import NamedTuple
 
@@ -758,6 +758,21 @@ class _ExactBlobSink:
         return len(block)
 
 
+def _verify_review_batches(git, declarations, *, compact):
+    argv = [*git.prefix, "cat-file", "--batch"]
+    if compact:
+        complete = tuple(declarations())
+        try:
+            verify_blobs(argv, env=git.env, objects=complete, timeout=120)
+        except _GitTimeout:
+            # No integrity failure was observed. Rebuild any partial sinks.
+            del complete
+        else:
+            return
+    for batch in batched(declarations(), 32):
+        verify_blobs(argv, env=git.env, objects=batch, timeout=120)
+
+
 class _ApplyReviewOwners(ExitStack):
     """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
@@ -812,14 +827,13 @@ class _ApplyReviewOwners(ExitStack):
         export.check()
         references = frozenset(export.values)
         available = _review_role_objects(manifest, references)
-        envelope = (
-            manifest.review_object,
-            manifest.review_size,
-            manifest.review_sha256,
-            _ExactBlobSink(export.raw),
-        )
-
-        def payloads():
+        def declarations():
+            yield (
+                manifest.review_object,
+                manifest.review_size,
+                manifest.review_sha256,
+                _ExactBlobSink(export.raw),
+            )
             for sha in sorted(references):
                 oid, size = available[sha]
                 if size != export.values[sha].identity.size:
@@ -828,13 +842,7 @@ class _ApplyReviewOwners(ExitStack):
                     export.copy(sha, expected)
                     yield oid, size, sha, _ExactBlobSink(expected.getvalue())
 
-        for batch in batched(chain((envelope,), payloads()), 32):
-            verify_blobs(
-                [*git.prefix, "cat-file", "--batch"],
-                env=git.env,
-                objects=batch,
-                timeout=120,
-            )
+        _verify_review_batches(git, declarations, compact=32 <= len(references) < 128)
         export.check()
         if self._prepared_metadata is None:
             review = _load_result("loaded", export.saved, export.effects).loaded
@@ -953,17 +961,19 @@ class _ApplyReviewOwners(ExitStack):
             manifest.review_sha256,
             None,
         )
-        payloads = (
-            (available[sha][0], available[sha][1], sha, None)
-            for sha in sorted(references)
+        def declarations():
+            yield envelope
+            for sha in sorted(references):
+                oid, size = available[sha]
+                yield oid, size, sha, None
+
+        compact = (
+            self._resume_cancel is not None
+            and 32 <= len(references) < 128
+            and manifest.review_size + sum(available[sha][1] for sha in references)
+            <= 4 * 1024 * 1024
         )
-        for batch in batched(chain((envelope,), payloads), 32):
-            verify_blobs(
-                [*git.prefix, "cat-file", "--batch"],
-                env=git.env,
-                objects=batch,
-                timeout=120,
-            )
+        _verify_review_batches(git, declarations, compact=compact)
         session._verify_retained_backings(records)
         verified.update(available[sha][0] for sha in references)
         return metadata, review if include_review else None
