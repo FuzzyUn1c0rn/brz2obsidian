@@ -769,6 +769,9 @@ class _ApplyReviewOwners(ExitStack):
         self._borrowed_session = None
         self._prepared_export = None
         self._prepared_metadata = None
+        self._checkpoint_graphs = (
+            {} if local_owner is None else local_owner._checkpoint_graphs
+        )
 
     def _retain_prepared_export(self, git, commit, manifest, export):
         if (
@@ -1434,6 +1437,94 @@ class _MetadataHistory:
     status: str = "intact"
 
 
+def _checkpoint_graph(git, current, controls, owners):
+    graphs = owners._checkpoint_graphs if type(owners) is _ApplyReviewOwners else None
+    key = git.root, current
+    previous = graphs.get(key) if graphs is not None else None
+    if previous is not None:
+        requested, original, decoded = previous
+        fresh = _control_objects(git, requested, controls)
+        if fresh != original:
+            raise OSError("Owned checkpoint control bytes changed")
+        return decoded
+
+    commit_raw = _control_objects(git, {current: "commit"}, controls)[current]
+    headers, separator, _ = commit_raw.partition(b"\n\n")
+    trees = [
+        line[5:].decode("ascii")
+        for line in headers.splitlines()
+        if line.startswith(b"tree ")
+    ]
+    parents = [
+        line[7:].decode("ascii")
+        for line in headers.splitlines()
+        if line.startswith(b"parent ")
+    ]
+    if (
+        not separator
+        or len(trees) != 1
+        or any(
+            len(oid) != 40 or set(oid) - set("0123456789abcdef")
+            for oid in (*trees, *parents)
+        )
+    ):
+        raise OSError("Invalid owned commit edges")
+    raw = git.call("ls-tree", "-r", "-t", "-z", current)
+    entries = {}
+    for row in raw.split(b"\0"):
+        if not row:
+            continue
+        data, path = row.split(b"\t", 1)
+        mode, kind, oid = data.decode("ascii").split()
+        path = path.decode("utf-8")
+        if path in entries or not _safe_relative(path):
+            raise OSError("Unsafe or duplicate owned graph path")
+        if kind not in ("blob", "tree"):
+            raise OSError("Unknown owned graph object kind")
+        entries[path] = mode, kind, oid
+    root_names = {path for path in entries if "/" not in path}
+    required_names = {
+        "association.json",
+        "manifest.json",
+        "source",
+        "vault",
+        "preimage",
+        "proposed",
+    }
+    if root_names not in (
+        required_names,
+        required_names | {"review.json"},
+        required_names | {"review.json", "review-content"},
+    ):
+        raise OSError("Required checkpoint graph roles are missing or unknown")
+    requested = {current: "commit", trees[0]: "tree"}
+    requested.update(
+        {oid: "tree" for _, kind, oid in entries.values() if kind == "tree"}
+    )
+    for path in ("association.json", "manifest.json"):
+        mode, kind, oid = entries[path]
+        if (mode, kind) != ("100644", "blob"):
+            raise OSError("Invalid checkpoint metadata edge")
+        requested[oid] = "blob"
+    objects = _control_objects(git, requested, controls)
+    manifest = CheckpointManifest.model_validate_json(
+        objects[entries["manifest.json"][2]]
+    )
+    actual_association = VaultAssociation.model_validate_json(
+        objects[entries["association.json"][2]]
+    )
+
+    decoded = parents, entries, manifest, actual_association
+    if (
+        graphs is not None
+        and len(graphs) < 4
+        and len(raw) <= 128 * 1024
+        and sum(len(value) for value in objects.values()) <= 256 * 1024
+    ):
+        graphs[key] = requested, objects, decoded
+    return decoded
+
+
 def _read(
     root,
     git,
@@ -1506,70 +1597,8 @@ def _read(
         if current in visited:
             raise OSError("Cyclic owned checkpoint history")
         visited.add(current)
-        commit_raw = _control_objects(git, {current: "commit"}, controls)[current]
-        headers, separator, _ = commit_raw.partition(b"\n\n")
-        trees = [
-            line[5:].decode("ascii")
-            for line in headers.splitlines()
-            if line.startswith(b"tree ")
-        ]
-        parents = [
-            line[7:].decode("ascii")
-            for line in headers.splitlines()
-            if line.startswith(b"parent ")
-        ]
-        if (
-            not separator
-            or len(trees) != 1
-            or any(
-                len(oid) != 40 or set(oid) - set("0123456789abcdef")
-                for oid in (*trees, *parents)
-            )
-        ):
-            raise OSError("Invalid owned commit edges")
-        raw = git.call("ls-tree", "-r", "-t", "-z", current)
-        entries = {}
-        for row in raw.split(b"\0"):
-            if not row:
-                continue
-            data, path = row.split(b"\t", 1)
-            mode, kind, oid = data.decode("ascii").split()
-            path = path.decode("utf-8")
-            if path in entries or not _safe_relative(path):
-                raise OSError("Unsafe or duplicate owned graph path")
-            if kind not in ("blob", "tree"):
-                raise OSError("Unknown owned graph object kind")
-            entries[path] = mode, kind, oid
-        root_names = {path for path in entries if "/" not in path}
-        required_names = {
-            "association.json",
-            "manifest.json",
-            "source",
-            "vault",
-            "preimage",
-            "proposed",
-        }
-        if root_names not in (
-            required_names,
-            required_names | {"review.json"},
-            required_names | {"review.json", "review-content"},
-        ):
-            raise OSError("Required checkpoint graph roles are missing or unknown")
-        requested = {trees[0]: "tree"}
-        requested.update(
-            {oid: "tree" for _, kind, oid in entries.values() if kind == "tree"}
-        )
-        for path in ("association.json", "manifest.json"):
-            mode, kind, oid = entries[path]
-            if (mode, kind) != ("100644", "blob"):
-                raise OSError("Invalid checkpoint metadata edge")
-            requested[oid] = "blob"
-        objects = _control_objects(git, requested, controls)
-        manifest = CheckpointManifest.model_validate_json(
-            objects[entries["manifest.json"][2]]
-        )
-        actual_association = VaultAssociation.model_validate_json(
-            objects[entries["association.json"][2]]
+        parents, entries, manifest, actual_association = _checkpoint_graph(
+            git, current, controls, _owners
         )
         if (
             actual_association != association
