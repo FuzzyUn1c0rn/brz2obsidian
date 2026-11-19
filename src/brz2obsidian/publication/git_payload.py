@@ -17,7 +17,6 @@ from brz2obsidian.publication.git_read import (
 )
 
 _CHUNK_SIZE = 1024 * 1024
-_HEADER_LIMIT = 128
 _HEX = frozenset("0123456789abcdefABCDEF")
 _TIMEOUT = "Git payload exceeded its time budget"
 
@@ -106,12 +105,19 @@ def verify_blobs(argv, *, env, objects, timeout=30):
             for oid, size, digest, sink in objects:
                 if failed.is_set():
                     return
-                header = stream.readline(_HEADER_LIMIT + 1)
-                control(len(header))
                 expected = f"{oid.lower()} blob {size}\n".encode("ascii")
-                if header != expected:
-                    observed_integrity_failure = not expected.startswith(header)
-                    raise OSError("Git payload has an invalid batch header")
+                offset = 0
+                while offset < len(expected):
+                    # A buffered readline can lose a partial line when a
+                    # deadline cancels the pipe read. Check each prefix first.
+                    block = stream.read1(len(expected) - offset)
+                    control(len(block))
+                    if not block:
+                        raise OSError("Git payload has a truncated batch header")
+                    if not expected.startswith(block, offset):
+                        observed_integrity_failure = True
+                        raise OSError("Git payload has an invalid batch header")
+                    offset += len(block)
                 sha1 = hashlib.sha1(usedforsecurity=False)
                 sha1.update(f"blob {size}\0".encode("ascii"))
                 sha256 = hashlib.sha256()
