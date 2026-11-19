@@ -367,6 +367,7 @@ class ReviewSession:
         self._record = None
         self._initial_review_entry = None
         self._apply_proved_plan = None
+        self._retained_resume_proof = None
         self._batch_current = False
         self._retain_initial_review = False
         self._closed = False
@@ -615,6 +616,7 @@ class ReviewSession:
     def _invalidate(self):
         self._initial_review_entry = None
         self._apply_proved_plan = None
+        self._retained_resume_proof = None
         self._operation_key = self._outstanding = self._selected = None
         self._content._clear_retained_semantic()
 
@@ -1298,6 +1300,7 @@ class ReviewSession:
         from brz2obsidian.review_codec import _RetainedDecoder
 
         with self._operation():
+            self._retained_resume_proof = None
             self._initial_review_entry = None
             self._record = uuid4().hex
             registrations = self._content._prepare_retained(
@@ -1349,7 +1352,10 @@ class ReviewSession:
                         "plan": canonical,
                     },
                 )
-            return _load_result("loaded", saved, effects).loaded
+            loaded = _load_result("loaded", saved, effects).loaded
+            if self._batch_current:
+                self._retained_resume_proof = (loaded, canonical)
+            return loaded
 
     def _verify_retained_backings(self):
         """Recheck the registrations that support this retained review."""
@@ -1493,6 +1499,7 @@ class ReviewSession:
             self._content._discard_fresh_scope()
 
     def _resume_review(self, loaded, facts, *, preflight, admission):
+        proof, self._retained_resume_proof = self._retained_resume_proof, None
         with self._operation():
             self._check()
             self._selected = None
@@ -1509,9 +1516,13 @@ class ReviewSession:
                     purpose=purpose,
                     ledger=self._ledger,
                 )
-                loaded = self._ledger.construct(LoadedReview, loaded)
-                self._ledger.admit_metadata(loaded)
-                loaded = self._admit_values(loaded, ("loaded",))
+                canonical = None
+                if proof is not None and loaded is proof[0]:
+                    canonical = self._admit_values(proof[1])
+                else:
+                    loaded = self._ledger.construct(LoadedReview, loaded)
+                    self._ledger.admit_metadata(loaded)
+                    loaded = self._admit_values(loaded, ("loaded",))
                 self._initial_review_entry = None
                 self._record = uuid4().hex
                 facts = self._ledger.construct(ReconciliationInput, facts)
@@ -1521,7 +1532,8 @@ class ReviewSession:
                 self._physical.clear()
                 self._admit_current(physical, facts)
                 self._coadmit()
-                canonical = self._replay(loaded.saved.plan)
+                if canonical is None:
+                    canonical = self._replay(loaded.saved.plan)
                 if canonical is None:
                     return _resume_result("refused", "invalid_review", loaded)
                 effects = self._drive(SelectedEffectsWork(canonical))
