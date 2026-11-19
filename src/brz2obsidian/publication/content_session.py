@@ -24,6 +24,7 @@ from brz2obsidian.contracts import ImmutableContentReference
 from brz2obsidian.publication.vault_native import (
     _check_owned_directory,
     _observed_chunks,
+    available_memory,
     observe_file,
     verify_directory,
 )
@@ -257,6 +258,7 @@ class ContentSession:
         self._prepared_digests = {}
         self._retained_semantic = {}
         self._spooled_bytes = 0
+        self._spool_acquisitions = False
 
     @classmethod
     def _retained_review(
@@ -436,6 +438,21 @@ class ContentSession:
         self._files[path] = (info.st_dev, info.st_ino)
         return path, stream
 
+    def _seal_small_backing(self, path, reference, ledger, scope):
+        if (
+            not self._spool_acquisitions
+            or reference.size > 65536
+            or self._spooled_bytes + reference.size > 2 * 1024 * 1024
+            or available_memory() < 64 * 1024 * 1024 + 2 * reference.size
+        ):
+            return path
+        with closing(self._read_owned(path, reference, ledger, scope)) as chunks:
+            data = b"".join(chunks)
+        scope.check(self)
+        self._unlink_owned_file(path)
+        self._spooled_bytes += len(data)
+        return _MemoryBacking(data)
+
     def _import_physical(self, root, row, ledger, scope):
         """Register an actual rendered file; a declaration alone is insufficient."""
         self._require_private_scope(scope, ledger)
@@ -471,15 +488,19 @@ class ContentSession:
             sha256=sha,
             size=info.st_size,
         )
+        backing = self._seal_small_backing(backing, reference, ledger, scope)
         self._values[reference.content_id] = (
             reference,
             backing,
             mode,
             ("rendered_source", str(root), anchor, row.path, identity, row),
         )
-        with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
-            for _ in chunks:
-                pass
+        if type(backing) is _MemoryBacking:
+            self._prepare_registered(reference, ledger, scope)
+        else:
+            with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
+                for _ in chunks:
+                    pass
         return reference
 
     def _detach(self):
@@ -954,6 +975,8 @@ class ContentSession:
             backing.unlink()
             del self._files[backing]
             backing = previous_backing
+        elif ledger is not None:
+            backing = self._seal_small_backing(backing, row, ledger, scope)
         reference = ImmutableContentReference(
             content_id=self._namespace + ":" + uuid4().hex,
             sha256=row.sha256,
@@ -968,6 +991,8 @@ class ContentSession:
             origin,
         )
         self._digests[row.sha256] = (reference, backing)
+        if type(backing) is _MemoryBacking:
+            self._prepare_registered(reference, ledger, scope)
         return reference
 
     def _compare_backings(self, backing, previous_ref, previous_backing, transfer):
@@ -1213,6 +1238,10 @@ class _DecodedImport:
                         if a != b:
                             raise OSError("Prepared digest has unequal exact bytes")
                 backing = previous.backing
+            else:
+                backing = self.session._seal_small_backing(
+                    backing, reference, self.ledger, self.scope
+                )
             record = _PreparedRegistration(
                 self.session, reference, backing, "100644", origin
             )

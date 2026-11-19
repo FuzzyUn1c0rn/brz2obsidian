@@ -642,6 +642,7 @@ class _OwnedPreparation:
                 _cancel=self._cancel,
             )
             self._session._batch_current = self._apply_source_update
+            self._session._content._spool_acquisitions = self._apply_source_update
 
     def restore(self, vault, *, resume=False, cancel=None, check_saved=None):
         """Read saved history, optionally checking identity before resuming it."""
