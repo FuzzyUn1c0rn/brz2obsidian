@@ -780,7 +780,12 @@ class ContentSession:
                 [*git.prefix, "cat-file", "--batch"],
                 env=git.env,
                 objects=tuple(
-                    (row.object_id, row.size, row.sha256, transfer.sink(output, row.size))
+                    (
+                        row.object_id,
+                        row.size,
+                        row.sha256,
+                        transfer.sink(output, row.size),
+                    )
                     for row, _, output in acquired
                 ),
                 timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
@@ -791,7 +796,12 @@ class ContentSession:
                 os.fsync(output.fileno())
         references = {
             row.path: self._register_acquired(
-                row, backing, ("source", row.path, locator, row), transfer, ledger, scope
+                row,
+                backing,
+                ("source", row.path, locator, row),
+                transfer,
+                ledger,
+                scope,
             )
             for row, backing, _ in acquired
         }

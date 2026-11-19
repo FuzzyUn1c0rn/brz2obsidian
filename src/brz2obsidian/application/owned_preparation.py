@@ -1468,7 +1468,11 @@ class _OwnedPreparation:
                         != preparation.source_binding
                     ):
                         raise OSError("source_payload_changed")
-                    return scoped, resume[0].model_copy(update={"code": "current"}), None
+                    return (
+                        scoped,
+                        resume[0].model_copy(update={"code": "current"}),
+                        None,
+                    )
         with self._session._operation():
             plan = self._session._admit_values(preparation.review)
             self._session._coadmit()
