@@ -683,11 +683,12 @@ def _restore_review(record, payloads, manifest):
 class _ApplyReviewOwners(ExitStack):
     """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
-    def __init__(self, *, local_owner=None, retain_prepared=False):
+    def __init__(self, *, local_owner=None, retain_prepared=False, memory_spool=False):
         super().__init__()
         self._proofs = {}
         self._local_owner = local_owner
         self._retain_prepared = retain_prepared
+        self._memory_spool = memory_spool
 
     def read(self, git, manifest, verified, *, commit, include_review):
         cache = self if self._local_owner is None else self._local_owner
@@ -716,7 +717,12 @@ class _ApplyReviewOwners(ExitStack):
                 return None
             with ExitStack() as trial:
                 review, references, session = _read_owned_checkpoint_review(
-                    git, manifest, verified, commit=commit, owners=trial
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                    owners=trial,
+                    memory_spool=self._memory_spool,
                 )
                 metadata = _checkpoint_review_metadata(
                     manifest, review, frozenset(references)
@@ -882,7 +888,9 @@ def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
         return _checkpoint_review_metadata(manifest, review, references)
 
 
-def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
+def _read_owned_checkpoint_review(
+    git, manifest, verified, *, commit, owners, memory_spool=False
+):
     from brz2obsidian.application.review_session import ReviewSession
 
     if type(owners) not in (ExitStack, _ApplyReviewOwners):
@@ -894,6 +902,7 @@ def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
             manifest,
             commit,
             capacity=available_memory(),
+            memory_spool=memory_spool,
         )
     )
     review = session._load_retained(

@@ -550,7 +550,7 @@ class ReviewSession:
         return _load_result("loaded", saved, effects).loaded
 
     @classmethod
-    def _retained_review(cls, git, manifest, commit, *, capacity):
+    def _retained_review(cls, git, manifest, commit, *, capacity, memory_spool=False):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
             # M counts cumulative model work, not measured live heap. Give it
@@ -576,6 +576,7 @@ class ReviewSession:
             commit,
             capacity=capacity,
             envelope_size=manifest.review_size,
+            memory_spool=memory_spool,
         )
         result._initialize_state()
         result._retain_initial_review = True

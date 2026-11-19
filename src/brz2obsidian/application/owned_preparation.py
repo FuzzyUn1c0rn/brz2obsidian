@@ -60,6 +60,7 @@ class _OwnedPreparation:
         self._history_origin_commit = None
         self._history_values = {}
         self._apply_review_owners = None
+        self._apply_source_update = False
         self._readonly_initial = self._readonly_initial_seed = None
 
     def _stage_readonly_initial(self, result):
@@ -164,6 +165,7 @@ class _OwnedPreparation:
             commit,
             capacity=lifecycle.available_memory(),
             envelope_size=manifest.review_size,
+            memory_spool=self._apply_source_update,
         )
         self._session._content._observation = retained
         try:
@@ -631,7 +633,7 @@ class _OwnedPreparation:
         # Guarded Resume begins with Load's refusal semantics.
         resuming = resume and check_saved is None
         if check_saved is not None:
-            self._apply_review_owners = _ApplyReviewOwners()
+            self._apply_review_owners = _ApplyReviewOwners(memory_spool=True)
         try:
             history = self._observe(vault)
             history, stopped = lifecycle._history(
@@ -659,6 +661,9 @@ class _OwnedPreparation:
             ):
                 return None
             kind = checkpoint.metadata[10]
+            self._apply_source_update = (
+                check_saved is not None and kind == "source_update"
+            )
             self._start_session()
             self._tip = self._load_tip(checkpoint)
             plan = self._tip.saved.plan

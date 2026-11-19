@@ -72,8 +72,9 @@ def _assert_intact(case):
     assert (case.source / "Notes/Opening.md").read_bytes() == _INCOMING
 
 
+@pytest.mark.parametrize("memory_spool", [False, True], ids=["disk", "memory"])
 def test_repeated_apply_review_requires_live_backings(
-    compact_checkpoint, tmp_path, monkeypatch
+    compact_checkpoint, tmp_path, monkeypatch, memory_spool
 ):
     case = compact_checkpoint
     manifest = CheckpointManifest.model_validate_json(case.manifest)
@@ -91,7 +92,7 @@ def test_repeated_apply_review_requires_live_backings(
         )
 
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    with _ApplyReviewOwners() as owners:
+    with _ApplyReviewOwners(memory_spool=memory_spool) as owners:
         metadata, expected = read(owners)
         assert expected.saved.plan.approvals[0].result.identity.sha256 == (
             hashlib.sha256(_CURRENT).hexdigest()
@@ -108,14 +109,19 @@ def test_repeated_apply_review_requires_live_backings(
                 read(owners)
         finally:
             hidden.rename(loose_object)
-        backing = next(
+        backings = [
             path
             for path in tmp_path.glob("content-*/*")
             if path.read_bytes() == _BASELINE
-        )
-        backing.write_bytes(b"x" * len(_BASELINE))
-        with pytest.raises(OSError, match="Registered content integrity failed"):
-            read(owners)
+        ]
+        if memory_spool:
+            assert not backings
+            assert id(read(owners)[1]) == id(expected)
+        else:
+            (backing,) = backings
+            backing.write_bytes(b"x" * len(_BASELINE))
+            with pytest.raises(OSError, match="Registered content integrity failed"):
+                read(owners)
     assert not tuple(tmp_path.glob("content-*"))
 
 
