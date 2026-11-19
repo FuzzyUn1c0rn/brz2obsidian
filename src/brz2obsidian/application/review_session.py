@@ -51,7 +51,7 @@ from brz2obsidian.core.refresh import RefreshWork
 from brz2obsidian.core.resolution import ActionWork, PlanWork
 from brz2obsidian.core.resume import _load_result, _resume_result
 from brz2obsidian.core.selected_effects import SelectedEffectsWork, _refused
-from brz2obsidian.publication.content_session import ContentSession
+from brz2obsidian.publication.content_session import ContentSession, _MemoryBacking
 from brz2obsidian.publication.legacy_content import ContentComparison, LegacyContentSlot
 from brz2obsidian.review_codec import LegacyDecoder
 
@@ -298,6 +298,7 @@ class _OwnedReviewExport:
 
     effects = None
     _apply_review_owners = None
+    _sealed_closure = None
 
     def check(self, plan=None):
         if self.session._publication_export is not self or self.session._closed:
@@ -332,6 +333,13 @@ class _OwnedReviewExport:
         self.check()
         if self.session._selected is not self.effects:
             raise OSError("Current canonical selected effects required")
+        if (
+            self._sealed_closure is not None
+            and self._sealed_closure is self.session._closure
+            and any(row is effect for row in self.effects.files)
+        ):
+            self._stage_sealed(effect, output)
+            return
         staged = self.session.stage_effect(effect)
         with (
             self.session._operation(),
@@ -347,6 +355,36 @@ class _OwnedReviewExport:
             for block in chunks:
                 if output.write(block) != len(block):
                     raise OSError("Incomplete selected stage copy")
+
+    def _stage_sealed(self, effect, output):
+        session = self.session
+        with session._operation():
+            # This exact closure was co-admitted before export. Its backing
+            # bytes are immutable; registration and scope are still live.
+            for record in self._sealed_closure.view.records.values():
+                session._content._check_prepared(record, session._scope)
+            content = effect.content
+            binding = session._binding(
+                content.occurrence,
+                content.identity,
+                content.reference,
+                published=True,
+                inline=content.data if type(content) is InlineExactContent else None,
+            )
+            if type(binding.registration.backing) is not _MemoryBacking:
+                raise OSError("Selected effect is outside the sealed export closure")
+            with closing(
+                session._content._read_owned(
+                    binding.registration.backing,
+                    binding.registration.reference,
+                    session._ledger,
+                    session._scope,
+                )
+            ) as chunks:
+                for block in chunks:
+                    if output.write(block) != len(block):
+                        raise OSError("Incomplete selected stage copy")
+            session._check()
 
 
 class ReviewSession:
@@ -562,6 +600,11 @@ class ReviewSession:
                 if effects.status != "selected":
                     raise OSError("Whole current owned review required")
                 export.effects = self._selected = effects
+                if admitted_for_apply and all(
+                    type(record.backing) is _MemoryBacking
+                    for record in self._closure.view.records.values()
+                ):
+                    export._sealed_closure = self._closure
             self._publication_export = export
         return export
 
