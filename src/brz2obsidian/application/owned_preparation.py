@@ -796,6 +796,7 @@ class _OwnedPreparation:
 
     def _resume_update(self, history, plan):
         checkpoint = history.checkpoint
+        exact_retained_plan = self._apply_source_update and plan is self._tip.saved.plan
         with self._session._operation():
             plan = self._session._admit_values(plan)
             baseline = self._source_payload(checkpoint)
@@ -849,10 +850,16 @@ class _OwnedPreparation:
                 )
             facts = self._session._admit_values(facts)
             self._session._coadmit()
-            canonical = self._session._replay(plan)
-            if canonical is None:
-                raise OSError("invalid_review")
-            effects = self._session._drive(SelectedEffectsWork(canonical))
+            if exact_retained_plan:
+                # These historical effects only identify the queries to make.
+                # resume_review still replays against the fresh scoped admission.
+                canonical = plan
+                effects = self._tip.historical_effects
+            else:
+                canonical = self._session._replay(plan)
+                if canonical is None:
+                    raise OSError("invalid_review")
+                effects = self._session._drive(SelectedEffectsWork(canonical))
             scoped = self.observed.inspect(
                 subjects=lifecycle._subjects(facts, canonical, effects=effects),
                 new_operation="format_transition" if maintenance else None,
