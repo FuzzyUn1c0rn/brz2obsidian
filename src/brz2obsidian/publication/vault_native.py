@@ -186,7 +186,13 @@ def verify_directory(path, *, writable=False):
 
 
 def _observed_chunks(
-    root, path, *, writable=False, expected_size=None, read_chunk_limit=1024 * 1024
+    root,
+    path,
+    *,
+    writable=False,
+    expected_size=None,
+    read_chunk_limit=1024 * 1024,
+    owned_identity=None,
 ):
     """Internal traversal; its return value exists only after verified EOF."""
     if (
@@ -215,14 +221,21 @@ def _observed_chunks(
 
     root, path = Path(root).absolute(), Path(path).absolute()
     path.relative_to(root)
+    if owned_identity is not None and path.parent != root:
+        raise OSError("Owned backing is outside its scratch directory")
     ancestors = []
     parent = path.parent
     while True:
-        ancestors.append((parent, verify_directory(parent)))
+        identity = verify_directory(parent)
+        ancestors.append((parent, identity))
         if parent == root:
+            if owned_identity is not None and identity != owned_identity[0]:
+                raise OSError("Content scratch identity changed")
             break
         parent = parent.parent
     before = path.lstat()
+    if owned_identity is not None and (before.st_dev, before.st_ino) != owned_identity[1]:
+        raise OSError("Owned backing identity changed")
     values = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns)
 
     def check_opened(opened):

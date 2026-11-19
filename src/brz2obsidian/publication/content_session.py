@@ -528,11 +528,13 @@ class ContentSession:
         ledger.raw_pass(reference.size)
 
         def chunks():
-            scope.check(self)
+            if type(scope) is _PrivateOperation:
+                scope._check_live(self)
+            else:
+                scope.check(self)
             ledger.check()
             expected = self._files.get(backing)
-            info = backing.lstat()
-            if (info.st_dev, info.st_ino) != expected:
+            if expected is None:
                 raise OSError("Owned backing identity changed")
             with closing(
                 _observed_chunks(
@@ -540,6 +542,7 @@ class ContentSession:
                     backing,
                     expected_size=reference.size,
                     read_chunk_limit=65536,
+                    owned_identity=(self._anchor, expected),
                 )
             ) as observed:
                 while True:
