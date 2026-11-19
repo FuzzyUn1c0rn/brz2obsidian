@@ -234,7 +234,10 @@ def _observed_chunks(
             break
         parent = parent.parent
     before = path.lstat()
-    if owned_identity is not None and (before.st_dev, before.st_ino) != owned_identity[1]:
+    if (
+        owned_identity is not None
+        and (before.st_dev, before.st_ino) != owned_identity[1]
+    ):
         raise OSError("Owned backing identity changed")
     values = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns)
 

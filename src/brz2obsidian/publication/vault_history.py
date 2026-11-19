@@ -681,24 +681,41 @@ def _restore_review(record, payloads, manifest):
 
 
 class _ApplyReviewOwners(ExitStack):
-    """Keep one parsed local review across fresh inspections in owned Apply."""
+    """Keep one parsed local review across otherwise independent inspections."""
 
-    def __init__(self):
+    def __init__(self, *, local_owner=None):
         super().__init__()
         self._local_review = None
+        self._local_owner = local_owner
 
     def read(self, git, manifest, verified, *, commit, include_review):
+        cache = self if self._local_owner is None else self._local_owner
+        return cache._read_local(git, manifest, verified, commit, include_review, self)
+
+    def _read_local(self, git, manifest, verified, commit, include_review, phase):
         if self._local_review is None:
             if not include_review or manifest.boundary != "local" or manifest.proposed:
                 return None
-            review, references, session = _read_owned_checkpoint_review(
-                git, manifest, verified, commit=commit, owners=self
-            )
-            metadata = _checkpoint_review_metadata(
-                manifest, review, frozenset(references)
-            )
-            self._local_review = (git.root, commit, manifest, session, metadata, review)
-            self.callback(self._forget_review)
+            with ExitStack() as trial:
+                review, references, session = _read_owned_checkpoint_review(
+                    git, manifest, verified, commit=commit, owners=trial
+                )
+                metadata = _checkpoint_review_metadata(
+                    manifest, review, frozenset(references)
+                )
+                if metadata[10] == "source_update":
+                    self.enter_context(trial.pop_all())
+                    self._local_review = (
+                        git.root,
+                        commit,
+                        manifest,
+                        session,
+                        metadata,
+                        review,
+                    )
+                    self.callback(self._forget_review)
+                else:
+                    phase.enter_context(trial.pop_all())
             return metadata, review
 
         root, retained_commit, retained_manifest, session, metadata, review = (
@@ -1901,7 +1918,13 @@ class _UpdateRead:
     """Single-use lexical reader; never accepted by capture or apply."""
 
     def __init__(
-        self, vault, *, git_executable=None, _metadata_only=False, _recovery=False
+        self,
+        vault,
+        *,
+        git_executable=None,
+        _metadata_only=False,
+        _recovery=False,
+        _apply_review_owners=None,
     ):
         self._root = Path(vault).absolute()
         self._executable = git_executable
@@ -1917,7 +1940,11 @@ class _UpdateRead:
         self._metadata_only = _metadata_only
         self._recovery = _recovery
         self._recovery_status = None
-        self._owners = ExitStack()
+        self._owners = (
+            _ApplyReviewOwners(local_owner=_apply_review_owners)
+            if _apply_review_owners is not None
+            else ExitStack()
+        )
 
     def __enter__(self):
         from .vault_admission import (

@@ -2978,7 +2978,16 @@ def apply_reviewed_update(
             and type(review) is ReviewPlan
             and review.facts.format_operation.kind == "source_update"
         )
-        owners = _ApplyReviewOwners() if reusable_local_review else ExitStack()
+        borrowed = (
+            getattr(_owned_export, "_apply_review_owners", None)
+            if reusable_local_review
+            else None
+        )
+        owners = (
+            _ApplyReviewOwners(local_owner=borrowed)
+            if reusable_local_review
+            else ExitStack()
+        )
         with owners:
             return _apply_reviewed_update(
                 vault,

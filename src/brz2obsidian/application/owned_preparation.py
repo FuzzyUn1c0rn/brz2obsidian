@@ -22,6 +22,7 @@ from brz2obsidian.core.resolution import (
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
 from brz2obsidian.publication.vault_history import (
+    _ApplyReviewOwners,
     _binding_signature,
     _checkpoint_review_metadata,
     _Git,
@@ -58,6 +59,7 @@ class _OwnedPreparation:
         self._history_observation = self._history_origin = None
         self._history_origin_commit = None
         self._history_values = {}
+        self._apply_review_owners = None
         self._readonly_initial = self._readonly_initial_seed = None
 
     def _stage_readonly_initial(self, result):
@@ -118,7 +120,12 @@ class _OwnedPreparation:
         return False
 
     def _observe(self, vault, expected=None, *, expected_absent=False, _recovery=False):
-        fresh = _UpdateRead(vault, _metadata_only=True, _recovery=_recovery)
+        fresh = _UpdateRead(
+            vault,
+            _metadata_only=True,
+            _recovery=_recovery,
+            _apply_review_owners=self._apply_review_owners if not _recovery else None,
+        )
         fresh.__enter__()
         try:
             if expected_absent and fresh.history.status != "absent":
@@ -623,6 +630,8 @@ class _OwnedPreparation:
         kind = None
         # Guarded Resume begins with Load's refusal semantics.
         resuming = resume and check_saved is None
+        if check_saved is not None:
+            self._apply_review_owners = _ApplyReviewOwners()
         try:
             history = self._observe(vault)
             history, stopped = lifecycle._history(
@@ -1070,6 +1079,7 @@ class _OwnedPreparation:
             raise OSError("Whole current owned review required")
         self._session._content._detach()
         self.observed = None
+        export._apply_review_owners = self._apply_review_owners
         return export
 
     def choices(self, plan):
@@ -1890,12 +1900,16 @@ class _OwnedPreparation:
             return
         self._closed = True
         try:
-            if self._session is not None:
-                self._session.close()
+            try:
+                if self._session is not None:
+                    self._session.close()
+            finally:
+                if self.observed is not None:
+                    self.observed.__exit__()
+                    self.observed = None
         finally:
-            if self.observed is not None:
-                self.observed.__exit__()
-                self.observed = None
+            if self._apply_review_owners is not None:
+                self._apply_review_owners.close()
         self._remove_owned(self._directory, self._anchor)
 
     def _remove_owned(self, directory, anchor):

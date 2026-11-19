@@ -297,6 +297,7 @@ class _OwnedReviewExport:
     """One owner-minted canonical export; declarations cannot mint this grant."""
 
     effects = None
+    _apply_review_owners = None
 
     def check(self, plan=None):
         if self.session._publication_export is not self or self.session._closed:
