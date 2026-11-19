@@ -352,18 +352,52 @@ class _Git:
                 children.setdefault(head, []).append((tail, mode, oid))
             else:
                 children[head] = (mode, oid)
-        rows = []
-        for name, value in sorted(children.items()):
+        for name, value in children.items():
             if isinstance(value, list):
-                mode, oid = "040000", self.tree(value)
-            else:
-                mode, oid = value
-            rows.append(
-                f"{mode} {'tree' if mode == '040000' else 'blob'} {oid}\t".encode()
-                + name.encode("utf-8")
-                + b"\0"
-            )
-        return self.call("mktree", "-z", input=b"".join(rows)).decode().strip()
+                children[name] = "040000", self.tree(value)
+        return self.call("mktree", "-z", input=self._tree_rows(children)).decode().strip()
+
+    @staticmethod
+    def _tree_rows(entries):
+        return b"".join(
+            f"{mode} {'tree' if mode == '040000' else 'blob'} {oid}\t".encode("ascii")
+            + name.encode("utf-8")
+            + b"\0"
+            for name, (mode, oid) in sorted(entries.items())
+        )
+
+    def checkpoint_trees(self, inventories):
+        """Build independent trees at each depth with one Git invocation."""
+        levels = [{}]
+        for role, inventory in inventories:
+            levels[0][(role,)] = {}
+            for row in inventory:
+                parts = (role, *row.path.split("/"))
+                depth = len(parts) - 2
+                while len(levels) <= depth:
+                    levels.append({})
+                levels[depth].setdefault(parts[:-1], {})[parts[-1]] = (
+                    row.mode,
+                    row.object_id,
+                )
+        controls = {}
+        for depth in range(len(levels) - 1, -1, -1):
+            trees = levels[depth]
+            batch = b"".join(self._tree_rows(rows) + b"\0" for rows in trees.values())
+            oids = self.call("mktree", "-z", "--batch", input=batch).decode().splitlines()
+            if len(oids) != len(trees) or any(
+                len(oid) != 40 or set(oid) - set("0123456789abcdef") for oid in oids
+            ):
+                raise OSError("Incomplete checkpoint tree write")
+            controls.update(dict.fromkeys(oids, "tree"))
+            if depth:
+                for path, oid in zip(trees, oids, strict=True):
+                    levels[depth - 1].setdefault(path[:-1], {})[path[-1]] = (
+                        "040000",
+                        oid,
+                    )
+        _control_objects(self, controls, {})
+        return [(path[0], "040000", oid) for path, oid in zip(trees, oids, strict=True)]
 
 
 def _spool(root, directory, paths=None, *, offset=0):
@@ -3613,28 +3647,40 @@ def capture_checkpoint(
                 metadata.append((path, "100644", oid))
             if review_oid is not None:
                 metadata.append(("review.json", "100644", review_oid))
-            roots = []
-            for role, inventory in (
+            inventories = (
                 ("source", source_rows),
                 ("vault", vault_rows),
                 ("preimage", preimage_rows),
                 ("proposed", proposed_rows),
-            ):
-                control_write_pending = True
-                object_storage = "possible"
-                role_tree = git.tree([(f.path, f.mode, f.object_id) for f in inventory])
-                _control_objects(git, {role_tree: "tree"}, {})
-                objects, object_storage, control_write_pending = True, "verified", False
-                roots.append((role, "040000", role_tree))
+            )
             if review_content:
+                inventories += (("review-content", review_content),)
+            batch_trees = (
+                type(_owners) is _ApplyReviewOwners
+                and type(_owners._local_owner) is _ApplyReviewOwners
+                and sum(len(rows) for _, rows in inventories) <= 512
+                and sum(len(f.path) for _, rows in inventories for f in rows) <= 65536
+            )
+            if batch_trees:
                 control_write_pending = True
                 object_storage = "possible"
-                review_tree = git.tree(
-                    [(f.path, f.mode, f.object_id) for f in review_content]
-                )
-                _control_objects(git, {review_tree: "tree"}, {})
+                roots = git.checkpoint_trees(inventories)
                 objects, object_storage, control_write_pending = True, "verified", False
-                roots.append(("review-content", "040000", review_tree))
+            else:
+                roots = []
+                for role, inventory in inventories:
+                    control_write_pending = True
+                    object_storage = "possible"
+                    role_tree = git.tree(
+                        [(f.path, f.mode, f.object_id) for f in inventory]
+                    )
+                    _control_objects(git, {role_tree: "tree"}, {})
+                    objects, object_storage, control_write_pending = (
+                        True,
+                        "verified",
+                        False,
+                    )
+                    roots.append((role, "040000", role_tree))
             control_write_pending = True
             object_storage = "possible"
             tree = git.tree([*metadata, *roots])
