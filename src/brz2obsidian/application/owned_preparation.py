@@ -21,6 +21,7 @@ from brz2obsidian.core.resolution import (
 )
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
+from brz2obsidian.publication.vault_admission import _same_current_domain
 from brz2obsidian.publication.vault_history import (
     _ApplyReviewOwners,
     _binding_signature,
@@ -61,6 +62,7 @@ class _OwnedPreparation:
         self._history_values = {}
         self._apply_review_owners = None
         self._apply_source_update = False
+        self._apply_resume = None
         self._readonly_initial = self._readonly_initial_seed = None
 
     def _stage_readonly_initial(self, result):
@@ -706,6 +708,18 @@ class _OwnedPreparation:
             ):
                 result = self._resume_update(history, plan)
                 self.preparation = result.preparation
+                if (
+                    self._apply_source_update
+                    and result.ready
+                    and result.code == "unchanged"
+                    and result.preparation is not None
+                    and result.preparation.source_ref is None
+                ):
+                    self._apply_resume = (
+                        result,
+                        self.observed._inspection,
+                        history.checkpoint.manifest,
+                    )
                 return result
             from .onboarding import _reobserve_onboarding
             from .update_contracts import UpdatePreparation
@@ -1388,7 +1402,8 @@ class _OwnedPreparation:
         ):
             raise lifecycle._ExcludedDependency
 
-    def _reobserve(self, preparation):
+    def _reobserve(self, preparation, *, for_apply=False):
+        resume, self._apply_resume = self._apply_resume, None
         if preparation.kind == "onboarding":
             from .onboarding import reobserve_onboarding
 
@@ -1423,6 +1438,29 @@ class _OwnedPreparation:
             != preparation.source_binding
         ):
             raise OSError("source_payload_changed")
+        if (
+            for_apply
+            and resume is not None
+            and resume[0].preparation == preparation
+            and resume[2] == history.checkpoint.manifest
+            and _same_current_domain(resume[1], self.observed._inspection)
+        ):
+            with self._session._operation():
+                plan = self._session._admit_values(preparation.review)
+                scoped = self._scoped(history, plan.facts, plan)
+                if scoped.admission.preflight == plan.preflight:
+                    # Resume proved this graph against the same inputs. Fresh
+                    # admission rechecks history, Current and its policy, and
+                    # co-admission rechecks every live retained backing.
+                    self._session._coadmit()
+                    if (
+                        self.operations.observe_reviewed_source(
+                            preparation.payload_directory, plan
+                        )
+                        != preparation.source_binding
+                    ):
+                        raise OSError("source_payload_changed")
+                    return scoped, resume[0].model_copy(update={"code": "current"}), None
         with self._session._operation():
             plan = self._session._admit_values(preparation.review)
             self._session._coadmit()
@@ -1913,6 +1951,7 @@ class _OwnedPreparation:
 
     def close(self):
         self._clear_readonly_initial()
+        self._apply_resume = None
         if self._closed:
             return
         self._closed = True

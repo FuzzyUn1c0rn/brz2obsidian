@@ -2003,7 +2003,7 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
         history, current, _ = (
             _reobserve(operations, preparation)
             if _owner is None
-            else _owner._reobserve(preparation)
+            else _owner._reobserve(preparation, for_apply=True)
         )
         if history is None or current.status == "stale_review":
             return current
