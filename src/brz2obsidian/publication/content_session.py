@@ -762,6 +762,9 @@ class ContentSession:
         self._check()
         if checkpoint.status != "valid":
             raise OSError("Current retained source locator required")
+        if shutil.disk_usage(self._directory).free < size:
+            # The serial path can retire identical spools between reads.
+            return None
         self._budget(size, ledger.remaining("raw_work"))
         transfer = _Transfer(
             timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),

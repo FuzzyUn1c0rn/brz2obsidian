@@ -1449,12 +1449,14 @@ class _OwnedPreparation:
         if (
             for_apply
             and resume is not None
+            and resume[0].preparation is self.preparation
             and resume[0].preparation == preparation
             and resume[2] == history.checkpoint.manifest
             and _same_current_domain(resume[1], self.observed._inspection)
         ):
             with self._session._operation():
                 plan = self._session._admit_values(preparation.review)
+                self._recheck_resumed_payloads(history, preparation)
                 scoped = self._scoped(history, plan.facts, plan)
                 if scoped.admission.preflight == plan.preflight:
                     # Resume proved this graph against the same inputs. Fresh
@@ -1599,6 +1601,26 @@ class _OwnedPreparation:
                 _owner=self,
             )
             return history, result, baseline
+
+    def _recheck_resumed_payloads(self, history, preparation):
+        # Keep exact live byte comparisons with Resume's owned registrations.
+        # The admission inventory identifies candidates for those comparisons.
+        current_paths = {
+            origin[1]
+            for _, _, _, origin in self._session._content._values.values()
+            if origin[0] == "current"
+        }
+        self._source_payload(history.checkpoint)
+        lifecycle._read_physical(
+            preparation.payload_directory, preparation.source_binding.files, _owner=self
+        )
+        lifecycle._read_physical(
+            preparation.vault,
+            tuple(
+                row for row in history.admission.inventory if row.path in current_paths
+            ),
+            _owner=self,
+        )
 
     def refresh(self, preparation, *, source=None, cancel=None):
         self._cancel.probe = cancel
