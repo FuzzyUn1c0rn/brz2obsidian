@@ -492,12 +492,7 @@ def _apply(args):
     loaded = operations.load_update(args.vault)
     if loaded.loaded is None:
         return _update_result(loaded, command="apply")
-    if (
-        args.proposal_id != loaded.operation_id
-        or args.generation != loaded.generation
-        or loaded.checkpoint is None
-        or args.checkpoint != loaded.checkpoint.commit
-    ):
+    if _requested_identity_changed(args, loaded):
         return _update_result(
             loaded,
             command="apply",
@@ -506,14 +501,22 @@ def _apply(args):
             ready=False,
             next_actions=("inspect_saved_review",),
         )
-    current = operations.resume_update(args.vault)
+    return _apply_resumed(
+        operations.resume_update(args.vault),
+        (loaded.operation_id, loaded.generation, loaded.checkpoint),
+        operations.apply_update,
+    )
+
+
+def _apply_resumed(current, saved_identity, apply_preparation):
     if current.preparation is None:
         return _update_result(current, command="apply")
-    if (current.operation_id, current.generation, current.preparation.locator) != (
-        loaded.operation_id,
-        loaded.generation,
-        loaded.checkpoint,
-    ):
+    resumed_identity = (
+        current.operation_id,
+        current.generation,
+        current.preparation.locator,
+    )
+    if resumed_identity != saved_identity:
         return _update_result(
             current,
             command="apply",
@@ -531,7 +534,7 @@ def _apply(args):
             ready=False,
             next_actions=("resolve_update", "save_update"),
         )
-    applied = operations.apply_update(current.preparation)
+    applied = apply_preparation(current.preparation)
     return _update_result(
         applied,
         command="apply",
@@ -569,40 +572,12 @@ def _apply_context(args, operations):
         opened = context.resume(
             args.vault, selection_id=selection, _check_saved=check_saved
         )
-        current = context._last_result
-        if current.preparation is None:
-            return _update_result(current, command="apply")
-        if (
-            current.operation_id,
-            current.generation,
-            current.preparation.locator,
-        ) != saved_identity:
-            return _update_result(
-                current,
-                command="apply",
-                status="stale_review",
-                code="review_identity_changed",
-                ready=False,
-                next_actions=("review_update",),
-            )
-        if not current.ready:
-            return _update_result(
-                current,
-                command="apply",
-                status="unresolved",
-                code="review_not_ready",
-                ready=False,
-                next_actions=("resolve_update", "save_update"),
-            )
-        context.apply(opened.binding)
-        return _update_result(
-            context._last_result,
-            command="apply",
-            proposal_id=current.operation_id,
-            generation=current.generation,
-            source=current.preparation.observed_source,
-            output_identity=current.preparation.review.facts.incoming_identity,
-        )
+
+        def apply_preparation(_preparation):
+            context.apply(opened.binding)
+            return context._last_result
+
+        return _apply_resumed(context._last_result, saved_identity, apply_preparation)
     finally:
         context._retire_owner()
 

@@ -18,6 +18,7 @@ from brz2obsidian.cli_review import CliReviewResult
 from brz2obsidian.contracts import OutputIdentity
 from brz2obsidian.publication import vault_history
 from brz2obsidian.publication.git_read import _GitTimeout, read_git
+from tests.application.test_update_context import worker_context_call
 from tests.application.test_vault_checkpoints import fixture_case, git, user_state
 from tests.application.test_verified_coverage import (
     OWNER,
@@ -89,8 +90,9 @@ def ready_source_update():
         context.close(choice="discard")
 
 
+@pytest.mark.parametrize("entry_point", ("cli", "worker"))
 def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
-    ready_source_update, monkeypatch, capsys
+    ready_source_update, monkeypatch, capsys, entry_point
 ):
     vault, context, binding, _ = ready_source_update
     saved = context.save(binding)
@@ -113,23 +115,44 @@ def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
         return read_git(argv, **kwargs)
 
     monkeypatch.setattr(vault_history, "read_git", timeout_after_first_tree)
-    exit_code = main(
-        [
-            "review",
-            "apply",
-            str(vault),
-            "--proposal-id",
-            saved.binding.proposal_id,
-            "--generation",
-            str(saved.binding.generation),
-            "--checkpoint",
-            saved.capture.commit,
-            "--json",
-        ]
-    )
-    applied = CliReviewResult.model_validate_json(capsys.readouterr().out)
+    if entry_point == "cli":
+        exit_code = main(
+            [
+                "review",
+                "apply",
+                str(vault),
+                "--proposal-id",
+                saved.binding.proposal_id,
+                "--generation",
+                str(saved.binding.generation),
+                "--checkpoint",
+                saved.capture.commit,
+                "--json",
+            ]
+        )
+        applied = CliReviewResult.model_validate_json(capsys.readouterr().out)
+        assert exit_code == 0, applied.model_dump_json()
+    else:
+        cold = UpdateContext()
+        try:
+            resumed = worker_context_call(
+                cold,
+                {
+                    "command": "resume",
+                    "vault": str(vault),
+                    "selection_id": str(uuid4()),
+                },
+            )
+            assert resumed.ready and resumed.binding is not None, (
+                resumed.model_dump_json()
+            )
+            applied = worker_context_call(
+                cold, {"command": "apply", "binding": resumed.binding}
+            )
+        finally:
+            cold.close(choice="discard")
 
-    assert exit_code == 0 and applied.status == "applied", applied.model_dump_json()
+    assert applied.status == "applied", applied.model_dump_json()
     assert timed_out == {_ORIGINAL, _INCOMING}
     operation = applied.operation
     assert operation is not None and operation.phase == "terminal"

@@ -653,7 +653,7 @@ class _OwnedPreparation:
         kind = None
         # Guarded Resume begins with Load's refusal semantics.
         resuming = resume and check_saved is None
-        if check_saved is not None:
+        if resume:
             self._apply_review_owners = _ApplyReviewOwners(
                 memory_spool=True, cancel=self._cancel
             )
@@ -684,9 +684,7 @@ class _OwnedPreparation:
             ):
                 return None
             kind = checkpoint.metadata[10]
-            self._apply_source_update = (
-                check_saved is not None and kind == "source_update"
-            )
+            self._apply_source_update = resume and kind == "source_update"
             borrowed = (
                 self._apply_review_owners._borrow_local(self.observed, checkpoint)
                 if self._apply_source_update
