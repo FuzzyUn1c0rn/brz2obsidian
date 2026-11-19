@@ -110,9 +110,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                 control(len(header))
                 expected = f"{oid.lower()} blob {size}\n".encode("ascii")
                 if header != expected:
-                    observed_integrity_failure = (
-                        header.endswith(b"\n") or len(header) > _HEADER_LIMIT
-                    )
+                    observed_integrity_failure = not expected.startswith(header)
                     raise OSError("Git payload has an invalid batch header")
                 sha1 = hashlib.sha1(usedforsecurity=False)
                 sha1.update(f"blob {size}\0".encode("ascii"))

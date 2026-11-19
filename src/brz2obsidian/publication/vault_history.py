@@ -827,6 +827,7 @@ class _ApplyReviewOwners(ExitStack):
         export.check()
         references = frozenset(export.values)
         available = _review_role_objects(manifest, references)
+
         def declarations():
             yield (
                 manifest.review_object,
@@ -961,6 +962,7 @@ class _ApplyReviewOwners(ExitStack):
             manifest.review_sha256,
             None,
         )
+
         def declarations():
             yield envelope
             for sha in sorted(references):
