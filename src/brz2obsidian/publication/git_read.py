@@ -263,6 +263,8 @@ def read_git(argv, *, env, input=None, timeout=30):
     if overflow.is_set() or failures or any(thread.is_alive() for thread in threads):
         raise OSError("Git observation exceeds its safe resource budget")
     if timed_out:
+        if outputs[1]:
+            raise OSError("Git reported an error before its observation timed out")
         raise _GitTimeout("Git observation exceeded its safe time budget")
     return subprocess.CompletedProcess(
         argv, process.returncode, bytes(outputs[0]), bytes(outputs[1])

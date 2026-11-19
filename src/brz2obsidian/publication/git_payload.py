@@ -67,6 +67,8 @@ def verify_blobs(argv, *, env, objects, timeout=30):
     process = None
     process_reaped = False
     control_overflow = False
+    diagnostic_output = False
+    observed_integrity_failure = False
     job = None
     threads = []
     deadline = time.monotonic() + timeout
@@ -98,7 +100,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
             fail("Git payload pipe cleanup failed")
 
     def payload_reader():
-        nonlocal accounted_objects
+        nonlocal accounted_objects, observed_integrity_failure
         stream = process.stdout
         try:
             for oid, size, digest, sink in objects:
@@ -108,6 +110,9 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                 control(len(header))
                 expected = f"{oid.lower()} blob {size}\n".encode("ascii")
                 if header != expected:
+                    observed_integrity_failure = (
+                        header.endswith(b"\n") or len(header) > _HEADER_LIMIT
+                    )
                     raise OSError("Git payload has an invalid batch header")
                 sha1 = hashlib.sha1(usedforsecurity=False)
                 sha1.update(f"blob {size}\0".encode("ascii"))
@@ -126,24 +131,29 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                         try:
                             written = sink.write(block)
                         except Exception:  # noqa: BLE001 - caller callback failure boundary
+                            observed_integrity_failure = True
                             fail("Git payload sink failed")
                             return
                         if type(written) is not int or written != len(block):
+                            observed_integrity_failure = True
                             fail("Git payload sink made an incomplete write")
                             return
                 terminator = stream.read(1)
                 control(len(terminator))
                 if terminator != b"\n":
+                    observed_integrity_failure = bool(terminator)
                     raise OSError("Git payload has an invalid batch terminator")
                 if (
                     sha1.hexdigest() != oid.lower()
                     or sha256.hexdigest() != digest.lower()
                 ):
+                    observed_integrity_failure = True
                     raise OSError("Git payload digest does not match its declaration")
                 accounted_objects += 1
             extra = stream.read(1)
             control(len(extra))
             if extra:
+                observed_integrity_failure = True
                 raise OSError("Git payload contains unexpected extra output")
             payload_complete.set()
         except OSError as error:
@@ -152,9 +162,11 @@ def verify_blobs(argv, *, env, objects, timeout=30):
             close_worker_stream(stream)
 
     def stderr_reader():
+        nonlocal diagnostic_output
         stream = process.stderr
         try:
             while block := stream.read(65536):
+                diagnostic_output = True
                 control(len(block))
                 fail("Git payload command reported an error")
         except OSError as error:
@@ -242,7 +254,13 @@ def verify_blobs(argv, *, env, objects, timeout=30):
     if any(thread.is_alive() for thread in threads):
         raise OSError("Git payload caller-owned sink did not finish")
     if failed.is_set():
-        if failure_reason == _TIMEOUT and process_reaped and not control_overflow:
+        if (
+            failure_reason == _TIMEOUT
+            and process_reaped
+            and not control_overflow
+            and not diagnostic_output
+            and not observed_integrity_failure
+        ):
             raise _GitTimeout(failure_reason)
         raise OSError(failure_reason)
     if not payload_complete.is_set() or accounted_objects != len(objects):
