@@ -114,7 +114,7 @@ class _RegistrationView:
         session._require_private_scope(scope)
         rows = {}
         for record in records:
-            session._check_prepared(record, scope)
+            session._require_prepared_record(record)
             previous = rows.get(record.reference.content_id)
             if previous is not None and previous is not record:
                 raise OSError("Conflicting prepared registration")
@@ -176,7 +176,8 @@ class _RetainedReviewRead:
         self.spooled = 0
         self._open = True
 
-    def budget_spool(self, payload_bytes):
+    def budget_spool(self, payload_bytes, owned_bytes):
+        self.spooled = owned_bytes
         if self.memory_spool:
             # Leave room for the whole set to become semantic evidence later.
             headroom = (
@@ -255,6 +256,7 @@ class ContentSession:
         self._prepared = {}
         self._prepared_digests = {}
         self._retained_semantic = {}
+        self._spooled_bytes = 0
 
     @classmethod
     def _retained_review(
@@ -285,7 +287,7 @@ class ContentSession:
             raise OSError("Retained review byte owner required")
         payload_bytes = sum(available[sha][1] for sha in references)
         self._budget(payload_bytes, (1 << 63) - 1)
-        source.budget_spool(payload_bytes)
+        source.budget_spool(payload_bytes, self._spooled_bytes)
 
         class Sink:
             def __init__(self, output):
@@ -358,6 +360,8 @@ class ContentSession:
                 self, reference, backings[sha], "100644", origin
             )
             self._prepared[reference.content_id] = record
+            if type(record.backing) is _MemoryBacking:
+                self._spooled_bytes += size
             records[sha] = record
         return records
 
@@ -535,12 +539,7 @@ class ContentSession:
             and type(record.backing) is _MemoryBacking
         )
         self._require_private_scope(scope, filesystem=not memory)
-        if (
-            type(record) is not _PreparedRegistration
-            or record.session is not self
-            or self._prepared.get(record.reference.content_id) is not record
-        ):
-            raise OSError("Registration was not prepared by this content owner")
+        self._require_prepared_record(record)
         if not memory:
             info = record.backing.lstat()
             if self._files.get(record.backing) != (info.st_dev, info.st_ino):
@@ -552,6 +551,14 @@ class ContentSession:
             record.origin,
         ):
             raise OSError("Physical registration origin changed")
+
+    def _require_prepared_record(self, record):
+        if (
+            type(record) is not _PreparedRegistration
+            or record.session is not self
+            or self._prepared.get(record.reference.content_id) is not record
+        ):
+            raise OSError("Registration was not prepared by this content owner")
 
     def _prepare_registered(self, reference, ledger, scope):
         self._require_private_scope(scope, ledger)
@@ -948,6 +955,7 @@ class ContentSession:
         self._digests.clear()
         self._prepared.clear()
         self._prepared_digests.clear()
+        self._spooled_bytes = 0
         if not self._directory.exists():
             return
         try:

@@ -921,6 +921,7 @@ class ReviewSession:
             registry[record.reference.content_id] = record
         records = tuple(registry.values())
         view = self._content._registration_view(records, self._ledger, self._scope)
+        # Resolve every record against live backing before publishing this view.
         comparison = ContentComparison(
             self._content,
             tuple(record.reference for record in records),
@@ -1556,6 +1557,10 @@ class ReviewSession:
     def close(self):
         self._closed = True
         self._invalidate()
+        self._publication_export = None
+        self._closure = _ClosureState(
+            MappingProxyType({}), MappingProxyType({}), None, None, self._epoch
+        )
         self._staged_bindings = None
         self._physical.clear()
         self._content._discard_fresh_scope()

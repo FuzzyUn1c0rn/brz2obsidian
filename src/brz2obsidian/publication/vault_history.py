@@ -896,6 +896,13 @@ def _read_owned_checkpoint_review(
     if type(owners) not in (ExitStack, _ApplyReviewOwners):
         raise OSError("Lexical retained review ownership required")
     record, references, available = _review_reference_graph(git, manifest)
+    if memory_spool:
+        # The raw discriminator only selects the byte transport. Canonical
+        # replay below still qualifies the review and its operation kind.
+        kind = record
+        for key in ("plan", "facts", "format_operation", "kind"):
+            kind = kind.get(key) if type(kind) is dict else None
+        memory_spool = kind == "source_update"
     session = owners.enter_context(
         ReviewSession._retained_review(
             git,

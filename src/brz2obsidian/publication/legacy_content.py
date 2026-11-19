@@ -352,17 +352,27 @@ class ContentComparison:
 
         def chunks():
             transfer.check()
-            self._check()
+            if self._scope is None:
+                self._check()
+            else:
+                self._scope._check_live(self._session)
             expected = self._session._files.get(backing)
-            before = backing.lstat()
-            if (before.st_dev, before.st_ino) != expected:
-                raise OSError("Owned backing identity changed")
+            if self._scope is None:
+                before = backing.lstat()
+                if (before.st_dev, before.st_ino) != expected:
+                    raise OSError("Owned backing identity changed")
+                owned_identity = None
+            else:
+                if expected is None:
+                    raise OSError("Owned backing identity changed")
+                owned_identity = (self._session._anchor, expected)
             with closing(
                 _observed_chunks(
                     self._session._directory,
                     backing,
                     expected_size=reference.size,
                     read_chunk_limit=_CHUNK,
+                    owned_identity=owned_identity,
                 )
             ) as observed:
                 while True:
