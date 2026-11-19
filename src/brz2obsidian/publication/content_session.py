@@ -704,6 +704,47 @@ class ContentSession:
             scope=scope,
         )
 
+    def _acquire_small_current(self, rows, ledger, scope):
+        """Read exact admitted files before returning any results from the group."""
+        if (
+            len(rows) < 2
+            or len(rows) > 32
+            or sum(row.size for row in rows) > 4 * 1024 * 1024
+        ):
+            return None
+        observed = self._require_current_observation()
+        self._require_private_scope(scope, ledger)
+        self._check()
+        inventory = {row.path: row for row in observed.history.admission.inventory}
+        if any(
+            row != inventory.get(row.path) or row.exclusion in ("cache", "temporary")
+            for row in rows
+        ):
+            raise OSError("Current files differ from the admitted inventory")
+
+        def recheck():
+            scope.check(self)
+
+        references = {}
+        for row in rows:
+            scope.check(self)
+            transfer = _Transfer(
+                timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+                cancel=ledger.budget.cancel,
+            )
+            references[row.path] = self._capture_row(
+                row,
+                "current",
+                None,
+                transfer,
+                ledger.remaining("raw_work"),
+                ledger,
+                scope,
+                recheck,
+            )
+        self._check()
+        return references
+
     def _acquire_small_source(self, locator, ledger, scope):
         """Read one bounded retained source inventory under a single observation."""
         from .git_payload import verify_blobs
@@ -799,6 +840,13 @@ class ContentSession:
         row = next((row for row in rows if row.path == path), None)
         if row is None or getattr(row, "exclusion", None) in ("cache", "temporary"):
             raise OSError("Content path is unavailable in the admitted origin")
+        return self._capture_row(
+            row, role, locator, transfer, byte_limit, ledger, scope, self._check
+        )
+
+    def _capture_row(
+        self, row, role, locator, transfer, byte_limit, ledger, scope, recheck
+    ):
         self._budget(row.size, byte_limit)
         if ledger is not None:
             ledger.reserve_file_cleanup()
@@ -844,10 +892,10 @@ class ContentSession:
                 )
             output.flush()
             os.fsync(output.fileno())
-        self._check()
+        recheck()
         transfer.check()
         return self._register_acquired(
-            row, backing, (role, path, locator, row), transfer, ledger, scope
+            row, backing, (role, row.path, locator, row), transfer, ledger, scope
         )
 
     def _register_acquired(self, row, backing, origin, transfer, ledger, scope):

@@ -185,8 +185,16 @@ class _OwnedPreparation:
 
     def _physical_payload(self, root, rows):
         values = {}
+        current = Path(root).absolute() == self.observed._root
+        references = None
+        if current and self._apply_source_update:
+            references = self._session._content._acquire_small_current(
+                rows, self._session._ledger, self._session._scope
+            )
         for row in rows:
-            if Path(root).absolute() == self.observed._root:
+            if references is not None:
+                reference = references[row.path]
+            elif current:
                 reference = self._session._content._acquire_current(
                     row.path, self._session._ledger, self._session._scope
                 )
