@@ -368,8 +368,23 @@ class _Git:
             for name, (mode, oid) in sorted(entries.items())
         )
 
+    @staticmethod
+    def _tree_oid(entries):
+        # Git sorts directory names as if followed by a slash.
+        rows = [
+            (name.encode("utf-8"), mode, oid) for name, (mode, oid) in entries.items()
+        ]
+        rows.sort(key=lambda row: row[0] + (b"/" if row[1] == "040000" else b""))
+        body = b"".join(
+            mode.lstrip("0").encode("ascii") + b" " + name + b"\0" + bytes.fromhex(oid)
+            for name, mode, oid in rows
+        )
+        return hashlib.sha1(
+            f"tree {len(body)}\0".encode("ascii") + body, usedforsecurity=False
+        ).hexdigest()
+
     def checkpoint_trees(self, inventories):
-        """Build independent trees at each depth with one Git invocation."""
+        """Write trees by depth, with per-tree deadlines after a clean timeout."""
         levels = [{}]
         for role, inventory in inventories:
             levels[0][(role,)] = {}
@@ -386,9 +401,28 @@ class _Git:
         for depth in range(len(levels) - 1, -1, -1):
             trees = levels[depth]
             batch = b"".join(self._tree_rows(rows) + b"\0" for rows in trees.values())
-            oids = (
-                self.call("mktree", "-z", "--batch", input=batch).decode().splitlines()
-            )
+            try:
+                raw = self.call("mktree", "-z", "--batch", input=batch)
+            except _GitTimeout as error:
+                if len(trees) == 1:
+                    raise
+                expected = [self._tree_oid(rows) for rows in trees.values()]
+                _check_timed_out_object_ids(
+                    error, expected, "Checkpoint tree batch output changed"
+                )
+                # Only the batch deadline expired. Each immutable tree still
+                # has its own write deadline, with the same readback below.
+                oids = []
+                for rows, expected_oid in zip(trees.values(), expected, strict=True):
+                    oid = self.tree(
+                        (name, mode, object_id)
+                        for name, (mode, object_id) in rows.items()
+                    )
+                    if oid != expected_oid:
+                        raise OSError("Checkpoint tree write changed")
+                    oids.append(oid)
+            else:
+                oids = raw.decode().splitlines()
             if len(oids) != len(trees) or any(
                 len(oid) != 40 or set(oid) - set("0123456789abcdef") for oid in oids
             ):
@@ -557,6 +591,15 @@ def _spool_oid(directory, path, size, sha):
     return oid.hexdigest()
 
 
+def _check_timed_out_object_ids(error, expected, message):
+    partial = error.stdout.replace(b"\r\n", b"\n")
+    if partial.endswith(b"\r"):
+        partial = partial[:-1] + b"\n"
+    expected_stdout = "".join(f"{oid}\n" for oid in expected).encode("ascii")
+    if not expected_stdout.startswith(partial):
+        raise OSError(message) from error
+
+
 def _write_review_spools(git, spools, declarations):
     expected = [oid for oid, _, _, _ in declarations]
     try:
@@ -568,12 +611,9 @@ def _write_review_spools(git, spools, declarations):
             input=_quoted_paths(spools),
         )
     except _GitTimeout as error:
-        partial = error.stdout.replace(b"\r\n", b"\n")
-        if partial.endswith(b"\r"):
-            partial = partial[:-1] + b"\n"
-        expected_stdout = "".join(f"{oid}\n" for oid in expected).encode()
-        if not expected_stdout.startswith(partial):
-            raise OSError("Saved review byte object write changed") from error
+        _check_timed_out_object_ids(
+            error, expected, "Saved review byte object write changed"
+        )
         raise
     if raw.decode().splitlines() != expected:
         raise OSError("Saved review byte object write changed")
@@ -3610,7 +3650,10 @@ def capture_checkpoint(
                         _write_review_spools(git, (spool,), (declaration,))
                 if group_size > 1:
                     _owned_export.check()
-                    _owned_export.session._ledger.check()
+                    # After the last successful group, Apply handles
+                    # cancellation once the prepared checkpoint is retained.
+                    if hashes[-1] != review_hashes[-1]:
+                        _owned_export.session._ledger.check()
                 objects, object_storage = True, "verified"
                 review_content.extend(
                     CheckpointFile(

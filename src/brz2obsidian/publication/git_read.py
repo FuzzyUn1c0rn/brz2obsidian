@@ -1,6 +1,7 @@
 """Bounded, noninteractive read-process execution for local Git observations."""
 
 import ctypes
+import errno
 import os
 import signal
 import subprocess
@@ -210,15 +211,32 @@ def read_git(argv, *, env, input=None, timeout=30):
         finally:
             stream.close()
 
+    def input_failure(error):
+        # Killing the timed-out child can interrupt the pipe write or close.
+        if (
+            timed_out
+            and isinstance(error, OSError)
+            and (
+                error.errno == errno.EPIPE
+                or os.name == "nt"
+                and error.errno == errno.EINVAL
+            )
+        ):
+            return
+        failure(error)
+
     def writer():
         try:
             if process.stdin.write(input) != len(input):
                 raise OSError("Incomplete Git observation input")
             process.stdin.flush()
-        except (BrokenPipeError, OSError, ValueError) as error:
-            failure(error)
+        except (OSError, ValueError) as error:
+            input_failure(error)
         finally:
-            process.stdin.close()
+            try:
+                process.stdin.close()
+            except (OSError, ValueError) as error:
+                input_failure(error)
 
     try:
         factory = _SuspendedPopen if job else subprocess.Popen
