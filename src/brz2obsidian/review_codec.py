@@ -8,6 +8,7 @@ they are never assembled into a second complete base64 scalar.
 import base64
 import codecs
 import json
+from functools import lru_cache
 from typing import Annotated, get_args, get_origin
 
 from pydantic import BaseModel
@@ -37,6 +38,7 @@ def _alternatives(annotation):
                 yield from _alternatives(child)
 
 
+@lru_cache(maxsize=2048)
 def _field(annotation, key):
     fields = tuple(
         resolved_contract_fields(model)[key].annotation
@@ -48,12 +50,14 @@ def _field(annotation, key):
     return fields[0] if len(fields) == 1 else fields
 
 
+@lru_cache(maxsize=256)
 def _models(annotation):
     if type(annotation) is tuple:
         return tuple(model for child in annotation for model in _alternatives(child))
     return tuple(_alternatives(annotation))
 
 
+@lru_cache(maxsize=256)
 def _array_item(annotation):
     if type(annotation) is tuple:
         return tuple(_array_item(child) for child in annotation)
