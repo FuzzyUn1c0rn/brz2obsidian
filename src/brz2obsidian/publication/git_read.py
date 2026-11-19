@@ -169,6 +169,10 @@ def _cancel(thread):
 class _GitTimeout(OSError):
     """The owned Git process reached its observation deadline."""
 
+    def __init__(self, message, *, stdout=b""):
+        super().__init__(message)
+        self.stdout = stdout
+
 
 def read_git(argv, *, env, input=None, timeout=30):
     """Bound aggregate input/output and terminate owned work on every exit."""
@@ -265,7 +269,9 @@ def read_git(argv, *, env, input=None, timeout=30):
     if timed_out:
         if outputs[1]:
             raise OSError("Git reported an error before its observation timed out")
-        raise _GitTimeout("Git observation exceeded its safe time budget")
+        raise _GitTimeout(
+            "Git observation exceeded its safe time budget", stdout=bytes(outputs[0])
+        )
     return subprocess.CompletedProcess(
         argv, process.returncode, bytes(outputs[0]), bytes(outputs[1])
     )

@@ -520,18 +520,21 @@ def _spool_oid(directory, path, size, sha):
 
 
 def _write_review_spools(git, spools, declarations):
-    actual = (
-        git.call(
+    expected = [oid for oid, _, _, _ in declarations]
+    try:
+        raw = git.call(
             "hash-object",
             "-w",
             "--no-filters",
             "--stdin-paths",
             input=_quoted_paths(spools),
         )
-        .decode()
-        .splitlines()
-    )
-    if actual != [oid for oid, _, _, _ in declarations]:
+    except _GitTimeout as error:
+        partial = error.stdout.replace(b"\r\n", b"\n").removesuffix(b"\r")
+        if not "".join(f"{oid}\n" for oid in expected).encode().startswith(partial):
+            raise OSError("Saved review byte object write changed") from error
+        raise
+    if raw.decode().splitlines() != expected:
         raise OSError("Saved review byte object write changed")
     verify_blobs(
         [*git.prefix, "cat-file", "--batch"],
