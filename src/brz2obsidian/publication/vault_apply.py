@@ -2984,7 +2984,7 @@ def apply_reviewed_update(
             else None
         )
         owners = (
-            _ApplyReviewOwners(local_owner=borrowed)
+            _ApplyReviewOwners(local_owner=borrowed, retain_prepared=True)
             if reusable_local_review
             else ExitStack()
         )

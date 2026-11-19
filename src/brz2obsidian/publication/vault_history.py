@@ -681,20 +681,38 @@ def _restore_review(record, payloads, manifest):
 
 
 class _ApplyReviewOwners(ExitStack):
-    """Keep one parsed local review across otherwise independent inspections."""
+    """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
-    def __init__(self, *, local_owner=None):
+    def __init__(self, *, local_owner=None, retain_prepared=False):
         super().__init__()
-        self._local_review = None
+        self._proofs = {}
         self._local_owner = local_owner
+        self._retain_prepared = retain_prepared
 
     def read(self, git, manifest, verified, *, commit, include_review):
         cache = self if self._local_owner is None else self._local_owner
-        return cache._read_local(git, manifest, verified, commit, include_review, self)
+        local = cache._proofs.get("local")
+        if (
+            self._retain_prepared
+            and local is not None
+            and manifest.boundary == "prepared"
+            and manifest.recovery_direction is None
+            and manifest.undo_of_receipt_commit is None
+            and (git.root, manifest.previous) == local[:2]
+        ):
+            return self._read_proof(
+                git, manifest, verified, commit, include_review, self, "prepared"
+            )
+        if manifest.boundary == "local" and not manifest.proposed:
+            return cache._read_proof(
+                git, manifest, verified, commit, include_review, self, "local"
+            )
+        return None
 
-    def _read_local(self, git, manifest, verified, commit, include_review, phase):
-        if self._local_review is None:
-            if not include_review or manifest.boundary != "local" or manifest.proposed:
+    def _read_proof(self, git, manifest, verified, commit, include_review, phase, role):
+        proof = self._proofs.get(role)
+        if proof is None:
+            if not include_review:
                 return None
             with ExitStack() as trial:
                 review, references, session = _read_owned_checkpoint_review(
@@ -705,7 +723,7 @@ class _ApplyReviewOwners(ExitStack):
                 )
                 if metadata[10] == "source_update":
                     self.enter_context(trial.pop_all())
-                    self._local_review = (
+                    self._proofs[role] = (
                         git.root,
                         commit,
                         manifest,
@@ -713,14 +731,12 @@ class _ApplyReviewOwners(ExitStack):
                         metadata,
                         review,
                     )
-                    self.callback(self._forget_review)
+                    self.callback(self._proofs.pop, role)
                 else:
                     phase.enter_context(trial.pop_all())
             return metadata, review
 
-        root, retained_commit, retained_manifest, session, metadata, review = (
-            self._local_review
-        )
+        root, retained_commit, retained_manifest, session, metadata, review = proof
         if (git.root, commit) != (root, retained_commit):
             return None
         if manifest != retained_manifest:
@@ -750,9 +766,6 @@ class _ApplyReviewOwners(ExitStack):
         session._verify_retained_backings()
         verified.update(available[sha][0] for sha in references)
         return metadata, review if include_review else None
-
-    def _forget_review(self):
-        self._local_review = None
 
 
 class CheckpointReviewMemo:
