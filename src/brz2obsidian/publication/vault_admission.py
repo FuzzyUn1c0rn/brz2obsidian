@@ -365,7 +365,7 @@ def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
     # Admission resolves the checkpoint and retains the complete ref snapshot.
     # Check the exact fully qualified ref in this same fresh observation.
     rows = current_refs.splitlines()
-    expected_checkpoint = f"{association.ref} {locator.commit}".encode("utf-8")
+    expected_checkpoint = f"{association.ref} {locator.commit}".encode()
     if (
         current != locator
         or verify_directory(root) != association.vault_anchor
