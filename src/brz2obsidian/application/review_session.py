@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from threading import TIMEOUT_MAX, Event
 from types import MappingProxyType
 from uuid import uuid4
+from weakref import ref
 
 from pydantic import BaseModel
 
@@ -298,7 +299,7 @@ class _OwnedReviewExport:
 
     effects = None
     _apply_review_owners = None
-    _sealed_closure = None
+    _sealed_closure_ref = None
 
     def check(self, plan=None):
         if self.session._publication_export is not self or self.session._closed:
@@ -333,12 +334,13 @@ class _OwnedReviewExport:
         self.check()
         if self.session._selected is not self.effects:
             raise OSError("Current canonical selected effects required")
+        closure = self._sealed_closure_ref() if self._sealed_closure_ref else None
         if (
-            self._sealed_closure is not None
-            and self._sealed_closure is self.session._closure
+            closure is not None
+            and closure is self.session._closure
             and any(row is effect for row in self.effects.files)
         ):
-            self._stage_sealed(effect, output)
+            self._stage_sealed(effect, output, closure)
             return
         staged = self.session.stage_effect(effect)
         with (
@@ -356,12 +358,12 @@ class _OwnedReviewExport:
                 if output.write(block) != len(block):
                     raise OSError("Incomplete selected stage copy")
 
-    def _stage_sealed(self, effect, output):
+    def _stage_sealed(self, effect, output, closure):
         session = self.session
         with session._operation():
             # This exact closure was co-admitted before export. Its backing
             # bytes are immutable; registration and scope are still live.
-            for record in self._sealed_closure.view.records.values():
+            for record in closure.view.records.values():
                 session._content._check_prepared(record, session._scope)
             content = effect.content
             binding = session._binding(
@@ -604,7 +606,7 @@ class ReviewSession:
                     type(record.backing) is _MemoryBacking
                     for record in self._closure.view.records.values()
                 ):
-                    export._sealed_closure = self._closure
+                    export._sealed_closure_ref = ref(self._closure)
             self._publication_export = export
         return export
 

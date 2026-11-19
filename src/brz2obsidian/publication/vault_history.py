@@ -807,6 +807,8 @@ class _ApplyReviewOwners(ExitStack):
             return None
         if manifest != expected_manifest:
             raise OSError("Captured prepared checkpoint has a different manifest")
+        if available_memory() < 4 * len(export.raw) + 64 * 1024 * 1024:
+            return None
         export.check()
         references = frozenset(export.values)
         available = _review_role_objects(manifest, references)
