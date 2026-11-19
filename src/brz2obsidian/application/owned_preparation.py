@@ -62,6 +62,7 @@ class _OwnedPreparation:
         self._history_values = {}
         self._apply_review_owners = None
         self._apply_source_update = False
+        self._borrowed_apply_session = False
         self._apply_resume = None
         self._readonly_initial = self._readonly_initial_seed = None
 
@@ -654,7 +655,9 @@ class _OwnedPreparation:
         # Guarded Resume begins with Load's refusal semantics.
         resuming = resume and check_saved is None
         if check_saved is not None:
-            self._apply_review_owners = _ApplyReviewOwners(memory_spool=True)
+            self._apply_review_owners = _ApplyReviewOwners(
+                memory_spool=True, cancel=self._cancel
+            )
         try:
             history = self._observe(vault)
             history, stopped = lifecycle._history(
@@ -685,8 +688,18 @@ class _OwnedPreparation:
             self._apply_source_update = (
                 check_saved is not None and kind == "source_update"
             )
-            self._start_session()
-            self._tip = self._load_tip(checkpoint)
+            borrowed = (
+                self._apply_review_owners._borrow_local(self.observed, checkpoint)
+                if self._apply_source_update
+                else None
+            )
+            if borrowed is None:
+                self._start_session()
+                self._tip = self._load_tip(checkpoint)
+            else:
+                self._session, self._tip = borrowed
+                self._tip_commit = checkpoint.locator.commit
+                self._borrowed_apply_session = True
             plan = self._tip.saved.plan
             if not resume or check_saved is not None:
                 saved = UpdateResult(
@@ -2003,7 +2016,7 @@ class _OwnedPreparation:
         self._closed = True
         try:
             try:
-                if self._session is not None:
+                if self._session is not None and not self._borrowed_apply_session:
                     self._session.close()
             finally:
                 if self.observed is not None:

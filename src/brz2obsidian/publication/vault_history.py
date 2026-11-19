@@ -710,12 +710,34 @@ def _restore_review(record, payloads, manifest):
 class _ApplyReviewOwners(ExitStack):
     """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
-    def __init__(self, *, local_owner=None, retain_prepared=False, memory_spool=False):
+    def __init__(
+        self, *, local_owner=None, retain_prepared=False, memory_spool=False, cancel=None
+    ):
         super().__init__()
         self._proofs = {}
         self._local_owner = local_owner
         self._retain_prepared = retain_prepared
         self._memory_spool = memory_spool
+        self._resume_cancel = cancel
+        self._borrowed_session = None
+
+    def _borrow_local(self, observed, checkpoint):
+        """Attach an admitted Current observation to the exact retained owner."""
+        proof = self._proofs.get("local")
+        if self._borrowed_session is not None or proof is None:
+            return None
+        root, commit, manifest, session, _, review, _ = proof
+        if (
+            (root, commit, manifest)
+            != (observed._root, checkpoint.locator.commit, checkpoint.manifest)
+            or session._ledger.budget.cancel is not self._resume_cancel
+        ):
+            return None
+        session._content._attach(observed)
+        session._batch_current = True
+        session._content._spool_acquisitions = True
+        self._borrowed_session = session
+        return session, review
 
     def read(self, git, manifest, verified, *, commit, include_review):
         cache = self if self._local_owner is None else self._local_owner
@@ -750,6 +772,7 @@ class _ApplyReviewOwners(ExitStack):
                     commit=commit,
                     owners=trial,
                     memory_spool=self._memory_spool,
+                    resume_cancel=self._resume_cancel if role == "local" else None,
                 )
                 metadata = _checkpoint_review_metadata(
                     manifest, review, frozenset(references)
@@ -763,13 +786,14 @@ class _ApplyReviewOwners(ExitStack):
                         session,
                         metadata,
                         review,
+                        tuple(session._closure.view.records.values()),
                     )
                     self.callback(self._proofs.pop, role)
                 else:
                     phase.enter_context(trial.pop_all())
             return metadata, review
 
-        root, retained_commit, retained_manifest, session, metadata, review = proof
+        root, retained_commit, retained_manifest, session, metadata, review, records = proof
         if (git.root, commit) != (root, retained_commit):
             return None
         if manifest != retained_manifest:
@@ -796,7 +820,7 @@ class _ApplyReviewOwners(ExitStack):
                 objects=batch,
                 timeout=120,
             )
-        session._verify_retained_backings()
+        session._verify_retained_backings(records)
         verified.update(available[sha][0] for sha in references)
         return metadata, review if include_review else None
 
@@ -916,7 +940,7 @@ def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
 
 
 def _read_owned_checkpoint_review(
-    git, manifest, verified, *, commit, owners, memory_spool=False
+    git, manifest, verified, *, commit, owners, memory_spool=False, resume_cancel=None
 ):
     from brz2obsidian.application.review_session import ReviewSession
 
@@ -937,8 +961,10 @@ def _read_owned_checkpoint_review(
             commit,
             capacity=available_memory(),
             memory_spool=memory_spool,
+            cancel=resume_cancel,
         )
     )
+    session._batch_current = memory_spool and resume_cancel is not None
     review = session._load_retained(
         record,
         available,

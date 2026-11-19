@@ -573,7 +573,9 @@ class ReviewSession:
         return _load_result("loaded", saved, effects).loaded
 
     @classmethod
-    def _retained_review(cls, git, manifest, commit, *, capacity, memory_spool=False):
+    def _retained_review(
+        cls, git, manifest, commit, *, capacity, memory_spool=False, cancel=None
+    ):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
             # M counts cumulative model work, not measured live heap. Give it
@@ -588,7 +590,7 @@ class ReviewSession:
             request_limit=maximum,
             step_limit=maximum,
             timeout=TIMEOUT_MAX,
-            cancel=Event(),
+            cancel=Event() if cancel is None else cancel,
         )
         result = cls.__new__(cls)
         result._ledger = _Ledger(budget)
@@ -1357,26 +1359,32 @@ class ReviewSession:
                 self._retained_resume_proof = (loaded, canonical)
             return loaded
 
-    def _verify_retained_backings(self):
+    def _verify_retained_backings(self, records=None):
         """Recheck the registrations that support this retained review."""
         self._check()
+        if records is None:
+            records = tuple(self._closure.view.records.values())
+        if self._scope is not None:
+            self._check_backings(records, self._ledger, self._scope)
+            return
         # Each inspection has its own verification budget. The proof's ledger
         # stays live and retains its original registrations and charges.
         ledger = _Ledger(self._ledger.budget)
         try:
             with self._content._operation(ledger) as scope:
-                for record in self._closure.view.records.values():
-                    self._content._check_prepared(record, scope)
-                    with closing(
-                        self._content._read_owned(
-                            record.backing, record.reference, ledger, scope
-                        )
-                    ) as chunks:
-                        for _ in chunks:
-                            pass
+                self._check_backings(records, ledger, scope)
         finally:
             ledger.retire()
         self._check()
+
+    def _check_backings(self, records, ledger, scope):
+        for record in records:
+            self._content._check_prepared(record, scope)
+            with closing(
+                self._content._read_owned(record.backing, record.reference, ledger, scope)
+            ) as chunks:
+                for _ in chunks:
+                    pass
 
     def load_review(self, raw):
         with self._operation():
