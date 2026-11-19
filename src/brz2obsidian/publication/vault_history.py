@@ -530,8 +530,11 @@ def _write_review_spools(git, spools, declarations):
             input=_quoted_paths(spools),
         )
     except _GitTimeout as error:
-        partial = error.stdout.replace(b"\r\n", b"\n").removesuffix(b"\r")
-        if not "".join(f"{oid}\n" for oid in expected).encode().startswith(partial):
+        partial = error.stdout.replace(b"\r\n", b"\n")
+        if partial.endswith(b"\r"):
+            partial = partial[:-1] + b"\n"
+        expected_stdout = "".join(f"{oid}\n" for oid in expected).encode()
+        if not expected_stdout.startswith(partial):
             raise OSError("Saved review byte object write changed") from error
         raise
     if raw.decode().splitlines() != expected:
