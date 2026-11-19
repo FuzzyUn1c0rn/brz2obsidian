@@ -551,17 +551,26 @@ class _OwnedPreparation:
             return _executed(result, preparation.kind)
 
     def _source_payload(self, checkpoint):
+        references = None
+        if self._apply_source_update:
+            references = self._session._content._acquire_small_source(
+                checkpoint.locator, self._session._ledger, self._session._scope
+            )
         result = {}
         for row in checkpoint.manifest.source:
-            reference = self._session._content._acquire(
-                row.path,
-                role="source",
-                locator=checkpoint.locator,
-                byte_limit=self._session._ledger.remaining("raw_work"),
-                timeout=120,
-                cancel=self._session._ledger.budget.cancel,
-                ledger=self._session._ledger,
-                scope=self._session._scope,
+            reference = (
+                references[row.path]
+                if references is not None
+                else self._session._content._acquire(
+                    row.path,
+                    role="source",
+                    locator=checkpoint.locator,
+                    byte_limit=self._session._ledger.remaining("raw_work"),
+                    timeout=120,
+                    cancel=self._session._ledger.budget.cancel,
+                    ledger=self._session._ledger,
+                    scope=self._session._scope,
+                )
             )
             value = self._session._owned_value(reference)
             result[row.path] = (

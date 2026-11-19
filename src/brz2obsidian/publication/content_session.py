@@ -704,6 +704,60 @@ class ContentSession:
             scope=scope,
         )
 
+    def _acquire_small_source(self, locator, ledger, scope):
+        """Read one bounded retained source inventory under a single observation."""
+        from .git_payload import verify_blobs
+        from .vault_history import _Git
+
+        observed = self._require_current_observation()
+        self._require_private_scope(scope, ledger)
+        checkpoint = observed.history.checkpoint
+        if checkpoint is None or checkpoint.locator != locator:
+            raise OSError("Current retained source locator required")
+        rows = checkpoint.manifest.source
+        size = sum(row.size for row in rows)
+        if len(rows) < 2 or len(rows) > 32 or size > 4 * 1024 * 1024:
+            return None
+        self._check()
+        if checkpoint.status != "valid":
+            raise OSError("Current retained source locator required")
+        self._budget(size, ledger.remaining("raw_work"))
+        transfer = _Transfer(
+            timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+            cancel=ledger.budget.cancel,
+        )
+        git = _Git(observed._root, observed._inspection.executable)
+        acquired = []
+        with ExitStack() as outputs:
+            for row in rows:
+                scope.check(self)
+                ledger.reserve_file_cleanup()
+                backing, output = self._new_file()
+                outputs.enter_context(output)
+                acquired.append((row, backing, output))
+            verify_blobs(
+                [*git.prefix, "cat-file", "--batch"],
+                env=git.env,
+                objects=tuple(
+                    (row.object_id, row.size, row.sha256, transfer.sink(output, row.size))
+                    for row, _, output in acquired
+                ),
+                timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
+            )
+            for _, _, output in acquired:
+                transfer.check()
+                output.flush()
+                os.fsync(output.fileno())
+        references = {
+            row.path: self._register_acquired(
+                row, backing, ("source", row.path, locator, row), transfer, ledger, scope
+            )
+            for row, backing, _ in acquired
+        }
+        self._check()
+        transfer.check()
+        return references
+
     def _acquire(
         self,
         path,
@@ -792,6 +846,11 @@ class ContentSession:
             os.fsync(output.fileno())
         self._check()
         transfer.check()
+        return self._register_acquired(
+            row, backing, (role, path, locator, row), transfer, ledger, scope
+        )
+
+    def _register_acquired(self, row, backing, origin, transfer, ledger, scope):
         if ledger is None:
             self._copy(row, backing, _Discard(), transfer)
         else:
@@ -831,7 +890,7 @@ class ContentSession:
             reference,
             backing,
             row.mode,
-            (role, path, locator, row),
+            origin,
         )
         self._digests[row.sha256] = (reference, backing)
         return reference
