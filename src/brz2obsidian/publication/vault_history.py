@@ -845,6 +845,11 @@ class _ApplyReviewOwners(ExitStack):
             or session._ledger.budget.cancel is not self._resume_cancel
         ):
             return None
+        # Keep the fresh retained-byte check immediately before the caller's
+        # guarded identity check. The earlier traversal only supplies the parse.
+        self._read_proof(
+            _Git(root, observed._executable), manifest, set(), commit, False, self, "local"
+        )
         session._content._attach(observed)
         session._batch_current = True
         session._content._spool_acquisitions = True

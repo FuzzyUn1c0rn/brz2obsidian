@@ -30,7 +30,7 @@ _CONTENT_DISPATCH_PINNED = (
 _CONTENT_DISPATCH_WORKSPACE_M = 4 * 128 + 2 * (64 + 16 * 3)
 
 
-def _content_branches(annotation, metadata):
+def _content_branches(annotation, origin, metadata):
     """Recognize only the source-pinned owned callable tagged declaration."""
     if not _CONTENT_DISPATCH_PINNED:
         return None
@@ -40,7 +40,7 @@ def _content_branches(annotation, metadata):
             if discriminator is not None:
                 return None
             discriminator = rule
-    if get_origin(annotation) is Annotated:
+    if origin is Annotated:
         arguments = get_args(annotation)
         for rule in arguments[1:]:
             if type(rule) is Discriminator:
@@ -583,18 +583,21 @@ class _ModelInventory:
         if depth > self.depth_limit:
             raise ModelBudgetError(self.nodes, self.steps)
         self.charge(nodes=1, steps=1)
-        if self.validate:
-            branches = _content_branches(annotation, metadata)
+        validate = self.validate
+        kind = type(item)
+        model_type = isinstance(annotation, type)
+        origin = None if model_type or annotation is None else get_origin(annotation)
+        if validate and (metadata or origin is Annotated):
+            branches = _content_branches(annotation, origin, metadata)
             if branches is not None:
                 self._tagged_content(branches, item, depth)
                 return
-        if self.validate and annotation is type(None) and item is not None:
+        if validate and annotation is type(None) and item is not None:
             # A None leaf checks the existing input, not its descendants.
             # Keep a conservative input-alias and error/location allowance.
             self.charge(temporary=16)
             self.error(depth)
             return
-        origin = get_origin(annotation)
         if origin is Annotated:
             self.walk(get_args(annotation)[0], item, depth + 1)
             return
@@ -607,29 +610,27 @@ class _ModelInventory:
                 self.walk(alternative, item, depth + 1)
             return
         selected = (
-            annotation
-            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
-            else None
+            annotation if model_type and issubclass(annotation, BaseModel) else None
         )
-        if selected is None and isinstance(item, BaseModel) and annotation is None:
-            selected = type(item)
+        if selected is None and annotation is None and isinstance(item, BaseModel):
+            selected = kind
         if selected is not None:
             fields = (
                 resolved_contract_fields(selected)
                 if selected.__module__ == "brz2obsidian.contracts"
                 else selected.model_fields
             )
-            if isinstance(item, selected) and type(item) is not selected:
+            if kind is not selected and isinstance(item, selected):
                 raise ValueError(
                     "Caller-defined model subclasses are not owned schemas"
                 )
-            if type(item) is not dict and type(item) is not selected:
+            if kind is not dict and kind is not selected:
                 self.error(depth)
                 return
             self.charge(
-                nodes=1 if self.validate else 0,
+                nodes=1 if validate else 0,
                 retained=1024 + 128 * len(fields),
-                temporary=256 + 64 * len(fields) if self.validate else 0,
+                temporary=256 + 64 * len(fields) if validate else 0,
             )
             for name, field in fields.items():
                 self.charge(steps=1)
@@ -637,7 +638,7 @@ class _ModelInventory:
                     item, name, None if field.is_required() else field.default
                 )
                 self.walk(field.annotation, child, depth + 1, metadata=field.metadata)
-                if self.validate:
+                if validate:
                     self.error(depth + 1)
                     self.charge(steps=1 + len(field.metadata))
                     if type(child) is str and any(
@@ -649,15 +650,15 @@ class _ModelInventory:
                         self.path(child)
                     if name == "reviewed_assumptions" and type(child) in (tuple, list):
                         self.mapping(len(child))
-            if self.validate:
+            if validate:
                 self.validators(selected, item, depth)
-            if type(item) is dict:
+            if kind is dict:
                 for name, child in item.items():
                     self.charge(steps=1)
                     if name not in fields:
                         self.walk(None, name, depth + 1)
                         if (
-                            self.validate
+                            validate
                             and selected.__module__ == "brz2obsidian.contracts"
                             and selected.model_config.get("extra") == "forbid"
                             and type(name) is str
@@ -670,41 +671,40 @@ class _ModelInventory:
                             self.walk(None, child, depth + 1)
                         self.error(depth + 1)
             return
-        if type(item) is dict:
+        if kind is dict:
             self.charge(retained=256 + 64 * len(item))
             for name, child in item.items():
                 self.walk(None, name, depth + 1)
                 self.walk(None, child, depth + 1)
             return
-        if type(item) in (tuple, list):
+        if kind in (tuple, list):
             self.charge(
-                nodes=1 if self.validate else 0,
+                nodes=1 if validate else 0,
                 retained=64 + 16 * len(item),
-                temporary=64 + 16 * len(item) if self.validate else 0,
+                temporary=64 + 16 * len(item) if validate else 0,
             )
-            args = get_args(annotation)
-            for index, child in enumerate(item):
-                child_type = (
-                    args[0]
-                    if len(args) == 2 and args[1] is Ellipsis
-                    else args[index]
-                    if index < len(args)
-                    else None
-                )
-                self.walk(child_type, child, depth + 1)
+            args = get_args(annotation) if origin is not None else ()
+            if len(args) == 2 and args[1] is Ellipsis:
+                for child in item:
+                    self.walk(args[0], child, depth + 1)
+            else:
+                for index, child in enumerate(item):
+                    self.walk(
+                        args[index] if index < len(args) else None, child, depth + 1
+                    )
             return
         if isinstance(item, BaseModel):
             # A failed ordinary-union alternative does not inspect attributes of
             # a model of another type, but its error/work remains accounted.
             self.error(depth)
-        elif type(item) is str:
+        elif kind is str:
             self.charge(retained=64 + 4 * len(item))
-        elif type(item) is bytes:
+        elif kind is bytes:
             self.charge(retained=64)
             self.text += len(item)
-        elif item is None or type(item) is bool:
+        elif item is None or kind is bool:
             self.charge(retained=16)
-        elif type(item) is int:
+        elif kind is int:
             self.charge(retained=64 + (item.bit_length() + 7) // 8)
         else:
             raise ValueError("Unsupported prospective model value")

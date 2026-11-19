@@ -5,6 +5,7 @@ import json
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from threading import Event
 
 import pytest
 
@@ -19,6 +20,7 @@ from brz2obsidian.publication.vault_history import (
     CheckpointReviewMemo,
     _ApplyReviewOwners,
     _Git,
+    _UpdateRead,
 )
 from tests.application.test_vault_checkpoint_integrity import _blob, _call, _git, _state
 from tests.application.test_vault_checkpoints import fixture_case
@@ -123,6 +125,31 @@ def test_repeated_apply_review_requires_live_backings(
             with pytest.raises(OSError, match="Registered content integrity failed"):
                 read(owners)
     assert not tuple(tmp_path.glob("content-*"))
+
+
+def test_borrow_rechecks_retained_blobs_before_using_saved_identity(compact_checkpoint):
+    case = compact_checkpoint
+    manifest = CheckpointManifest.model_validate_json(case.manifest)
+    payload = manifest.review_content[0].object_id
+    loose_object = case.vault / ".git" / "objects" / payload[:2] / payload[2:]
+    hidden = loose_object.with_suffix(".test-held")
+    with (
+        _ApplyReviewOwners(memory_spool=True, cancel=Event()) as owners,
+        _UpdateRead(
+            case.vault, _metadata_only=True, _apply_review_owners=owners
+        ) as observed,
+    ):
+        checkpoint = observed._bound_history.checkpoint
+        assert checkpoint.locator.commit == case.result.commit
+        loose_object.rename(hidden)
+        try:
+            with pytest.raises(OSError, match="Git payload"):
+                owners._borrow_local(observed, checkpoint)
+            assert owners._borrowed_session is None
+        finally:
+            hidden.rename(loose_object)
+        session, review = owners._borrow_local(observed, checkpoint)
+        assert session is owners._borrowed_session and review.saved.plan.ready
 
 
 @pytest.fixture(scope="module")
