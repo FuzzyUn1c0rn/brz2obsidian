@@ -360,20 +360,17 @@ def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
     if len(raw) > 65536:
         raise OSError("Current locator exceeds its bounded control size")
     current = CheckpointLocator.model_validate_json(raw)
-    association = locator.association
-    if (
-        current != locator
-        or verify_directory(root) != association.vault_anchor
-        or verify_directory(root / ".git") != association.git_anchor
-    ):
-        raise OSError("Current checkpoint association or references changed")
     current_refs = git.call("for-each-ref", "--format=%(refname) %(objectname)")
+    association = locator.association
     # Admission resolves the checkpoint and retains the complete ref snapshot.
     # Check the exact fully qualified ref in this same fresh observation.
     rows = current_refs.splitlines()
     expected_checkpoint = f"{association.ref} {locator.commit}".encode("utf-8")
     if (
-        current_refs != refs
+        current != locator
+        or verify_directory(root) != association.vault_anchor
+        or verify_directory(root / ".git") != association.git_anchor
+        or current_refs != refs
         or expected_checkpoint not in rows
         or any(_existing_git_operation_blockers(root / ".git"))
     ):
