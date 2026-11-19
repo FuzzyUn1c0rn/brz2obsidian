@@ -641,6 +641,7 @@ class _OwnedPreparation:
                 lifecycle.available_memory(),
                 _cancel=self._cancel,
             )
+            self._session._batch_current = self._apply_source_update
 
     def restore(self, vault, *, resume=False, cancel=None, check_saved=None):
         """Read saved history, optionally checking identity before resuming it."""
@@ -851,10 +852,10 @@ class _OwnedPreparation:
             facts = self._session._admit_values(facts)
             self._session._coadmit()
             if exact_retained_plan:
-                # These historical effects only identify the queries to make.
-                # resume_review still replays against the fresh scoped admission.
+                # The verified saved plan supplies the subject queries.
+                # resume_review still replays against that fresh admission.
                 canonical = plan
-                effects = self._tip.historical_effects
+                effects = None
             else:
                 canonical = self._session._replay(plan)
                 if canonical is None:
@@ -1419,6 +1420,8 @@ class _OwnedPreparation:
 
     def _reobserve(self, preparation, *, for_apply=False):
         resume, self._apply_resume = self._apply_resume, None
+        if self._session is not None:
+            self._session._apply_proved_plan = None
         if preparation.kind == "onboarding":
             from .onboarding import reobserve_onboarding
 
@@ -1477,6 +1480,7 @@ class _OwnedPreparation:
                         != preparation.source_binding
                     ):
                         raise OSError("source_payload_changed")
+                    self._session._apply_proved_plan = resume[0].preparation.review
                     return (
                         scoped,
                         resume[0].model_copy(update={"code": "current"}),

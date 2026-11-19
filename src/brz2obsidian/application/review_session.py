@@ -366,6 +366,8 @@ class ReviewSession:
         self._physical = {}
         self._record = None
         self._initial_review_entry = None
+        self._apply_proved_plan = None
+        self._batch_current = False
         self._retain_initial_review = False
         self._closed = False
         self._selected = None
@@ -481,10 +483,11 @@ class ReviewSession:
 
         from brz2obsidian.publication.vault_history import _stored_model_fields
 
+        admitted_for_apply = select_effects and self._apply_proved_plan is plan
         with self._operation():
             plan = self._admit_values(plan)
             self._coadmit()
-            canonical = self._replay(plan)
+            canonical = plan if admitted_for_apply else self._replay(plan)
             if canonical is None:
                 raise OSError("Only canonical owned review can be exported")
             saved = SavedReview(
@@ -609,6 +612,7 @@ class ReviewSession:
 
     def _invalidate(self):
         self._initial_review_entry = None
+        self._apply_proved_plan = None
         self._operation_key = self._outstanding = self._selected = None
         self._content._clear_retained_semantic()
 
@@ -1402,6 +1406,16 @@ class ReviewSession:
             raise OSError("Complete supported physical admission required")
         self._ledger.retain_metadata(256 + 64 * len(admission.inventory))
         inventory = {row.path: row for row in admission.inventory}
+        pending = {} if self._batch_current else None
+
+        def register(path, reference=None):
+            if reference is None:
+                reference = self._content._acquire_current(
+                    path, self._ledger, self._scope
+                )
+            self._physical[path] = self._content._prepare_registered(
+                reference, self._ledger, self._scope
+            )
 
         def current(path, existence, content):
             self._ledger.take("step", 1)
@@ -1424,16 +1438,12 @@ class ReviewSession:
                 content.identity.sha256,
             ):
                 raise OSError("Current claim differs from freshly admitted bytes")
-            if path not in self._physical:
+            if path not in self._physical and (pending is None or path not in pending):
                 self._ledger.retain_metadata(1024 + 4 * len(path))
-                reference = self._content._acquire_current(
-                    path,
-                    self._ledger,
-                    self._scope,
-                )
-                self._physical[path] = self._content._prepare_registered(
-                    reference, self._ledger, self._scope
-                )
+                if pending is None:
+                    register(path)
+                else:
+                    pending[path] = row
 
         for subject in facts.subjects:
             value = subject.current
@@ -1458,6 +1468,12 @@ class ReviewSession:
                 for target in targets:
                     if target.canonical_path is not None:
                         current(target.canonical_path, fact.existence, fact.content)
+        if pending:
+            references = self._content._acquire_small_current(
+                tuple(pending.values()), self._ledger, self._scope
+            )
+            for path in pending:
+                register(path, references[path] if references is not None else None)
 
     def resume_review(self, loaded, facts, *, preflight, admission):
         """Resume after an immediate same-reader public scoped ``inspect``.
@@ -1528,13 +1544,14 @@ class ReviewSession:
                 return _resume_result("refused", "invalid_review", loaded)
 
     def select_review_effects(self, plan):
+        admitted_for_apply = plan is not None and self._apply_proved_plan is plan
         with self._operation():
             self._check()
             self._selected = None
             try:
                 plan = self._admit_values(plan)
                 self._coadmit()
-                canonical = self._replay(plan)
+                canonical = plan if admitted_for_apply else self._replay(plan)
                 if canonical is None:
                     return _refused("invalid_plan")
                 effects = self._drive(SelectedEffectsWork(canonical))

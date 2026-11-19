@@ -45,7 +45,7 @@ from brz2obsidian.core import (
     select_review_effects,
 )
 from brz2obsidian.publication.git_payload import verify_blobs
-from brz2obsidian.publication.git_read import OUTPUT_BUDGET, read_git
+from brz2obsidian.publication.git_read import OUTPUT_BUDGET, _GitTimeout, read_git
 from brz2obsidian.publication.vault_admission import (
     HOOKS,
     _configured_hook_state,
@@ -517,6 +517,27 @@ def _spool_oid(directory, path, size, sha):
     if info.st_size != size or actual_sha != sha:
         raise OSError("Captured spool changed")
     return oid.hexdigest()
+
+
+def _write_review_spools(git, spools, declarations):
+    actual = (
+        git.call(
+            "hash-object",
+            "-w",
+            "--no-filters",
+            "--stdin-paths",
+            input=_quoted_paths(spools),
+        )
+        .decode()
+        .splitlines()
+    )
+    if actual != [oid for oid, _, _, _ in declarations]:
+        raise OSError("Saved review byte object write changed")
+    verify_blobs(
+        [*git.prefix, "cat-file", "--batch"],
+        env=git.env,
+        objects=tuple(declarations),
+    )
 
 
 def _control_objects(git, requested, cache):
@@ -3362,24 +3383,15 @@ def capture_checkpoint(
                     declarations.append((oid, payload_size, sha, None))
                 written_declarations += tuple(declarations)
                 object_storage = "possible"
-                actual = (
-                    git.call(
-                        "hash-object",
-                        "-w",
-                        "--no-filters",
-                        "--stdin-paths",
-                        input=_quoted_paths(spools),
-                    )
-                    .decode()
-                    .splitlines()
-                )
-                if actual != [oid for oid, _, _, _ in declarations]:
-                    raise OSError("Saved review byte object write changed")
-                verify_blobs(
-                    [*git.prefix, "cat-file", "--batch"],
-                    env=git.env,
-                    objects=tuple(declarations),
-                )
+                try:
+                    _write_review_spools(git, spools, declarations)
+                except _GitTimeout:
+                    if len(spools) == 1:
+                        raise
+                    # Object writes are content-addressed. The ref has not
+                    # moved, so retry with the original per-file deadlines.
+                    for spool, declaration in zip(spools, declarations, strict=True):
+                        _write_review_spools(git, (spool,), (declaration,))
                 objects, object_storage = True, "verified"
                 review_content.extend(
                     CheckpointFile(

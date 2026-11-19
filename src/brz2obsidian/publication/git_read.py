@@ -166,6 +166,10 @@ def _cancel(thread):
                 kernel.CloseHandle(handle)
 
 
+class _GitTimeout(OSError):
+    """The owned Git process reached its observation deadline."""
+
+
 def read_git(argv, *, env, input=None, timeout=30):
     """Bound aggregate input/output and terminate owned work on every exit."""
     if input is not None and len(input) > OUTPUT_BUDGET:
@@ -234,7 +238,7 @@ def read_git(argv, *, env, input=None, timeout=30):
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            raise OSError("Git observation exceeded its safe time budget") from None
+            raise _GitTimeout("Git observation exceeded its safe time budget") from None
     finally:
         if job:
             job.close()

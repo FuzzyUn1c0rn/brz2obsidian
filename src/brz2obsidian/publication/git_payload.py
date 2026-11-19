@@ -11,6 +11,7 @@ from threading import Event, Lock, Thread
 from brz2obsidian.publication.git_read import (
     OUTPUT_BUDGET,
     _cancel,
+    _GitTimeout,
     _SuspendedPopen,
     _WindowsJob,
 )
@@ -18,6 +19,7 @@ from brz2obsidian.publication.git_read import (
 _CHUNK_SIZE = 1024 * 1024
 _HEADER_LIMIT = 128
 _HEX = frozenset("0123456789abcdefABCDEF")
+_TIMEOUT = "Git payload exceeded its time budget"
 
 
 def verify_blobs(argv, *, env, objects, timeout=30):
@@ -199,7 +201,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
         try:
             process.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            fail("Git payload exceeded its time budget")
+            fail(_TIMEOUT)
         if process.returncode:
             fail("Git payload command failed")
     except OSError, RuntimeError, ValueError, TypeError, OverflowError, MemoryError:
@@ -222,7 +224,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
             thread.join(timeout=max(0, deadline - time.monotonic()))
         survivors = [thread for thread in threads if thread.is_alive()]
         if survivors:
-            fail("Git payload exceeded its time budget")
+            fail(_TIMEOUT)
             for thread in survivors:
                 _cancel(thread)
             cleanup_deadline = time.monotonic() + 2
@@ -237,6 +239,8 @@ def verify_blobs(argv, *, env, objects, timeout=30):
     if any(thread.is_alive() for thread in threads):
         raise OSError("Git payload caller-owned sink did not finish")
     if failed.is_set():
+        if failure_reason == _TIMEOUT:
+            raise _GitTimeout(failure_reason)
         raise OSError(failure_reason)
     if not payload_complete.is_set() or accounted_objects != len(objects):
         raise OSError("Git payload verification did not complete")

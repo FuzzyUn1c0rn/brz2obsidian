@@ -748,6 +748,7 @@ class ContentSession:
     def _acquire_small_source(self, locator, ledger, scope):
         """Read one bounded retained source inventory under a single observation."""
         from .git_payload import verify_blobs
+        from .git_read import _GitTimeout
         from .vault_history import _Git
 
         observed = self._require_current_observation()
@@ -762,41 +763,52 @@ class ContentSession:
         self._check()
         if checkpoint.status != "valid":
             raise OSError("Current retained source locator required")
-        if shutil.disk_usage(self._directory).free < size:
+        if (
+            size > ledger.remaining("raw_work")
+            or shutil.disk_usage(self._directory).free < size
+        ):
             # The serial path can retire identical spools between reads.
             return None
-        self._budget(size, ledger.remaining("raw_work"))
         transfer = _Transfer(
-            timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+            timeout=min(120 * len(rows), max(0.001, ledger.deadline - time.monotonic())),
             cancel=ledger.budget.cancel,
+            _native=True,
         )
         git = _Git(observed._root, observed._inspection.executable)
         acquired = []
-        with ExitStack() as outputs:
-            for row in rows:
+        try:
+            with ExitStack() as outputs:
+                for row in rows:
+                    scope.check(self)
+                    ledger.reserve_file_cleanup()
+                    backing, output = self._new_file()
+                    outputs.enter_context(output)
+                    acquired.append((row, backing, output))
+                verify_blobs(
+                    [*git.prefix, "cat-file", "--batch"],
+                    env=git.env,
+                    objects=tuple(
+                        (
+                            row.object_id,
+                            row.size,
+                            row.sha256,
+                            transfer.sink(output, row.size),
+                        )
+                        for row, _, output in acquired
+                    ),
+                    timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
+                )
+                for _, _, output in acquired:
+                    transfer.check()
+                    output.flush()
+                    os.fsync(output.fileno())
+        except _GitTimeout:
+            # Preserve the serial per-file allowance for a slow batch. No
+            # reference exists until all spools have passed verification.
+            for _, backing, _ in acquired:
                 scope.check(self)
-                ledger.reserve_file_cleanup()
-                backing, output = self._new_file()
-                outputs.enter_context(output)
-                acquired.append((row, backing, output))
-            verify_blobs(
-                [*git.prefix, "cat-file", "--batch"],
-                env=git.env,
-                objects=tuple(
-                    (
-                        row.object_id,
-                        row.size,
-                        row.sha256,
-                        transfer.sink(output, row.size),
-                    )
-                    for row, _, output in acquired
-                ),
-                timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
-            )
-            for _, _, output in acquired:
-                transfer.check()
-                output.flush()
-                os.fsync(output.fileno())
+                self._unlink_owned_file(backing)
+            return None
         references = {
             row.path: self._register_acquired(
                 row,
@@ -1081,23 +1093,26 @@ class ContentSession:
         try:
             if verify_directory(self._directory) != self._anchor:
                 raise OSError("Content scratch identity changed")
-            for path, identity in tuple(self._files.items()):
+            for path in tuple(self._files):
                 if not path.exists():
                     continue
-                info = path.lstat()
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or info.st_nlink != 1
-                    or (info.st_dev, info.st_ino) != identity
-                ):
-                    raise OSError("Owned content file identity changed")
-                path.unlink()
-                del self._files[path]
+                self._unlink_owned_file(path)
             self._directory.rmdir()
         except OSError as error:
             raise OSError(
                 f"Owned content scratch retained at {self._directory}"
             ) from error
+
+    def _unlink_owned_file(self, path):
+        info = path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != self._files.get(path)
+        ):
+            raise OSError("Owned content file identity changed")
+        path.unlink()
+        del self._files[path]
 
 
 class _DecodedImport:
