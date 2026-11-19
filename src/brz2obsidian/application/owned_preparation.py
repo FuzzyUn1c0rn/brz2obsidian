@@ -21,7 +21,6 @@ from brz2obsidian.core.resolution import (
 )
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
-from brz2obsidian.publication.vault_admission import _same_current_domain
 from brz2obsidian.publication.vault_history import (
     _ApplyReviewOwners,
     _binding_signature,
@@ -740,7 +739,7 @@ class _OwnedPreparation:
                 ):
                     self._apply_resume = (
                         result,
-                        self.observed._inspection,
+                        self.observed.current_domain_matcher(),
                         history.checkpoint.manifest,
                     )
                 return result
@@ -1476,7 +1475,7 @@ class _OwnedPreparation:
             and resume[0].preparation is self.preparation
             and resume[0].preparation == preparation
             and resume[2] == history.checkpoint.manifest
-            and _same_current_domain(resume[1], self.observed._inspection)
+            and resume[1](self.observed)
         ):
             with self._session._operation():
                 plan = self._session._admit_values(preparation.review)

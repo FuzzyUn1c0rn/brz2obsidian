@@ -2497,6 +2497,23 @@ class _UpdateRead:
         self._check()
         return result
 
+    def current_domain_matcher(self):
+        """Retain the entry observation for comparison after this reader closes."""
+        from .vault_admission import _same_current_domain
+
+        if not self._open or self._inspection is None:
+            raise OSError("Completed current input observation required")
+        initial = self._inspection
+
+        def matches(current):
+            return (
+                current._open
+                and current._inspection is not None
+                and _same_current_domain(initial, current._inspection)
+            )
+
+        return matches
+
     def inspect(self, *, subjects, new_operation=None):
         from .vault_admission import _same_current_domain
 
