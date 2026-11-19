@@ -763,10 +763,19 @@ class ReviewSession:
         if (identity.sha256, identity.size) != (reference.sha256, reference.size):
             raise OSError("Registered content identity changed")
         if inline is not None:
+            backing = binding.registration.backing
+            if type(backing) is _MemoryBacking:
+                self._ledger.raw_pass(reference.size)
+                if inline != backing.data:
+                    raise OSError(
+                        "Inline bytes differ from the actual owned occurrence"
+                    )
+                self._scope._check_live(self._content)
+                return binding
             position, equal = 0, True
             with closing(
                 self._content._read_owned(
-                    binding.registration.backing,
+                    backing,
                     reference,
                     self._ledger,
                     self._scope,
@@ -958,16 +967,30 @@ class ReviewSession:
                 transaction.abort()
                 raise
         if isinstance(value, BaseModel):
-            updates = {
-                name: self._admit_values(getattr(value, name), path + (name,))
-                for name in type(value).model_fields
-            }
-            return value.model_copy(update=updates)
+            if self._batch_current:
+                updates = {}
+                for name in type(value).model_fields:
+                    child = getattr(value, name)
+                    admitted = self._admit_values(child, path + (name,))
+                    if admitted is not child:
+                        updates[name] = admitted
+                return value.model_copy(update=updates) if updates else value
+            return value.model_copy(
+                update={
+                    name: self._admit_values(getattr(value, name), path + (name,))
+                    for name in type(value).model_fields
+                }
+            )
         if type(value) is tuple:
-            return tuple(
+            admitted = tuple(
                 self._admit_values(child, path + (index,))
                 for index, child in enumerate(value)
             )
+            if self._batch_current and all(
+                left is right for left, right in zip(value, admitted, strict=True)
+            ):
+                return value
+            return admitted
         return value
 
     def _build_closure(self, bindings, physical, epoch):
@@ -1424,7 +1447,9 @@ class ReviewSession:
         for record in records:
             self._content._check_prepared(record, scope)
             with closing(
-                self._content._read_owned(record.backing, record.reference, ledger, scope)
+                self._content._read_owned(
+                    record.backing, record.reference, ledger, scope
+                )
             ) as chunks:
                 for _ in chunks:
                     pass

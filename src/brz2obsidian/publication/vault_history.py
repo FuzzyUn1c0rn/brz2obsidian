@@ -352,10 +352,12 @@ class _Git:
                 children.setdefault(head, []).append((tail, mode, oid))
             else:
                 children[head] = (mode, oid)
-        for name, value in children.items():
+        for name, value in sorted(children.items()):
             if isinstance(value, list):
                 children[name] = "040000", self.tree(value)
-        return self.call("mktree", "-z", input=self._tree_rows(children)).decode().strip()
+        return (
+            self.call("mktree", "-z", input=self._tree_rows(children)).decode().strip()
+        )
 
     @staticmethod
     def _tree_rows(entries):
@@ -384,7 +386,9 @@ class _Git:
         for depth in range(len(levels) - 1, -1, -1):
             trees = levels[depth]
             batch = b"".join(self._tree_rows(rows) + b"\0" for rows in trees.values())
-            oids = self.call("mktree", "-z", "--batch", input=batch).decode().splitlines()
+            oids = (
+                self.call("mktree", "-z", "--batch", input=batch).decode().splitlines()
+            )
             if len(oids) != len(trees) or any(
                 len(oid) != 40 or set(oid) - set("0123456789abcdef") for oid in oids
             ):
@@ -748,7 +752,7 @@ class _ExactBlobSink:
 
     def write(self, block):
         end = self.offset + len(block)
-        if self.expected[self.offset:end] != block:
+        if self.expected[self.offset : end] != block:
             raise OSError("Retained review blob differs from the owned export")
         self.offset = end
         return len(block)
@@ -758,7 +762,12 @@ class _ApplyReviewOwners(ExitStack):
     """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
     def __init__(
-        self, *, local_owner=None, retain_prepared=False, memory_spool=False, cancel=None
+        self,
+        *,
+        local_owner=None,
+        retain_prepared=False,
+        memory_spool=False,
+        cancel=None,
     ):
         super().__init__()
         self._proofs = {}
@@ -770,7 +779,9 @@ class _ApplyReviewOwners(ExitStack):
         self._prepared_export = None
         self._prepared_metadata = None
         self._checkpoint_graphs = (
-            {} if local_owner is None else local_owner._checkpoint_graphs
+            local_owner._checkpoint_graphs
+            if type(local_owner) is _ApplyReviewOwners
+            else {}
         )
 
     def _retain_prepared_export(self, git, commit, manifest, export):
@@ -839,16 +850,22 @@ class _ApplyReviewOwners(ExitStack):
         if self._borrowed_session is not None or proof is None:
             return None
         root, commit, manifest, session, _, review, _ = proof
-        if (
-            (root, commit, manifest)
-            != (observed._root, checkpoint.locator.commit, checkpoint.manifest)
-            or session._ledger.budget.cancel is not self._resume_cancel
-        ):
+        if (root, commit, manifest) != (
+            observed._root,
+            checkpoint.locator.commit,
+            checkpoint.manifest,
+        ) or session._ledger.budget.cancel is not self._resume_cancel:
             return None
         # Keep the fresh retained-byte check immediately before the caller's
         # guarded identity check. The earlier traversal only supplies the parse.
         self._read_proof(
-            _Git(root, observed._executable), manifest, set(), commit, False, self, "local"
+            _Git(root, observed._executable),
+            manifest,
+            set(),
+            commit,
+            False,
+            self,
+            "local",
         )
         session._content._attach(observed)
         session._batch_current = True
@@ -916,7 +933,9 @@ class _ApplyReviewOwners(ExitStack):
                     phase.enter_context(trial.pop_all())
             return metadata, review
 
-        root, retained_commit, retained_manifest, session, metadata, review, records = proof
+        root, retained_commit, retained_manifest, session, metadata, review, records = (
+            proof
+        )
         if (git.root, commit) != (root, retained_commit):
             return None
         if manifest != retained_manifest:
