@@ -707,6 +707,19 @@ def _restore_review(record, payloads, manifest):
     return restored.loaded
 
 
+class _ExactBlobSink:
+    def __init__(self, expected):
+        self.expected = memoryview(expected)
+        self.offset = 0
+
+    def write(self, block):
+        end = self.offset + len(block)
+        if self.expected[self.offset:end] != block:
+            raise OSError("Retained review blob differs from the owned export")
+        self.offset = end
+        return len(block)
+
+
 class _ApplyReviewOwners(ExitStack):
     """Retain exact local and prepared proofs during otherwise fresh inspections."""
 
@@ -720,6 +733,68 @@ class _ApplyReviewOwners(ExitStack):
         self._memory_spool = memory_spool
         self._resume_cancel = cancel
         self._borrowed_session = None
+        self._prepared_export = None
+        self._prepared_metadata = None
+
+    def _retain_prepared_export(self, git, commit, manifest, export):
+        if (
+            self._retain_prepared
+            and type(self._local_owner) is _ApplyReviewOwners
+            and manifest.boundary == "prepared"
+            and manifest.recovery_direction is None
+            and manifest.undo_of_receipt_commit is None
+            and self._prepared_export is None
+            and export is not None
+            and len(export.raw) <= 2 * 1024 * 1024
+            and sum(value.identity.size for value in export.values.values())
+            <= 2 * 1024 * 1024
+        ):
+            self._prepared_export = (git.root, commit, manifest, export)
+
+    def _read_prepared_export(self, git, manifest, verified, commit, include_review):
+        from brz2obsidian.core.resume import _load_result
+
+        root, expected_commit, expected_manifest, export = self._prepared_export
+        if (git.root, commit) != (root, expected_commit):
+            return None
+        if manifest != expected_manifest:
+            raise OSError("Captured prepared checkpoint has a different manifest")
+        export.check()
+        references = frozenset(export.values)
+        available = _review_role_objects(manifest, references)
+        envelope = (
+            manifest.review_object,
+            manifest.review_size,
+            manifest.review_sha256,
+            _ExactBlobSink(export.raw),
+        )
+
+        def payloads():
+            for sha in sorted(references):
+                oid, size = available[sha]
+                if size != export.values[sha].identity.size:
+                    raise OSError("Captured prepared payload differs in size")
+                with io.BytesIO() as expected:
+                    export.copy(sha, expected)
+                    yield oid, size, sha, _ExactBlobSink(expected.getvalue())
+
+        for batch in batched(chain((envelope,), payloads()), 32):
+            verify_blobs(
+                [*git.prefix, "cat-file", "--batch"],
+                env=git.env,
+                objects=batch,
+                timeout=120,
+            )
+        export.check()
+        if self._prepared_metadata is None:
+            review = _load_result("loaded", export.saved, export.effects).loaded
+            self._prepared_metadata = (
+                _checkpoint_review_metadata(manifest, review, references),
+                review,
+            )
+        metadata, review = self._prepared_metadata
+        verified.update(available[sha][0] for sha in references)
+        return metadata, review if include_review else None
 
     def _borrow_local(self, observed, checkpoint):
         """Attach an admitted Current observation to the exact retained owner."""
@@ -750,6 +825,12 @@ class _ApplyReviewOwners(ExitStack):
             and manifest.undo_of_receipt_commit is None
             and (git.root, manifest.previous) == local[:2]
         ):
+            if self._prepared_export is not None:
+                prepared = self._read_prepared_export(
+                    git, manifest, verified, commit, include_review
+                )
+                if prepared is not None:
+                    return prepared
             return self._read_proof(
                 git, manifest, verified, commit, include_review, self, "prepared"
             )
@@ -3592,6 +3673,8 @@ def capture_checkpoint(
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, metadata_dir / "locator.json")
+            if type(_owners) is _ApplyReviewOwners:
+                _owners._retain_prepared_export(git, commit, manifest, _owned_export)
         return result(
             "captured",
             "retained",
