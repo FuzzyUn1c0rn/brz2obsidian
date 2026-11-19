@@ -542,7 +542,10 @@ class ReviewSession:
             if select_effects:
                 # Co-admission after projection has just checked the complete
                 # live closure used to select from this canonical review.
-                effects = self._drive(SelectedEffectsWork(canonical))
+                try:
+                    effects = self._drive(SelectedEffectsWork(saved.plan))
+                except (ValueError, OSError, RecursionError) as error:
+                    raise OSError("Whole current owned review required") from error
                 if effects.status != "selected":
                     raise OSError("Whole current owned review required")
                 export.effects = self._selected = effects
