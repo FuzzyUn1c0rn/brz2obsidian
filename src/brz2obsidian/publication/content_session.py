@@ -22,6 +22,7 @@ from uuid import uuid4
 from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
 from brz2obsidian.contracts import ImmutableContentReference
 from brz2obsidian.publication.vault_native import (
+    _check_owned_directory,
     _observed_chunks,
     observe_file,
     verify_directory,
@@ -1160,8 +1161,7 @@ class _PrivateOperation:
 
     def check(self, session):
         self._check_live(session)
-        if verify_directory(session._directory) != session._anchor:
-            raise OSError("Content scratch identity changed")
+        _check_owned_directory(session._directory, session._anchor)
 
     def resolve(self, reference):
         self.check(self.session)

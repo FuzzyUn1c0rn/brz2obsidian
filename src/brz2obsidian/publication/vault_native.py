@@ -31,6 +31,13 @@ def _windows_bindings():
         wintypes.DWORD,
     ]
     kernel.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel.GetFileInformationByHandleEx.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
     kernel.LocalFree.argtypes = [ctypes.c_void_p]
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.DuplicateHandle.argtypes = [
@@ -63,6 +70,7 @@ def _windows_bindings():
 # Only API bindings are shared. Handles, buffers, security descriptors and every
 # filesystem/permission observation remain local to their individual calls.
 _WINDOWS_BINDINGS = _windows_bindings() if os.name == "nt" else None
+_FILE_ID_INFO_CLASS = 18
 
 
 def available_memory():
@@ -185,6 +193,41 @@ def verify_directory(path, *, writable=False):
     return f"{before.st_dev}:{before.st_ino}:{owner}"
 
 
+class _FileIdInfo(ctypes.Structure):
+    _fields_ = [
+        ("volume_serial", ctypes.c_uint64),
+        ("file_id", ctypes.c_ubyte * 16),
+    ]
+
+
+def _check_owned_directory(path, anchor):
+    """Recheck a scratch anchor using the opened directory's own identity."""
+    if os.name == "nt":
+        kernel, _ = _WINDOWS_BINDINGS
+        with _handle(path, directory=True) as (handle, owner):
+            identity = _FileIdInfo()
+            if kernel.GetFileInformationByHandleEx(
+                handle,
+                _FILE_ID_INFO_CLASS,
+                ctypes.byref(identity),
+                ctypes.sizeof(identity),
+            ):
+                file_id = int.from_bytes(identity.file_id, "little")
+                if file_id:
+                    current = path.lstat()
+                    if (
+                        not _physical(current)
+                        or not stat.S_ISDIR(current.st_mode)
+                        or (current.st_dev, current.st_ino)
+                        != (identity.volume_serial, file_id)
+                        or f"{identity.volume_serial}:{file_id}:{owner}" != anchor
+                    ):
+                        raise OSError("Content scratch identity changed")
+                    return
+    if verify_directory(path) != anchor:
+        raise OSError("Content scratch identity changed")
+
+
 def _observed_chunks(
     root,
     path,
@@ -221,18 +264,18 @@ def _observed_chunks(
 
     root, path = Path(root).absolute(), Path(path).absolute()
     path.relative_to(root)
-    if owned_identity is not None and path.parent != root:
-        raise OSError("Owned backing is outside its scratch directory")
     ancestors = []
-    parent = path.parent
-    while True:
-        identity = verify_directory(parent)
-        ancestors.append((parent, identity))
-        if parent == root:
-            if owned_identity is not None and identity != owned_identity[0]:
-                raise OSError("Content scratch identity changed")
-            break
-        parent = parent.parent
+    if owned_identity is None:
+        parent = path.parent
+        while True:
+            ancestors.append((parent, verify_directory(parent)))
+            if parent == root:
+                break
+            parent = parent.parent
+    else:
+        if path.parent != root:
+            raise OSError("Owned backing is outside its scratch directory")
+        _check_owned_directory(root, owned_identity[0])
     before = path.lstat()
     if (
         owned_identity is not None
@@ -292,6 +335,8 @@ def _observed_chunks(
         raise OSError("File identity/content changed during observation")
     if any(verify_directory(parent) != identity for parent, identity in ancestors):
         raise OSError("Ancestor identity changed during observation")
+    if owned_identity is not None:
+        _check_owned_directory(root, owned_identity[0])
     return after, content.hexdigest(), f"{after.st_dev}:{after.st_ino}:{owner}"
 
 
