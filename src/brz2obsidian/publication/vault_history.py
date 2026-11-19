@@ -3336,47 +3336,60 @@ def capture_checkpoint(
                 for row in inventory
             }
             review_content = []
-            for sha in sorted(set(review_payloads) - role_hashes):
-                payload = review_payloads[sha]
-                spool = directory / ("review-content-" + sha)
-                if _owned_export is None:
-                    spool.write_bytes(payload)
-                    payload_size = len(payload)
-                else:
-                    with spool.open("xb", buffering=0) as output:
-                        _owned_export.copy(sha, output)
-                    payload_size = payload.identity.size
-                expected_oid = _spool_oid(directory, spool, payload_size, sha)
-                declaration = (expected_oid, payload_size, sha, None)
-                written_declarations += (declaration,)
+            review_hashes = sorted(set(review_payloads) - role_hashes)
+            group_size = 1
+            if (
+                type(_owners) is _ApplyReviewOwners
+                and _owned_export is not None
+                and sum(review_payloads[sha].identity.size for sha in review_hashes)
+                <= 4 * 1024 * 1024
+            ):
+                group_size = 32
+            for hashes in batched(review_hashes, group_size):
+                spools, declarations = [], []
+                for sha in hashes:
+                    payload = review_payloads[sha]
+                    spool = directory / ("review-content-" + sha)
+                    if _owned_export is None:
+                        spool.write_bytes(payload)
+                        payload_size = len(payload)
+                    else:
+                        with spool.open("xb", buffering=0) as output:
+                            _owned_export.copy(sha, output)
+                        payload_size = payload.identity.size
+                    oid = _spool_oid(directory, spool, payload_size, sha)
+                    spools.append(spool)
+                    declarations.append((oid, payload_size, sha, None))
+                written_declarations += tuple(declarations)
                 object_storage = "possible"
-                actual_oid = (
+                actual = (
                     git.call(
                         "hash-object",
                         "-w",
                         "--no-filters",
                         "--stdin-paths",
-                        input=_quoted_paths((spool,)),
+                        input=_quoted_paths(spools),
                     )
                     .decode()
-                    .strip()
+                    .splitlines()
                 )
-                if actual_oid != expected_oid:
+                if actual != [oid for oid, _, _, _ in declarations]:
                     raise OSError("Saved review byte object write changed")
                 verify_blobs(
                     [*git.prefix, "cat-file", "--batch"],
                     env=git.env,
-                    objects=(declaration,),
+                    objects=tuple(declarations),
                 )
                 objects, object_storage = True, "verified"
-                review_content.append(
+                review_content.extend(
                     CheckpointFile(
                         path=sha,
                         mode="100644",
-                        size=payload_size,
+                        size=size,
                         sha256=sha,
-                        object_id=actual_oid,
+                        object_id=oid,
                     )
+                    for oid, size, sha, _ in declarations
                 )
             review_oid = None
             if review_raw is not None:
