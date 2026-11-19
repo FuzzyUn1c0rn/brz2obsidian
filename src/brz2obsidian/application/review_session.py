@@ -476,7 +476,7 @@ class ReviewSession:
             raise OSError("Owned canonical review changed")
         return _inspect_canonical_choices(canonical)
 
-    def _freeze_export(self, plan):
+    def _freeze_export(self, plan, *, select_effects=False):
         import json
 
         from brz2obsidian.publication.vault_history import _stored_model_fields
@@ -539,6 +539,13 @@ class ReviewSession:
                 raw,
                 MappingProxyType(values),
             )
+            if select_effects:
+                # Co-admission after projection has just checked the complete
+                # live closure used to select from this canonical review.
+                effects = self._drive(SelectedEffectsWork(canonical))
+                if effects.status != "selected":
+                    raise OSError("Whole current owned review required")
+                export.effects = self._selected = effects
             self._publication_export = export
         return export
 

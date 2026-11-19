@@ -1078,8 +1078,11 @@ class _OwnedPreparation:
                 self._session._ledger.release_failed()
 
     def _publication_export(self, plan):
-        export = self._session._freeze_export(plan)
-        export.effects = self._session.select_review_effects(export.saved.plan)
+        export = self._session._freeze_export(
+            plan, select_effects=self._apply_source_update
+        )
+        if export.effects is None:
+            export.effects = self._session.select_review_effects(export.saved.plan)
         if export.effects.status != "selected":
             raise OSError("Whole current owned review required")
         self._session._content._detach()
