@@ -122,10 +122,11 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                 sha1.update(f"blob {size}\0".encode("ascii"))
                 sha256 = hashlib.sha256()
                 remaining = size
+                read_block = stream.read if sink is None else stream.read1
                 while remaining:
                     if failed.is_set():
                         return
-                    block = stream.read(min(remaining, _CHUNK_SIZE))
+                    block = read_block(min(remaining, _CHUNK_SIZE))
                     if not block:
                         raise OSError("Git payload is truncated")
                     remaining -= len(block)

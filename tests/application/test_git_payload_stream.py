@@ -104,9 +104,9 @@ def test_raw_batch_timeout_distinguishes_incomplete_header_prefix(
     script.write_text(
         "import pathlib, sys, time\n"
         f"assert sys.stdin.buffer.read() == {requests!r}\n"
+        f"pathlib.Path({str(marker)!r}).touch()\n"
         f"sys.stdout.buffer.write({header!r})\n"
         "sys.stdout.buffer.flush()\n"
-        f"pathlib.Path({str(marker)!r}).touch()\n"
         "time.sleep(120)\n",
         encoding="utf-8",
     )
