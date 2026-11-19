@@ -483,7 +483,9 @@ class ReviewSession:
 
         from brz2obsidian.publication.vault_history import _stored_model_fields
 
-        admitted_for_apply = select_effects and self._apply_proved_plan is plan
+        admitted_for_apply = (
+            select_effects and plan is not None and self._apply_proved_plan is plan
+        )
         with self._operation():
             plan = self._admit_values(plan)
             self._coadmit()

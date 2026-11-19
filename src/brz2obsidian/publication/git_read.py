@@ -178,6 +178,7 @@ def read_git(argv, *, env, input=None, timeout=30):
     process = None
     threads = []
     overflow = Event()
+    timed_out = False
     lock = Lock()
     used = len(input) if input is not None else 0
     failures = []
@@ -238,7 +239,7 @@ def read_git(argv, *, env, input=None, timeout=30):
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            raise _GitTimeout("Git observation exceeded its safe time budget") from None
+            timed_out = True
     finally:
         if job:
             job.close()
@@ -261,6 +262,8 @@ def read_git(argv, *, env, input=None, timeout=30):
                     stream.close()
     if overflow.is_set() or failures or any(thread.is_alive() for thread in threads):
         raise OSError("Git observation exceeds its safe resource budget")
+    if timed_out:
+        raise _GitTimeout("Git observation exceeded its safe time budget")
     return subprocess.CompletedProcess(
         argv, process.returncode, bytes(outputs[0]), bytes(outputs[1])
     )

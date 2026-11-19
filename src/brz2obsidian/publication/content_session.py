@@ -770,7 +770,9 @@ class ContentSession:
             # The serial path can retire identical spools between reads.
             return None
         transfer = _Transfer(
-            timeout=min(120 * len(rows), max(0.001, ledger.deadline - time.monotonic())),
+            timeout=min(
+                120 * len(rows), max(0.001, ledger.deadline - time.monotonic())
+            ),
             cancel=ledger.budget.cancel,
             _native=True,
         )

@@ -65,6 +65,8 @@ def verify_blobs(argv, *, env, objects, timeout=30):
     accounted_objects = 0
     failure_reason = None
     process = None
+    process_reaped = False
+    control_overflow = False
     job = None
     threads = []
     deadline = time.monotonic() + timeout
@@ -82,11 +84,11 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                 pass
 
     def control(count):
-        nonlocal used
+        nonlocal used, control_overflow
         with lock:
             used += count
-            overflow = used > OUTPUT_BUDGET
-        if overflow:
+            control_overflow = used > OUTPUT_BUDGET
+        if control_overflow:
             raise OSError("Git payload exceeds its control budget")
 
     def close_worker_stream(stream):
@@ -218,6 +220,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
         if process is not None:
             try:
                 process.wait(timeout=5)
+                process_reaped = True
             except subprocess.TimeoutExpired:
                 fail("Git payload process cleanup failed")
         for thread in threads:
@@ -239,7 +242,7 @@ def verify_blobs(argv, *, env, objects, timeout=30):
     if any(thread.is_alive() for thread in threads):
         raise OSError("Git payload caller-owned sink did not finish")
     if failed.is_set():
-        if failure_reason == _TIMEOUT:
+        if failure_reason == _TIMEOUT and process_reaped and not control_overflow:
             raise _GitTimeout(failure_reason)
         raise OSError(failure_reason)
     if not payload_complete.is_set() or accounted_objects != len(objects):

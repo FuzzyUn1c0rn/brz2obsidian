@@ -3391,7 +3391,12 @@ def capture_checkpoint(
                     # Object writes are content-addressed. The ref has not
                     # moved, so retry with the original per-file deadlines.
                     for spool, declaration in zip(spools, declarations, strict=True):
+                        _owned_export.check()
+                        _owned_export.session._ledger.check()
                         _write_review_spools(git, (spool,), (declaration,))
+                if group_size > 1:
+                    _owned_export.check()
+                    _owned_export.session._ledger.check()
                 objects, object_storage = True, "verified"
                 review_content.extend(
                     CheckpointFile(
