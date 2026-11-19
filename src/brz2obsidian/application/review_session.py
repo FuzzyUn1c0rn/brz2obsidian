@@ -491,6 +491,7 @@ class ReviewSession:
                 schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
             )
             values = {}
+            plain_fields = {} if select_effects else None
 
             def project(value):
                 if isinstance(value, (InlineExactContent, OpaqueContent)):
@@ -508,7 +509,13 @@ class ReviewSession:
                         "reference": project(value.reference),
                     }
                 if type(value) is bytes:
-                    item = self._admit_values(InlineExactContent(data=value))
+                    self._ledger.check()
+                    item = plain_fields.get(value) if plain_fields is not None else None
+                    if item is None:
+                        item = self._admit_values(InlineExactContent(data=value))
+                        if plain_fields is not None and len(plain_fields) < 1024:
+                            self._ledger.retain_metadata(128)
+                            plain_fields[value] = item
                     values.setdefault(item.identity.sha256, item)
                     return {"__brz2obsidian_review_blob__": item.identity.sha256}
                 if isinstance(value, BaseModel):
