@@ -6,7 +6,12 @@ can retain input and stack frames, so release that workspace after its handler
 exits. Charge returned immutable graph work cumulatively even after a lexical
 owner closes, since the caller can retain the graph. Cumulative model work uses
 finite work credit while live envelope and semantic allocations keep separate
-capacity checks.
+capacity checks. For legacy integer metadata, reject before decimal conversion
+if the lower bound on digit count exceeds the remaining budget. The magnitude
+of a nonzero integer is at least two to the power of its bit length minus one.
+Since two to the fourth power exceeds ten, dividing bit length minus one by
+four and rounding down gives a conservative bound without allocating the
+decimal text.
 
 Size replay capacity using distinct retained content bytes. One measured 36 MiB
 review reached roughly 294 MiB of peak commit as replay rebuilt its immutable
