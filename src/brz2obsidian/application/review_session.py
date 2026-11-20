@@ -136,6 +136,10 @@ class ReviewBudget:
             raise ValueError("Review cancellation requires an Event")  # noqa: TRY004
 
 
+class _ReviewCancelled(OSError):
+    """The review operation observed its cancellation event."""
+
+
 class _Ledger:
     def __init__(self, budget):
         self.budget = budget
@@ -151,7 +155,9 @@ class _Ledger:
         self.retain_metadata(_FIXED_M)
 
     def check(self):
-        if self.budget.cancel.is_set() or time.monotonic() >= self.deadline:
+        if self.budget.cancel.is_set():
+            raise _ReviewCancelled("Review cancelled")
+        if time.monotonic() >= self.deadline:
             raise OSError("Review cancelled or time budget exhausted")
 
     def remaining(self, name):

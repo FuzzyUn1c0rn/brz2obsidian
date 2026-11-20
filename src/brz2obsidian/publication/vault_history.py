@@ -830,6 +830,7 @@ class _ApplyReviewOwners(ExitStack):
         self._borrowed_session = None
         self._prepared_export = None
         self._prepared_metadata = None
+        self._read_cancelled = False
         self._checkpoint_graphs = (
             local_owner._checkpoint_graphs
             if type(local_owner) is _ApplyReviewOwners
@@ -1041,9 +1042,20 @@ class CheckpointReviewMemo:
         _owners=None,
     ):
         if type(_owners) is _ApplyReviewOwners and commit is not None:
-            retained = _owners.read(
-                git, manifest, verified, commit=commit, include_review=include_review
-            )
+            try:
+                retained = _owners.read(
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                    include_review=include_review,
+                )
+            except OSError as error:
+                from brz2obsidian.application.review_session import _ReviewCancelled
+
+                if isinstance(error, _ReviewCancelled):
+                    _owners._read_cancelled = True
+                raise
             if retained is not None:
                 return retained
         key = (

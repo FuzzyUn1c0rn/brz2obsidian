@@ -2507,6 +2507,8 @@ def _apply_reviewed_update(
                 operation_generation = prepared.locator.generation
             cancelled = cancel_requested()
             if not cancelled:
+                if type(_owners) is _ApplyReviewOwners:
+                    _owners._read_cancelled = False
                 tip = (
                     inspect_history(
                         root, subjects=subjects, active_operation=operation_id
@@ -2520,9 +2522,18 @@ def _apply_reviewed_update(
                         _owners=_owners,
                     )
                 )
-                # Retained export reads can stop on cancellation during
-                # verification. Acknowledge the stop before interpreting the read.
-                cancelled = cancel_requested()
+                # An interrupted review read records its cause before admission
+                # translates the error to an unavailable tip.
+                cancelled = (
+                    type(_owners) is _ApplyReviewOwners and _owners._read_cancelled
+                )
+                if not cancelled and (
+                    tip.status != "intact"
+                    or tip.checkpoint is None
+                    or tip.checkpoint.manifest.boundary != "prepared"
+                ):
+                    raise OSError("Prepared checkpoint could not be rediscovered")
+                cancelled = cancelled or cancel_requested()
             if cancelled:
                 return outcome(
                     "cancelled",
@@ -2538,12 +2549,6 @@ def _apply_reviewed_update(
                     recovery=False,
                     message="Cancellation retained preparation without publishing files.",
                 )
-            if (
-                tip.status != "intact"
-                or tip.checkpoint is None
-                or tip.checkpoint.manifest.boundary != "prepared"
-            ):
-                raise OSError("Prepared checkpoint could not be rediscovered")
             manifest = tip.checkpoint.manifest
             operation_generation = manifest.generation
             intent = VaultOperationIntent(

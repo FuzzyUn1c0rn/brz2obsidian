@@ -317,6 +317,46 @@ def test_owned_apply_reports_cancellation_after_successful_review_blob_batch(
     assert user_state(vault, owned_ref=ref) == before
 
 
+def test_resumed_apply_reports_prepared_git_failure_even_when_stop_arrives(
+    saved_source_update, monkeypatch
+):
+    vault, saved, ref = saved_source_update
+    before = user_state(vault, owned_ref=ref)
+    locator = vault / ".brz2obsidian" / "locator.json"
+    cancel = Event()
+    read_git = vault_history.read_git
+
+    def fail_ref_verification(argv, **kwargs):
+        if (
+            not cancel.is_set()
+            and argv[-3:] == ["rev-parse", "--verify", ref]
+            and json.loads(locator.read_bytes())["commit"] != saved.capture.commit
+        ):
+            result = read_git([*argv[:-1], ref + "-missing"], **kwargs)
+            assert result.returncode != 0 and result.stderr
+            cancel.set()
+            return result
+        return read_git(argv, **kwargs)
+
+    cold = UpdateContext()
+    try:
+        resumed = cold.resume(vault, selection_id=str(uuid4()))
+        assert resumed.ready and resumed.binding is not None, resumed.model_dump_json()
+        monkeypatch.setattr(vault_history, "read_git", fail_ref_verification)
+        failed = cold.apply(resumed.binding, cancel=cancel.is_set)
+    finally:
+        cold.close(choice="discard")
+
+    assert cancel.is_set()
+    assert failed.status == "failed", failed.model_dump_json()
+    assert failed.code == "apply_unavailable"
+    operation = failed.operation
+    assert operation is not None and operation.history == "prepared"
+    assert operation.published_files == 0 and operation.intent_commit is None
+    assert operation.result_commit is None and operation.receipt_commit is None
+    assert user_state(vault, owned_ref=ref) == before
+
+
 @pytest.mark.parametrize("diagnostic", (False, True))
 def test_git_timeout_with_pending_input_preserves_output_and_diagnostics(diagnostic):
     child = (
