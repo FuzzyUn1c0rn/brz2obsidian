@@ -278,8 +278,6 @@ def _observed_identity(path, content, identity, established, *, native_metadata=
             None,
             "content",
         )
-    # Recorded6 retains the delivered bounded identity grammar, without gaining
-    # structured merge or original-reproduction authority for that generation.
     read_format = 7 if identity.output_format == 6 else identity.output_format
     document = interpret_structure(content, output_format=read_format)
     fields = {
@@ -354,7 +352,6 @@ def assemble_facts(
     retired = set()
     historical = {}
     if qualified_scope:
-        # The checkpoint retains the association even across source omissions.
         retired.update(retired_note_ids)
         retired.update(
             key[0]
@@ -420,8 +417,6 @@ def assemble_facts(
             current_content,
             old_identity,
             established,
-            # A new format8 operation qualifies edited native metadata while
-            # the baseline identity and merge grammar retain their generation.
             native_metadata=identity.output_format in QUALIFIED_OUTPUT_FORMATS,
         )
         inventory.append(
@@ -869,7 +864,6 @@ def automatic_attachment_facts(facts, proposal, subject, change, *, _owner=None)
     from .attachment_choices import selected_attachment_candidate
     from .review_choices import review_plan_attachment_references
 
-    # Interpretation only: this view does not supply a canonical admission verdict.
     view = SimpleNamespace(facts=facts, proposal=proposal)
     row = ReviewRequirement(
         requirement_id=change.change_id,
@@ -1036,7 +1030,6 @@ def _link_context(
                     "identity": _identity(facts.incoming_identity, intended.item_id)
                 }
             )
-        # Duplicate identities retain distinct physical targets for ambiguity.
         if any(t.target_id == target_id for t in current_targets):
             actual = actual.model_copy(
                 update={"target_id": target_id + ":" + row.entry_id}

@@ -808,7 +808,6 @@ def test_ownership_projection_uses_retained_note_and_rename_target_paths(current
         interpret_links,
     )
 
-    # Actual post-rename observation: one source item, two owned physical paths.
     current_facts = with_review_links(
         request(original=b"base\r\n", current=b"new\r\n", incoming=b"base\r\n")
     )

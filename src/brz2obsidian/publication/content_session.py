@@ -180,7 +180,6 @@ class _RetainedReviewRead:
     def budget_spool(self, payload_bytes, owned_bytes):
         self.spooled = owned_bytes
         if self.memory_spool:
-            # Leave room for the whole set to become semantic evidence later.
             headroom = (
                 self.capacity
                 - 4 * self.envelope_size
@@ -374,8 +373,6 @@ class ContentSession:
             self._check_prepared(registration, scope)
             backing, reference = registration.backing, registration.reference
             if backing in self._retained_semantic:
-                # A cached value is available only after another complete read
-                # proves its correspondence with this exact owned backing.
                 data = self._retained_semantic[backing]
                 position, equal = 0, True
                 with closing(
@@ -674,8 +671,6 @@ class ContentSession:
             scope.check(self)
             ledger.check()
 
-        # Reserve this complete pass at construction, including when a second
-        # reader will be constructed before either stream starts consuming.
         return chunks()
 
     def _stage_decoded(self, reference, ledger, scope):
@@ -788,7 +783,6 @@ class ContentSession:
             size > ledger.remaining("raw_work")
             or shutil.disk_usage(self._directory).free < size
         ):
-            # The serial path can retire identical spools between reads.
             return None
         transfer = _Transfer(
             timeout=min(
@@ -982,8 +976,6 @@ class ContentSession:
             sha256=row.sha256,
             size=row.size,
         )
-        # Distinct registrations retain their own admitted origin even when
-        # equality has proved that an immutable backing can be shared.
         self._values[reference.content_id] = (
             reference,
             backing,

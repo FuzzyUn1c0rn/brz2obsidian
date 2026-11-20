@@ -138,7 +138,6 @@ def test_choice_details_button_retains_requested_context_while_pending_and_compl
                 args.command == "choice_details"
                 and args.requirement_id == offer.requirement_id
             ):
-                # Hold only the outer return, after actual closed production output.
                 self.completed_details = terminal
                 held.set()
                 assert release.wait(timeout=12), "Release the owned completed read"
@@ -321,7 +320,6 @@ def test_choice_details_button_retains_requested_context_while_pending_and_compl
             assert queue.currentItem().text() == "Overview" and queue.hasFocus()
             assert visible(label("Review the whole update"))
             assert scroll.value() == replacement_position, observations
-            # Normal local navigation still exposes the recorded Both decision.
             other = next(
                 queue.item(i)
                 for i in range(queue.count())

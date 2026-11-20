@@ -64,7 +64,6 @@ def ico(
     bodies, expected = {}, []
     for index, size in enumerate(sizes):
         rgba = pixels(size, size, index, opaque=opaque)
-        # The 2x2 phase0 control is handwritten independently of this encoder.
         if size == 2 and index == 0 and not opaque:
             rgba, xor = LITERAL_RGBA, LITERAL_BGRA
         else:
@@ -234,7 +233,7 @@ def legacy_zero_alpha_control():
         raw[top_left : top_left + 3] = b"\0\0\0"
         expected = bytearray(frame["rgba"])
         expected[:3] = b"\0\0\0"
-        expected[3] = 0  # Logical top-left only; all other mask bits are zero.
+        expected[3] = 0
         frame["rgba"] = bytes(expected)
         frame["rgba_sha256"] = digest(expected)
         frame["mask_sha256"] = digest(raw[mask_start : begin + frame["body_length"]])

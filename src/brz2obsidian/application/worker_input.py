@@ -18,8 +18,6 @@ class _PollingPipe(io.RawIOBase):
             try:
                 data = os.read(self._descriptor, len(buffer))
             except BlockingIOError:
-                # A blocked native pipe read can deadlock Windows extension
-                # initialization. Yield without owning a native I/O lock.
                 time.sleep(0.01)
                 continue
             buffer[: len(data)] = data

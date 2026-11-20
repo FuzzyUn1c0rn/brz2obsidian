@@ -1401,8 +1401,6 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     stored_source = {}
 
     def retain_description(vault_arg, source_arg, **values):
-        # This declared native port retains descriptions for lifecycle routing;
-        # no real checkpoint graph or file-publication claim follows.
         assert vault_arg == str(vault)
         source_root = Path(source_arg)
         stored_source.update(
@@ -1619,7 +1617,6 @@ def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
     assert all(
         row.baseline.status == "unknown" for row in prepared.review.facts.subjects
     )
-    # Valid current source/vault facts reach the public before-snapshot boundary.
     cancelled = operations.save_update(prepared, cancel=lambda: True)
     assert (cancelled.status, cancelled.code) == (
         "cancelled_before_publication",

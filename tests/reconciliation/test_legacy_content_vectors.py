@@ -325,7 +325,6 @@ def test_refs_envelope_uses_actual_storage_and_baseline_only_role_closure(
         (source / "Notes/Opening.md").read_bytes(),
     )
 
-    # A valid typed declaration still cannot authorize an inline checkpoint.
     from brz2obsidian.contracts import ContentIdentity, OpaqueContent, ReviewPlan
 
     original = loaded.saved.plan

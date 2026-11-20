@@ -20,8 +20,8 @@ def test_full_finite_icon_snapshots_keep_owned_icons_and_direct_membership(tmp_p
     assert {icons[IDS[name]].effective_icon_asset_id for name in "ABCDEFG"} == {ICON}
     assert icons[IDS["D"]].appearance_category_key == IDS["C"]
     assert icons[IDS["D"]].explicit_icon_asset_id is None
-    assert icons[identity(40)].effective_icon_asset_id == DEEP_ICON  # N8: eight links.
-    assert icons[identity(41)].effective_icon_asset_id == DEEP_ICON  # N9: nine links.
+    assert icons[identity(40)].effective_icon_asset_id == DEEP_ICON
+    assert icons[identity(41)].effective_icon_asset_id == DEEP_ICON
     destination = tmp_path / "vault"
     converted = workflow.convert(source, destination)
     assert converted.outcome == "warnings", converted.issues

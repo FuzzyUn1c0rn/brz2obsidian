@@ -200,7 +200,6 @@ def _read_physical(root, rows, *, _owner=None):
 
 
 def _read_source(operations, vault, checkpoint, observed=None, *, _owner=None):
-    # One finite request verifies the current complete owned manifest once.
     from .checkpoint_payload_contracts import CheckpointPayloadRequest
 
     rows = checkpoint.manifest.source
@@ -941,8 +940,6 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
             s for s in candidate.target_facts if s.target_id in selected_ids
         )
     if plan.facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS:
-        # Observe only results reconstructed from the actual producer facts and
-        # admitted actions. Unresolved peers do not imply a Current selection.
         if _owner is None:
             validated = validate_review(plan)
             canonical = validated.plan if validated.status == "accepted" else None
@@ -2062,8 +2059,6 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
                         "next_actions": ("continue_review", "refresh_update"),
                     }
                 )
-            # The existing capture retained source/current separately. Reobserve
-            # the new checkpoint before entering the existing publication path.
             applied = apply_update(
                 operations,
                 captured.preparation,

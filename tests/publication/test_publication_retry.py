@@ -359,7 +359,6 @@ def test_replaced_or_reparse_staging_never_claims_foreign_ownership(
 
     def native_sleep(delay):
         parking_delays.append(delay)
-        # Captured before patching time.sleep; only native parking setup waits.
         real_sleep(delay)
 
     def sleep(_delay):

@@ -924,7 +924,6 @@ class CommandCalls:
             try:
                 result = function(argv, **kwargs)
             except BaseException as original:
-                # Original cleanup has completed when the real function raises.
                 for job in self.current["jobs"]:
                     try:
                         job.close_measurement()
@@ -1219,7 +1218,6 @@ def _parent(size):
     proof = json.loads(raw)
     proof["child_alive_at_parent_exit"] = child.poll() is None
     print(json.dumps(proof), flush=True)
-    # Deliberately leave the child alive, with pipes held, for the real cleanup.
 
 
 def _peaks(attempt):
@@ -2045,7 +2043,6 @@ def _check_payload_file(path, declaration):
         while block := stream.read(MIB):
             if position + len(block) > declaration["size"]:
                 raise OSError("Payload file exceeds its independent size")
-            # Lane equality is separate from the repeated-block generator.
             for lane in range(min(256, len(block))):
                 values = block[lane::256]
                 expected = bytearray([(position + lane) % 256]) * len(values)

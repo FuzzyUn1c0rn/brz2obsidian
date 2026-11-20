@@ -148,7 +148,6 @@ class _Projection:
         elif kind is bool:
             self.emit(b"true" if value else b"false")
         elif kind is int:
-            # Decimal length is at least (bit_length-1)/4. Reject before str().
             if max(1, (value.bit_length() - 1) // 4) > self.maximum - self.metadata:
                 raise OSError("Integer metadata budget exhausted")
             try:
@@ -260,17 +259,15 @@ class ContentComparison:
         _limit(node_limit, "node", minimum=1)
         if type(references) is not tuple or 1 + 4 * len(references) > node_limit:
             raise OSError("Invalid bounded comparison references")
-        remaining_metadata = _limit(metadata_limit, "metadata") - 2  # Array brackets.
+        remaining_metadata = _limit(metadata_limit, "metadata") - 2
         if remaining_metadata < 0:
             raise OSError("Metadata budget exhausted")
         admitted = []
         for index, value in enumerate(references):
             if index:
-                remaining_metadata -= 1  # Compact comma, including duplicate entries.
+                remaining_metadata -= 1
             if remaining_metadata < 0:
                 raise OSError("Metadata budget exhausted")
-            # Admit each three-field copy before retaining the next one. The
-            # reference graph is bounded by M plus one constant-sized model.
             value = _reference(value)
             fragment = _Projection(
                 _reference_node(value),
@@ -391,8 +388,6 @@ class ContentComparison:
             self._check()
             transfer.check()
 
-        # Eager reservation lets paired comparisons fund both full reads before
-        # either iterator performs native IO; closing an unstarted one is safe.
         return chunks()
 
     def project_legacy(

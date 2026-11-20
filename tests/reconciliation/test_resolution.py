@@ -1020,7 +1020,6 @@ def test_mapping_and_format_choices_never_join_compatible_bulk_or_claim_old_byte
         and not kept.plan.approvals[0].source_accepted
     )
     assert kept.plan.approvals[0].source_memory.choice == "keep_vault"
-    # An unavailable historical renderer produces an explicit onboarding choice.
     facts = request(current=b"authored\xff", incoming=b"target format\n")
     older = facts.baseline_identity.model_copy(update={"output_format": 6})
     facts = facts.model_copy(
@@ -1288,7 +1287,6 @@ def test_configuration_keep_memory_is_domain_and_context_bound_across_new_propos
     )
     changed = later.model_copy(update={"incoming_identity": newer_identity})
     assert not prepare_review(with_review_links(changed), preflight=preflight()).ready
-    # A separately established supported context still needs new config consent.
     established = later.format_operation.established_baseline.model_copy(
         update={"identity": newer_identity}
     )
@@ -1901,7 +1899,6 @@ def test_binary_choices_use_exact_offered_outputs_and_never_generic_text_approva
     )
     assert refused.status == "refused" and refused.plan.approvals == ()
 
-    # The independent inventory owns an authored asset move, as in identity review.
     from tests.reconciliation.test_attachments import binary_context
 
     moved = attachment_request()

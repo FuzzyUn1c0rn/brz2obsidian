@@ -651,7 +651,6 @@ class _OwnedPreparation:
         self._cancel.probe = cancel
         history = None
         kind = None
-        # Guarded Resume begins with Load's refusal semantics.
         resuming = resume and check_saved is None
         if resume:
             self._apply_review_owners = _ApplyReviewOwners(
@@ -715,8 +714,6 @@ class _OwnedPreparation:
                 )
                 if not resume:
                     return saved
-                # Apply checks the verified identity before using this same
-                # owner to restore Incoming and revalidate Current.
                 stopped = check_saved(saved)
                 if stopped is not None:
                     return stopped
@@ -863,8 +860,6 @@ class _OwnedPreparation:
             facts = self._session._admit_values(facts)
             self._session._coadmit()
             if exact_retained_plan:
-                # The verified saved plan supplies the subject queries.
-                # resume_review still replays against that fresh admission.
                 canonical = plan
                 effects = None
             else:
@@ -885,8 +880,6 @@ class _OwnedPreparation:
                 facts = facts.model_copy(
                     update={"generation": plan.proposal.generation + 1}
                 )
-        # resume_review alone consumes this same reader's latest scoped
-        # observation and corroborates current bytes before canonical refresh.
         resumed = self._session.resume_review(
             self._tip,
             facts,
@@ -1480,9 +1473,6 @@ class _OwnedPreparation:
                 self._recheck_resumed_payloads(history, preparation)
                 scoped = self._scoped(history, plan.facts, plan)
                 if scoped.admission.preflight == plan.preflight:
-                    # Resume proved this graph against the same inputs. Fresh
-                    # admission rechecks history, Current and its policy, and
-                    # co-admission rechecks every live retained backing.
                     self._session._coadmit()
                     if (
                         self.operations.observe_reviewed_source(
@@ -1625,8 +1615,6 @@ class _OwnedPreparation:
             return history, result, baseline
 
     def _recheck_resumed_payloads(self, history, preparation):
-        # Keep exact live byte comparisons with Resume's owned registrations.
-        # The admission inventory identifies candidates for those comparisons.
         current_paths = {
             origin[1]
             for _, _, _, origin in self._session._content._values.values()
@@ -1933,7 +1921,6 @@ class _OwnedPreparation:
                     ),
                 }
             )
-            # Publication is already durable. Any failure below preserves it.
             fresh = self._observe(preparation.vault, captured.locator)
             metadata = fresh.checkpoint.metadata
             with self._session._operation():

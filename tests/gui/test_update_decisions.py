@@ -84,10 +84,6 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
     publications = []
 
     class NativeInputs(Operations):
-        # These outer Native ports supply declared preparation/checkpoint
-        # observations and a typed publication outcome. Real Core resolution,
-        # paging, worker codecs and host reduction remain exercised; the
-        # publication port performs no writes and proves no Native publication.
         def prepare_update(self, path, incoming, **kwargs):
             assert (path, incoming) == (str(vault), str(source))
             return UpdateResult(

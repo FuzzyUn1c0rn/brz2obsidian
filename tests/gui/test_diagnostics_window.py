@@ -595,7 +595,6 @@ def test_blocked_report_preparation_processes_input_and_close_before_release():
         until(app, lambda: not window.isVisible())
         assert not release.is_set()
         release.set()
-        # The report was expired by Close before its delayed admission.
         assert not copied
     finally:
         release.set()
@@ -721,7 +720,6 @@ def test_queued_unadmitted_export_does_not_retain_replaced_report(tmp_path):
         )
         release.set()
         until(app, finished.is_set)
-        # Queue a current export after the stale one to establish both completed.
         window.disclosure.click()
         window.copy.click()
         until(app, lambda: len(copied) == 2)

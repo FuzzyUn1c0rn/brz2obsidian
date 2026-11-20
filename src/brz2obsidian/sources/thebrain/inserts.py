@@ -396,7 +396,6 @@ def adapt_note(
             continue
         depth = prefix.count(">")
         if depth in seen:
-            # Consume the marker line in the edit, avoiding empty-source edits.
             separator = "\n" if depth == 1 else "> " * (depth - 1) + "\n"
         else:
             separator = ""

@@ -162,7 +162,6 @@ def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
     assert _tree(scratch) == scratch_before
     del warm, opened, chosen, page, converted
 
-    # The external capacity observation changes only after Save and full close.
     capacity = 96 * 1024 * 1024
     assert 9 * size + 64 * 1024 * 1024 > capacity
     capacity_observed = []

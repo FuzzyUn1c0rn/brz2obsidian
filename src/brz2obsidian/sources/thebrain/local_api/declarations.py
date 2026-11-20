@@ -116,7 +116,6 @@ def thought(value, brain_id, expected_id=None):
         refuse("An authoritative thought role is not qualified")
     if value["forgottenDateTime"] is not None:
         source_date(value["forgottenDateTime"])
-    # Exclusions are validated before any authored content is considered.
     if value["kind"] == 5 or value["forgottenDateTime"] is not None:
         return value
     if not isinstance(value["name"], str):

@@ -91,7 +91,7 @@ def test_blocked_startup_preferences_cannot_overwrite_newer_input(tmp_path):
         runner.submit(
             SetDestination(parent_or_null=str(tmp_path / "new"), vault_name="")
         )
-        assert edited.wait(2)  # Command delivery precedes release of blocked I/O.
+        assert edited.wait(2)
         release.set()
         assert delivered.wait(2)
         assert runner.session.snapshot.parent == str(tmp_path / "new")

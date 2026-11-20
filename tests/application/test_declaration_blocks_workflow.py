@@ -12,7 +12,7 @@ DECLARATIONS = [
     "<!a>",
     "   <!A> trailing",
     "<!a\n\ncontinued\nend >\n<Value>",
-    "<!A\n<Value>",  # later literal-looking text closes the owned block
+    "<!A\n<Value>",
     "Prose\n<!a\ncontinued",
     "Prose\n   <!a\ncontinued",
     "> <!a\n> continued",

@@ -411,7 +411,6 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     git(vault, "add", ".")
     git(vault, "commit", "-qm", "independent authored preimage")
     git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
-    # A mixed user index must survive preparation and Current resolution too.
     (vault / "Home.md").write_bytes(b"User staged Home.\n")
     git(vault, "add", "Home.md")
     (vault / "Home.md").write_bytes(b"Home before.\n")
@@ -788,7 +787,6 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         assert preparation.review.ready, preparation.review.blockers
         return preparation
 
-    # The unchanged produced document reverses to literal authored preimage.
     reversed_review = complete(kept, "reverse")
     assert [
         (target.target_id, target.canonical_path, target.identity)

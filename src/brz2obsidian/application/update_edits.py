@@ -21,7 +21,6 @@ class EditLease:
         self.received = 0
         self.sealed = False
         self._lifetime = ExitStack()
-        # The creator-owned lifetime spans multiple bounded worker commands.
         self._file = self._lifetime.enter_context(tempfile.TemporaryFile(mode="w+b"))  # noqa: SIM115 -- closed by resolve/discard through this lease's ExitStack.
 
     @property

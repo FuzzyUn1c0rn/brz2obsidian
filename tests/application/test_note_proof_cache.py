@@ -360,7 +360,6 @@ def test_shared_review_memo_reuses_same_class_and_admits_canonical_cross_class(
     memo, verified = CheckpointReviewMemo(), set()
     metadata, tip = memo.read(git, local, verified, include_review=True)
     assert tip.saved == saved and not tip.ready
-    # A cached same-class read needs no further external blob request.
     original_prefix = git.prefix
     git.prefix = [sys.executable, "-c", "raise SystemExit(7)"]
     repeated, again = memo.read(git, local, verified, include_review=True)

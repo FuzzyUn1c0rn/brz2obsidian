@@ -30,7 +30,6 @@ def test_launcher_uses_unicode_spaced_source_and_explicit_interpreter_from_unrel
     launcher = build(root, Path(sys.executable))
     elsewhere = tmp_path / "unrelated directory"
     elsewhere.mkdir()
-    # The installed regular GUI package must not win over the copied source.
     resolution = subprocess.run(
         [
             sys.executable,

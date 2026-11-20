@@ -172,7 +172,6 @@ def test_first_memo_over_completed_source_result_keeps_choices_after_prior_polic
     assert resumed.plan.approvals == reviewed.approvals
     assert resumed.plan.consents == reviewed.consents
     assert not resumed.plan.ready
-    # A second genuine LOCAL save retains the same dependency anchor.
     closing = next(
         row for row in resumed.plan.proposal.changes if row.path == "Notes/Closing.md"
     )
@@ -246,8 +245,6 @@ def test_first_memo_over_completed_source_result_keeps_choices_after_prior_polic
 def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decision(
     monkeypatch,
 ):
-    # The native reader owns complete graph validation. This controlled return
-    # supplies its validated scalar role chain at the real public admission port.
     owned = Path(tempfile.mkdtemp(prefix="brz2obsidian-285-memo-"))
     marker = {"owner": uuid4().hex, "root": str(owned.resolve())}
     (owned / ".fixture-owner.json").write_text(json.dumps(marker))
@@ -404,7 +401,6 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
         row.replacement == b"" for row in removed.attachment_selection.link_choices
     )
 
-    # A local memo cannot alias an unproved parent or an operation boundary.
     for invalid in (
         memo._replace(previous="d" * 40),
         memo._replace(review_parent_fingerprint="foreign-history"),

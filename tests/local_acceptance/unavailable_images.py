@@ -49,7 +49,6 @@ def image_location(uri, *, authored=None):
 def api_images(baseline):
     """Return independent mutable image facts within the existing audit lifetime."""
     if isinstance(baseline, _PassView):
-        # An expired or foreign view must refuse, never reopen its former owner.
         baseline._assessment.check()
         bindings, absent = json.loads(_api_image_facts(baseline))
         return dict(bindings), dict(absent)
@@ -334,7 +333,6 @@ def validate(raw, final, intermediate, edits, events, observed):
         base_delta += len(edit["after"]) - len(edit["before"])
     base = rebuilt_base
     validate_document_adaptations(raw, intermediate, base, profile_version="4")
-    # Independently rebuild each composed edit from exact source and base output.
     for index, proof in proof_by_flat.items():
         edit = edits[index]
         occurrences = [

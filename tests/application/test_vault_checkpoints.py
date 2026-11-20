@@ -520,8 +520,6 @@ def test_saved_s1_keep_memory_is_real_reachable_history_and_load_is_unready():
     assert resumed.status == "resumed"
     assert not resumed.ready
     assert resumed.plan.approvals == ()
-    # The current operation attestation observes the newly retained checkpoint.
-    # Its proof token changes while status, scope, bytes and choice stay fixed.
     attested = facts.safety_facts[-1].model_copy(
         update={"fingerprint": "observed:" + result.commit}
     )

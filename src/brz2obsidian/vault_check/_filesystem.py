@@ -21,7 +21,6 @@ def reparse(info):
 def guard(path, root=None):
     if root is not None and not path.absolute().is_relative_to(root):
         raise UnsafePath("Path escapes the vault")
-    # Check ancestors from the filesystem root before asking resolve to follow them.
     for component in (*reversed(path.parents), path):
         try:
             info = component.lstat()

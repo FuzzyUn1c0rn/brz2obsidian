@@ -575,8 +575,6 @@ class HistoryContext:
             )
         values = {"code": "context_closed", "binding": None, "ready": False}
         if self._last_result.status == "available":
-            # Closing an inspected header retires its capability; it does not
-            # execute or erase the observed native history operation.
             values.update(status="no_content_change", next_actions=("inspect_history",))
         if self.preparation is not None:
             values.update(

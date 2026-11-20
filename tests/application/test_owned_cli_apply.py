@@ -204,7 +204,6 @@ def test_unknown_onboarding_establishes_baseline_before_fresh_cli_applies_binary
     monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     scratch_before = _tree(scratch)
 
-    # Available source evidence supplies incoming bytes, never historical originals.
     onboarding = UpdateContext()
     state = worker_context_call(
         onboarding,

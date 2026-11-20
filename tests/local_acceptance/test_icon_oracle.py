@@ -136,7 +136,6 @@ def test_complete_structural_mutation_catalogue_refuses_before_native():
     for name, raw in (*ico_mutations(), *bmp_mutations()):
         with pytest.raises(AssertionError, match="ICO|BMP|icon"):
             icon_proof(raw, native=False)
-        # The names are retained so every meaningful mutation is visible in logs.
         print("structural refusal:", name)
 
 
@@ -149,7 +148,7 @@ def test_masks_hidden_rgb_and_valid_changed_artwork_keep_their_meaning():
     assert a["source_sha256"] != b["source_sha256"]
     assert a["frames"][0]["rgba_sha256"] == b["frames"][0]["rgba_sha256"]
     assert a["frames"][0]["mask_sha256"] != b["frames"][0]["mask_sha256"]
-    changed = patch(original, 62, "<B", 34)  # bottom-left hidden blue33->34
+    changed = patch(original, 62, "<B", 34)
     c = icon_proof(changed)
     assert c["frames"][0]["rgba_sha256"] != a["frames"][0]["rgba_sha256"]
     assert (

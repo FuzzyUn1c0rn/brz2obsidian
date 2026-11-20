@@ -159,7 +159,7 @@ def test_mapping_identity_and_declined_restoration_survive_checkpoint_unready():
     assert reopened.review.readiness == "revalidation_required"
     loaded = reopened.review.saved.plan
     assert loaded == decline.plan
-    assert loaded.ready is True  # Historical approval is not current readiness.
+    assert loaded.ready is True
     assert [(event.domain, event.choice) for event in loaded.actions] == [
         ("rename", "keep_path"),
         ("mapping", "current"),

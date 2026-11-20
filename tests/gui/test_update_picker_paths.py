@@ -34,7 +34,6 @@ def picker_case(tmp_path, spelling, *, foreign=False):
     source.write_bytes(b"Controlled source is not opened by the outer port")
     (vault / "Personal.md").write_bytes(b"Selected authored bytes\r\n")
     (other / "Personal.md").write_bytes(b"Foreign authored bytes\r\n")
-    # The canonical producer target is independently supplied by this outer port.
     prepared = preparation().model_copy(
         update={"vault": str(other if foreign else vault)}
     )

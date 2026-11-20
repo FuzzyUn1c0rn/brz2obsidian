@@ -168,8 +168,6 @@ def test_far_provider_icon_bytes_retire_dependent_choice_and_keep_unrelated_deci
     change,
     prepared_far_provider_review,
 ):
-    # Only the unchanged public preparation is shared. Every changed observation
-    # and its decisions receive independent dictionaries and contract graphs.
     baseline, incoming, current, plan, independent = deepcopy(
         prepared_far_provider_review
     )
@@ -180,14 +178,12 @@ def test_far_provider_icon_bytes_retire_dependent_choice_and_keep_unrelated_deci
         del edited["Attachments/A.svg"]
     else:
         edited["Other/A.svg"] = BLUE
-    # C declares no owned icon and contains no direct A.svg reference.
     assert b"A.svg" not in current["Categories/C.md"]
     observed = facts_for(baseline, incoming, edited, generation=2)
     fresh = prepare_review(observed, preflight=preflight())
     dependent_change = next(
         c for c in plan.proposal.changes if c.item_id == "category:C"
     )
-    # A caller updating the generation alone has not reviewed the changed image context.
     old_consent = action(
         plan,
         dependent_change,
@@ -425,9 +421,6 @@ def invalid_provider_graph():
         "category:B", provider="[[Categories/A.md]]", icon="[[A.svg]]"
     )
     current, incoming = dict(baseline), dict(baseline)
-    # The existing A declaration is already invalid; C currently chooses E and
-    # is independent of A. B's valid owned image must not hide A's declaration
-    # when C is explicitly switched into that chain.
     current["Categories/A.md"] = note("category:A", icon="[[A.svg]]").replace(
         b"appearance_category: null", b'appearance_category: "[[Missing]]"'
     )
@@ -451,8 +444,6 @@ def test_unchanged_provider_cycle_does_not_hide_new_invalid_owned_icon():
     baseline["migration-record.json"] = json.dumps(record).encode()
     baseline["Attachments/Manual.bin"] = b"An ordinary non-image resource."
     current, incoming = dict(baseline), dict(baseline)
-    # Only authored Current closes B->C->B. Both generated source versions
-    # retain the acyclic A->B->C assignment family.
     current["Categories/B.md"] = note(
         "category:B", provider="[[Categories/C.md]]", icon="[[A.svg]]", body="Local B."
     )
@@ -668,7 +659,6 @@ def test_selected_chain_checks_owned_icon_without_rejecting_ordinary_resource(fa
         assert kept.status == "accepted", kept
         plan = kept.plan
         assert plan.approvals[0].result.data == current["Notes/Independent.md"]
-        # An unsuitable icon target remains a legitimate ordinary resource.
         change = next(c for c in plan.proposal.changes if c.item_id == "category:C")
         chosen = resolve_review(
             plan,

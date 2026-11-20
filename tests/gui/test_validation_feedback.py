@@ -168,7 +168,6 @@ def test_vault_name_paste_feedback_is_immediate_and_conversion_waits_for_correct
         name.setFocus()
         app.clipboard().setText("bad?name")
         QTest.keyClick(name, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
-        # No event-loop turn or selected parent is needed for name feedback.
         error = control(window, QLabel, "Vault name error")
         assert error.isVisible() and error.text() == "Remove “?” from the vault name."
         source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()

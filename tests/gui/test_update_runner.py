@@ -283,7 +283,6 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
         timer.stop()
         runner.shutdown()
         button.close()
-        # This owned child can only inspect; EOF cleanup cannot stop a publisher.
         for child in children:
             if child.poll() is None:
                 if not child.stdin.closed:

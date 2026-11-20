@@ -128,7 +128,6 @@ def _seed(case_path, *, two_notes=False, capture_history=True):
         assert pristine.stat().st_size == row.length
         assert hashlib.sha256(pristine.read_bytes()).hexdigest() == row.sha256
         assert pristine.stat().st_mode & 0o777 == mode
-    # Distinct pristine source A is captured before authored changes or Git init.
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
     if two_notes:

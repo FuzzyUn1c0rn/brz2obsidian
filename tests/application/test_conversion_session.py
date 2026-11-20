@@ -427,7 +427,6 @@ def test_real_transport_failures_reduce_to_honest_conversion_status_without_retr
         counts=Counts(actual_notes=1),
         diagnostic_text="Safe verified late failure report.",
     )
-    # The controlled real child gets the exact request identity at runtime.
     response = WorkerResponse(
         request_id="00000000-0000-0000-0000-000000000001",
         operation="convert_reviewed",

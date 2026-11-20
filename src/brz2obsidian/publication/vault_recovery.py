@@ -264,7 +264,6 @@ def _review_observation(
                 for row in admission.inventory
                 if row.path.casefold().endswith(".md")
             )
-    # Canonical grants are independent of a caller's previous review DTO.
     granted_plans = [original, query_plan]
     active_prepared = retained.graph.intent.prepared_commit
     if active_prepared in retained.owned:
@@ -540,9 +539,6 @@ def _review_observation(
                     raise OSError("Operation-owned recovery note interpretation failed")
                 new_documents.append(parsed)
                 if owner[0].current.path == path:
-                    # A created note already has the sole retained item at
-                    # this physical path. Its ordinary inventory row below
-                    # receives the observed bytes; no second identity exists.
                     pass
                 elif direction == "finish":
                     if current[owner[0].current.path].existence != "absent":
@@ -564,8 +560,6 @@ def _review_observation(
                         }
                     )
                 else:
-                    # Restore reviews both physical endpoints under the
-                    # operation-bound reversal proof.
                     identity_inventory.append(
                         owner[0].model_copy(
                             update={
@@ -1493,8 +1487,6 @@ def _restore_review(
             and subject.path not in intent.affected_paths
             and not context_only
         ):
-            # An automatic, unchanged producer has no decision to reverse.
-            # Affected outputs still require retained selected ownership.
             continue
         ownership_subjects.append((subject, changes, approval, context_only))
         if not context_only:
@@ -1565,8 +1557,6 @@ def _restore_review(
             subject.baseline.content if subject.baseline.status == "known" else None
         )
         if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
-            # An Undo's directional incoming bytes can be authored preimage.
-            # Its generated baseline remains the actual retained source role.
             generated = _owned_content(
                 git, produced_source.get(subject.path), _owner=_owner
             )

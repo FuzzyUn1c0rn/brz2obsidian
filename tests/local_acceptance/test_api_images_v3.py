@@ -248,7 +248,6 @@ def image_source_case(tmp_path, scenario="basic"):
             else {"status": 404, "path": "missing-404.bin"}
         )
     manifest["http_responses"] = http
-    # Child now owns an unreferenced image, so its no-note wrapper stays required.
     write_json(baseline.manifest_path, manifest)
     baseline = reseal(baseline)
     return baseline

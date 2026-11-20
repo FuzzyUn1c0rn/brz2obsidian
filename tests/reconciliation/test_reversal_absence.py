@@ -349,7 +349,6 @@ def test_reversal_refresh_preserves_unaffected_approval_and_requires_new_current
         ("Notes/Second.md", b"incoming\n"),
     ]
     assert effects.remove_paths == ()
-    # Changing only the retained operation proof must also invalidate removal.
     same = facts.model_copy(update={"generation": 2})
     retained = refresh_review(plan, same, preflight=preflight())
     assert retained.status == "accepted" and retained.plan.ready

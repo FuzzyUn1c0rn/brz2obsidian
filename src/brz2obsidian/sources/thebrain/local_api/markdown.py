@@ -54,8 +54,6 @@ def adapt_note(
     preserve_table_warnings=False,
     _provenance=None,
 ):
-    # Frozen captures that already qualified before BOM normalization retain
-    # their exact prior interpretation. This is never a live acquisition option.
     if preserve_bom or not text.startswith("\ufeff"):
         return _adapt_note(
             text,

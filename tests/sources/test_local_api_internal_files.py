@@ -305,7 +305,6 @@ def test_current_capture_rejects_invalid_file_binding_before_snapshot_exposure(
         asset.update(availability="absent", actual_length=None, actual_sha256=None)
         payloads.pop(FILE)
     elif damage == "payload":
-        # Same length: source-bound digest equality, not size alone, must fail.
         payloads[FILE] = b"\x01" + OPAQUE_BYTES[1:]
     elif damage == "known-format":
         asset["original_name"] = "broken.PNG"

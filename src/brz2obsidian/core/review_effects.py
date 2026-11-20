@@ -261,7 +261,6 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
         else:
             states[target.target_id] = state
 
-    # Project operation output rows into the same selected semantic target graph.
     for change in proposal.changes:
         approval = approved.get(change.change_id)
         if approval is None and change.requires_decision:
@@ -360,7 +359,6 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                 documents[candidate.links.document_id] = candidate.links
                 explicit_documents.add(candidate.links.document_id)
 
-    # Binary selections establish exact offered output versions first.
     for approval in approvals:
         candidate = approval.attachment_candidate
         if candidate is None:
@@ -583,7 +581,6 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                 ),
                 None,
             )
-            # Exact target-state evidence can come from either interpreted comparison version.
             if state is None:
                 state = next(
                     (
@@ -669,7 +666,6 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
 
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
-    # Historical7 persisted reviews retain their qualified replay semantics.
     if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS:
         for code in provider_chain_blockers(
             context.current_target_facts,

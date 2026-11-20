@@ -125,7 +125,7 @@ def test_real_event_after_decoded_frame_prevents_source_yield(tmp_path, monkeypa
     def converted(image, *args, **kwargs):
         result = original(image, *args, **kwargs)
         if image.size == (2, 2) and result.mode == "RGBA":
-            cancelled.set()  # A genuine completed Pillow conversion, not a check counter.
+            cancelled.set()
         return result
 
     monkeypatch.setattr(Image.Image, "convert", converted)
@@ -482,7 +482,7 @@ def test_pinned5_capture_checks_unrequested_same_stat_icon_and_untrusted_manifes
         path = capture / binding["storage_key"]
         stat = path.stat()
         changed = bytearray(path.read_bytes())
-        changed[54] ^= 1  # A valid changed blue byte, not an intrinsic syntax error.
+        changed[54] ^= 1
         path.write_bytes(changed)
         os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         if manifest_forgery:
@@ -564,7 +564,6 @@ def test_frozen5_session_copy_observes_real_event_and_configured_limit(tmp_path)
             cancelled.set()
             return result
 
-    # Actual externally supplied Path IO is the direct-session copy boundary.
     path = tmp_path / "incoming.bin"
     raw = arguments["payloads"][icon.asset_id]
     path.write_bytes(raw)
@@ -859,7 +858,6 @@ def test_external_decoder_must_preserve_hidden_rgb_and_validate_nonpreferred_fra
     from PIL import Image
 
     observed = False
-    # Largest/preferred3 is intact in the nonpreferred case; fail entry2 only.
     fixture = ico() if fault == "hidden_rgb" else ico((3, 2), physical=(1, 0))
     original = Image.open
 

@@ -239,7 +239,6 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
     assert user_state(vault, owned_ref=seed.ref) == before
     del warm, opened, chosen, page, converted
 
-    # Change only external capacity after durable Save and complete owner close.
     capacity = 96 * 1024 * 1024
     assert 9 * size + 64 * 1024 * 1024 > capacity
     capacity_observed = []

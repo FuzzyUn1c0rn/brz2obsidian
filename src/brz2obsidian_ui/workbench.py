@@ -181,8 +181,6 @@ class UpdateWorkbench(QWidget):
             self._active_id = state.active_request_id
             self._active_started = monotonic() if self._active_id else None
         if state.active_request_id and state.progress is not None:
-            # Advance locally between real observations; a later frame cannot
-            # rewind the presentation clock or change operation authority.
             self._active_started = min(
                 self._active_started, monotonic() - state.progress.elapsed_ms / 1000
             )
@@ -605,7 +603,6 @@ class UpdateWorkbench(QWidget):
             state.binding, UpdateContextBinding
         ):
             arguments["queue"] = self._page_queue
-        # Busy-state focus changes can move the viewport before present().
         self._read_position = (
             (self.queue.currentRow(), self._binding_key),
             self.scroll.verticalScrollBar().value(),

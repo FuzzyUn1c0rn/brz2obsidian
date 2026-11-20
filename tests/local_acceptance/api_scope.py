@@ -163,7 +163,6 @@ def scope_note(raw, excluded, *, qualified_brain=None, profile_version="1"):
         )
     ), "unremoved excluded note association"
     if qualified_brain is not None:
-        # This is an expected-fact dependency, separate from production parsing.
         from .checker import inline_display
 
         source = raw[offset:]

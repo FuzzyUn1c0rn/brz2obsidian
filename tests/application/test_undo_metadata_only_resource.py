@@ -89,7 +89,6 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
         import_id="metadata-only-import",
     )
     assert applied.status == "applied" and applied.history == "terminal", applied.code
-    # Later writing remains fresh Current, not a generated source baseline.
     later_image = current["Attachments/A.svg"] + b"<!-- Later authored SVG edit. -->\n"
     (vault / "Attachments/A.svg").write_bytes(later_image)
     user_before = user_state(vault)
@@ -171,7 +170,6 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
         if path.is_file()
     } == source_before
 
-    # Unknown current bytes cannot acquire this association by a ready count.
     from brz2obsidian.contracts import CurrentContent
 
     unknown = CurrentContent(
@@ -213,7 +211,6 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
     refused = prepare_review(incomplete, preflight=offered.review.preflight)
     assert not refused.ready and select_review_effects(refused).status == "refused"
 
-    # An optional choice cannot turn context into ownership of another write.
     from brz2obsidian.contracts import (
         AttachmentCandidate,
         AttachmentSelection,

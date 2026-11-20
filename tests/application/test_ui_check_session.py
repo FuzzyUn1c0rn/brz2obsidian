@@ -64,7 +64,7 @@ def test_check_selection_admission_readonly_completion_cancellation_and_retry(tm
     )
     assert session.diagnostics_text() == text
     (tmp_path / "Manual.md").write_text("# Corrected\n", encoding="utf-8")
-    assert session.snapshot.result.status == "check_issues"  # No automatic retry.
+    assert session.snapshot.result.status == "check_issues"
     retry = session.dispatch(SimpleCommand(command="check_vault")).effects[0]
     assert retry.request.request_id != effect.request.request_id
     clean = complete(session, retry, check_vault(tmp_path), 0)

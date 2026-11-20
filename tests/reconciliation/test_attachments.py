@@ -1134,7 +1134,6 @@ def test_both_requires_each_redirect_and_validates_edited_link_tokens_without_gl
         == "resource:payload:incoming:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     )
     assert doc.occurrences[1].meaning.display_text == "Second edited alias"
-    # Extra prose changes are outside this per-occurrence choice.
     altered = doc.model_copy(
         update={"content": ExactContent(data=raw + b" injected prose")}
     )
@@ -1272,7 +1271,6 @@ def test_both_allocation_checks_inventory_ancestor_case_and_other_prospective_ve
     assert all(
         not c.attachment_review.alternatives[2].eligible for c in proposal.changes
     )
-    # A second explicitly safe version slot remains inspectable after the first collides.
     fallback = AttachmentDestination(
         path="Assets/data (incoming-ba7816bf)-2.bin",
         target=IdentityTargetFacts(
@@ -1460,7 +1458,6 @@ def test_incoming_payload_requires_explicit_same_token_meaning_review_and_refuse
         doc.occurrences[0].meaning.target_version
         == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     )
-    # A safe unrelated note is not an offered attachment target.
     raw = b"[[Notes/Owner|Other target]] and [[Assets/data.bin|Redirect second]]"
     changed = interpret_links(
         ExactContent(data=raw),
@@ -2479,7 +2476,6 @@ def test_retained_appearance_uses_prior_semantics_across_prose_edits_and_refuses
         update={"document": old_doc.model_copy(update={"occurrences": (forged,)})}
     )
     assert not validate(corrupt).valid
-    # Historical embedded membership spellings must agree with the historical registry.
     contradictory = category.model_copy(update={"representations": ("[[Other]]",)})
     assert not validate(
         proof.model_copy(update={"targets": (note, contradictory)})

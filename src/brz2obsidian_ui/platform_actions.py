@@ -171,9 +171,8 @@ def copy_windows_text(text: str, owner_window: int) -> None:
     kernel32.GlobalUnlock.restype = wintypes.BOOL
     kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
     kernel32.GlobalFree.restype = wintypes.HGLOBAL
-    # Allocate/encode before opening to keep clipboard ownership brief.
     data = (text + "\0").encode("utf-16-le")
-    handle = kernel32.GlobalAlloc(0x0002, len(data))  # GMEM_MOVEABLE
+    handle = kernel32.GlobalAlloc(0x0002, len(data))
     if not handle:
         raise ctypes.WinError(ctypes.get_last_error())
     opened = False

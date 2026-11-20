@@ -124,7 +124,6 @@ def test_changed_source_invalidates_carried_warning_without_persisted_authorizat
     assert changed.snapshot.reviewed is None and changed.snapshot.review_required
     assert "convert_this_archive" not in changed.snapshot.allowed_actions
     assert session.dispatch(ConvertCommand(proceed_with_warnings=True)).effects == ()
-    # Fresh clean inspection uses an ordinary non-authorizing Convert command.
     pending = next(
         effect for effect in changed.effects if effect.effect == "run_operation"
     )

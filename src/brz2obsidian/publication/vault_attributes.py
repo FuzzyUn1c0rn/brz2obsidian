@@ -19,7 +19,6 @@ def index_extensions(raw):
     """Locate actual extensions without letting Git freshen a split index."""
     if len(raw) < 32 or raw[:4] != b"DIRC":
         raise OSError("Malformed Git index header")
-    # SHA-256 repositories are rejected by the format gate before index commands.
     if hashlib.sha1(raw[:-20]).digest() == raw[-20:]:
         limit = len(raw) - 20
     elif len(raw) >= 44 and hashlib.sha256(raw[:-32]).digest() == raw[-32:]:

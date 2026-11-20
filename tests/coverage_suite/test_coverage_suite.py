@@ -20,8 +20,9 @@ def coverage_checkout(tmp_path):
     pytest.importorskip("PySide6")
     root = tmp_path / "coverage example"
     (root / "tools").mkdir(parents=True)
-    for name in ("check.py", "check_pytest.py", "coverage_report.py"):
+    for name in ("check.py", "check_lint.py", "check_pytest.py", "coverage_report.py"):
         shutil.copy2(ROOT / "tools" / name, root / "tools" / name)
+    (root / "tools" / "comment-baseline.json").write_text("{}\n", encoding="utf-8")
     for package, yes, no in (
         ("brz2obsidian", "yes", "no"),
         ("brz2obsidian_ui", "open", "closed"),

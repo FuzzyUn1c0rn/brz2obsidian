@@ -37,7 +37,7 @@ def update_source(path, *, version=1):
     fields = dict(TYPE_FIELDS)
     edges = EDGES
     if version >= 2:
-        fields[11] = 14  # B moves from A to E; C remains a direct member of B.
+        fields[11] = 14
         edges = tuple(
             (14, 11, 1, 3, -1)
             if e == (10, 11, 1, 3, -1)

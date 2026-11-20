@@ -67,7 +67,6 @@ def test_active_and_hovered_rows_leave_review_queue_focus_border_continuous(
     def row_color(item):
         row = queue.visualItemRect(item)
         sample = queue.viewport().mapTo(queue, row.center())
-        # Use the background beyond the labels and inside the row.
         return rendered.pixelColor(
             round((sample.x() + row.width() // 3) * scale),
             round(sample.y() * scale),

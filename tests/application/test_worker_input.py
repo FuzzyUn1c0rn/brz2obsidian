@@ -33,7 +33,6 @@ def test_cold_worker_prepares_image_archive_with_idle_control_pipe(tmp_path):
     )
     parts = source_parts(root)
     add_attachment(parts, "66666666-6666-4666-8666-666666666666", 1, "red.png", PNG)
-    # The absent inline image follows the real late native-decoder import path.
     note = b"Authored body.\r\n![Unavailable](.data/md-images/not-exported.png)\r\n"
     parts["22222222-2222-4222-8222-222222222222/Notes.md"] = note
     change_record(parts, "33333333-3333-4333-8333-333333333333", DataLength=len(note))
@@ -144,7 +143,6 @@ def test_cold_worker_prepares_image_archive_with_idle_control_pipe(tmp_path):
             assert close.phase == "completed"
             assert close.response.result.code == "context_closed"
         finally:
-            # Only prepare/close are admitted; releasing input cannot stop a publisher.
             channel.close()
             work.join(10)
         assert channel.process_status == 0 and not work.is_alive()
@@ -180,7 +178,6 @@ def test_worker_refuses_queued_continuation_before_inspecting_source(
             stdout, stderr = process.communicate(input=wire[13:], timeout=15)
         finally:
             if process.poll() is None:
-                # This one-shot inspect request cannot publish content.
                 process.kill()
                 process.communicate(timeout=5)
         returncode = process.returncode

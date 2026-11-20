@@ -98,8 +98,6 @@ class Supervisor:
         status = process.wait()
         for reader in readers:
             reader.join()
-        # Never persist, export or display stderr. Drain everything, retain only
-        # the bounded transient buffer, then discard it with this invocation.
         internal_stderr.clear()
         if oversized[0] or drain_failed[0] or write_failed:
             return Terminal(

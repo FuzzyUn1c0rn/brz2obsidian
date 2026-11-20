@@ -199,7 +199,6 @@ def test_explicit_original_evidence_qualifies_owned_onboarding_bytes(monkeypatch
     assert page.status == "available", page
     asset = page.page.items[0]
     assert asset.item_id == asset_id
-    # Both reads happen after the historical-render temporary directory closed.
     assert asset.original == asset.incoming == original and asset.current == current
     assert not asset.omitted and asset.current_path == asset.incoming_path == asset_path
     offer = next(

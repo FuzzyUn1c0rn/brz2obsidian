@@ -28,7 +28,6 @@ def test_worker_refresh_reobserves_current_and_keeps_the_independent_decision(
     operations, vault, source, authored, second = two_note_legacy_inputs(
         tmp_path, monkeypatch
     )
-    # Make Current an actual offer for the legacy note-original attachment.
     original_asset = vault / "Attachments/00000002/Notes.md.original"
     original_asset.parent.mkdir(parents=True)
     original_asset.write_bytes(b"Independent authored original asset.\r\n")
@@ -51,7 +50,6 @@ def test_worker_refresh_reobserves_current_and_keeps_the_independent_decision(
         return observe(directory, review)
 
     monkeypatch.setattr(operations, "observe_reviewed_source", observed_payload)
-    # Preserve a bounded diagnostic if a real canonical replay exceeds allocation.
     trace = (tmp_path / "068-stack.txt").open("w")
     faulthandler.dump_traceback_later(15, file=trace)
 
@@ -150,7 +148,6 @@ def test_worker_refresh_reobserves_current_and_keeps_the_independent_decision(
             if row.change_id == change.change_id
         )
         assert decisions[item] is not None
-    # The legacy support rows also require explicit preservation choices.
     remaining = worker_context_call(context, {"command": "choices", "binding": binding})
     for offer in remaining.offers:
         if offer.selected is not None:
@@ -320,7 +317,6 @@ def test_worker_refresh_reobserves_current_and_keeps_the_independent_decision(
         row for row in supported_offers.offers if row.change_id == opening.change_id
     )
     assert "edited" in offer.choices
-    # Retiring native authority must preserve an owned volatile edit until discard.
     allocated = []
     allocate = tempfile.TemporaryFile
 

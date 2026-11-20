@@ -382,11 +382,11 @@ def test_validation_failure_or_mismatched_terminal_never_replaces_primary_result
     assert done.snapshot.destination_validation.outcome == "failed"
     assert done.snapshot.result is primary
     assert session.diagnostics_text() == primary.diagnostic_text
-    assert done.effects == ()  # No automatic retry of failed validation.
+    assert done.effects == ()
     retry = session.dispatch(
         SetDestination(parent_or_null=str(tmp_path), vault_name="Vault")
     )
-    assert len(retry.effects) == 1  # Explicit choose/edit can request a fresh check.
+    assert len(retry.effects) == 1
 
 
 def test_real_destination_worker_and_cli_missing_parent_remain_compatible(

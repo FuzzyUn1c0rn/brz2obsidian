@@ -171,7 +171,6 @@ def test_invalid_provider_chain_remains_diagnostic_after_nearer_icon_success(tmp
         in projected.diagnostic_text
     )
     assert "Choose one of this note’s categories" not in projected.model_dump_json()
-    # N9's own H8 choice is valid; repairing only upstream H1 clears its finding.
     assert (tmp_path / "Notes/N9.md").read_bytes() == downstream_before
     write_note(
         tmp_path,

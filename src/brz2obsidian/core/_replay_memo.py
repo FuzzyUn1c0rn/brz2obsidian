@@ -116,7 +116,6 @@ class _ReplayMemo:
         for count, key, fingerprint in self.prefixes(history):
             entry = snapshot.get(fingerprint)
             if entry is not None and entry.raw_key_size == len(key):
-                # Framed prefix lengths strictly increase: at most 32 candidates.
                 candidates.append((count, fingerprint, entry))
         if key is None:
             return None

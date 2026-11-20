@@ -90,7 +90,7 @@ def test_standard5_output_matches_independent_icon_baseline(tmp_path, kind):
                 for count in ("present_assets", "planned_assets"):
                     changed["counts"][count] -= 1
             elif damage == "missing_copy":
-                copied.unlink()  # Exclusive fresh test copy; pristine is retained.
+                copied.unlink()
             elif damage in {"dropped_frame", "changed_artwork"}:
                 if damage == "dropped_frame":
                     original = fixture["raw"]
@@ -158,7 +158,7 @@ def test_standard5_full_chain_preserves_owned_icons_and_accounting(tmp_path):
         b_icon: (IDS["B"], bmp()["raw"]),
         d_icon: (IDS["D"], PNG),
         DEEP_ICON: (identity(30), JPEG),
-        entry_icon: (ENTRY, JPEG),  # Equal bytes remain distinct source owners.
+        entry_icon: (ENTRY, JPEG),
     }
     for key, (owner, raw) in originals.items():
         api.attachments[key] = attachment(key, owner, 5, "Icon.png", length=len(raw))

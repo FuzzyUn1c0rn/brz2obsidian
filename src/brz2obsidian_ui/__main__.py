@@ -59,8 +59,6 @@ class LocalApplication(QObject):
         self.window = self.window_factory(
             interpreter=self.interpreter, source_root=self.source_root
         )
-        # The window's policy-free runner performs both loads and effect writes
-        # off-thread. Keep this injection compatible with the existing UI seam.
         self.window.runner.preferences = self.preferences
         self.window.runner.on_feedback = self.preference_feedback.emit
         self.window.prepared.connect(self._revision_changed)

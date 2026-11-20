@@ -156,7 +156,6 @@ def test_semantic_screen_preserves_local_removal_safe_foreign_and_literals(
         api.thoughts[ALONE]["forgottenDateTime"] = "2026-10-15T10:00:00"
         api.payloads[NOTE] = body.encode()
         api.attachments[NOTE]["dataLength"] = len(body.encode())
-        # Keep the public fake upstream open through live capture.
         server = api_server(api)
         _, address = server.__enter__()
         module = LocalApiSourceModule(

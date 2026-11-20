@@ -62,9 +62,7 @@ def test_verified_publication_admits_only_current_derived_completion_targets(
         )
         assert Path(target.path).is_absolute()
     assert session.snapshot == previous
-    assert (
-        not destination.exists()
-    )  # Admission uses backend receipt, never disk inference.
+    assert not destination.exists()
 
 
 def test_no_completion_permission_from_unknown_publication_or_idle_session(tmp_path):
@@ -102,7 +100,6 @@ def test_no_completion_permission_from_unknown_publication_or_idle_session(tmp_p
 def test_explicit_published_check_atomically_selects_receipt_destination(tmp_path):
     session, destination = published_session(tmp_path)
     generation = session.diagnostic_generation
-    # Existing independent selection must not divert the result-area action.
     session.dispatch(SelectVault(path_or_null=str(tmp_path / "independent")))
     generation = session.diagnostic_generation
     started = session.check_published_vault(generation)

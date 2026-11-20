@@ -201,8 +201,6 @@ def test_capture_refuses_conflicting_canonical_source_authority(tmp_path, mutati
     source, snapshot, audit, payloads = golden_inputs()
     sentinel = tmp_path / "caller.txt"
     sentinel.write_bytes(b"caller-owned bytes\n")
-    # Empty input digests request fresh capture identity calculation; they do not
-    # authorize contradictory records or inventory roles.
     snapshot["identity"]["source_sha256"] = ""
     snapshot["identity"]["snapshot_digest"] = ""
     if mutation == "record_key":

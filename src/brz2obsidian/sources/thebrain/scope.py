@@ -372,8 +372,6 @@ def scope_records(records, physical_members, refuse, uuid):
     if any(uuid(key) not in asset_ids for key in states):
         refuse("invalid_source", "File states refer to an absent attachment")
     for member, declarations in claimed_members.items():
-        # Check the whole group, including omitted owners, so row order or
-        # inclusion cannot hide a competing role or a real payload claim.
         if len(declarations) > 1 and (
             member in physical_members
             or not all(

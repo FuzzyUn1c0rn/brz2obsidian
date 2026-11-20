@@ -270,7 +270,6 @@ def _semantic_meaning(
             if reviewed_source is not None
             else None,
         )
-    # Unmarked #272 storage retains its original semantic fingerprint.
     if undo_of_receipt_commit is not None:
         return digest((*parts, "undo-prepared", undo_of_receipt_commit))
     if recovery_origin_intent_commit is not None:
@@ -410,8 +409,6 @@ class _Git:
                 _check_timed_out_object_ids(
                     error, expected, "Checkpoint tree batch output changed"
                 )
-                # Only the batch deadline expired. Each immutable tree still
-                # has its own write deadline, with the same readback below.
                 for rows, expected_oid in zip(trees.values(), expected, strict=True):
                     oid = self.tree(
                         (name, mode, object_id)
@@ -540,9 +537,6 @@ def _capture_resources(
         else sum(len(value) for value in unique.values())
     )
     margin = 64 * 1024 * 1024
-    # Review bytes absent from raw roles are also spooled before their Git
-    # objects are written. Counting every unique review byte is a conservative
-    # upper bound and leaves the margin for the compact shape/control files.
     spool_need = input_size + review_size + margin
     git_need = input_size + review_size + margin
     if os.stat(root).st_dev == os.stat(temp_base).st_dev:
@@ -802,7 +796,6 @@ def _verify_review_batches(git, declarations, *, compact):
         try:
             verify_blobs(argv, env=git.env, objects=complete, timeout=120)
         except _GitTimeout:
-            # No integrity failure was observed. Rebuild any partial sinks.
             del complete
         else:
             return
@@ -905,8 +898,6 @@ class _ApplyReviewOwners(ExitStack):
             checkpoint.manifest,
         ) or session._ledger.budget.cancel is not self._resume_cancel:
             return None
-        # Keep the fresh retained-byte check immediately before the caller's
-        # guarded identity check. The earlier traversal only supplies the parse.
         self._read_proof(
             _Git(root, observed._executable),
             manifest,
@@ -990,8 +981,6 @@ class _ApplyReviewOwners(ExitStack):
         if manifest != retained_manifest:
             raise OSError("Repeated checkpoint has a different manifest")
 
-        # Reuse the parse and replay only. The current traversal still owns
-        # admission and checks all role edges, declarations and lineage.
         references = metadata[3]
         available = _review_role_objects(manifest, references)
         envelope = (
@@ -1153,8 +1142,6 @@ def _read_owned_checkpoint_review(
         raise OSError("Lexical retained review ownership required")
     record, references, available = _review_reference_graph(git, manifest)
     if memory_spool:
-        # The raw discriminator only selects the byte transport. Canonical
-        # replay below still qualifies the review and its operation kind.
         kind = record
         for key in ("plan", "facts", "format_operation", "kind"):
             kind = kind.get(key) if type(kind) is dict else None
@@ -1241,9 +1228,6 @@ def read_checkpoint_review(git, manifest, verified):
     """
     record, references, available = _review_reference_graph(git, manifest)
     size = manifest.review_size
-    # The actual 36 MiB distinct-byte review reached roughly 294 MiB peak
-    # commit while core replay rebuilt its immutable graph. Budget that demand
-    # from unique bytes, rather than the compact envelope's few KiB.
     if (
         available_memory()
         < 4 * size + 9 * sum(available[sha][1] for sha in references) + 64 * 1024 * 1024
@@ -1321,13 +1305,6 @@ def _role_policy(association, manifest, queries, *, pending_format=False):
         return None
     if manifest.boundary != "local" and (queries is None or queries.selected is None):
         return None
-    # These bases never replace the ordinary policy-bearing fingerprints.
-    # Policy equivalence requires separate fresh proof of BOTH stored policies.
-    # A completed SOURCE RESULT may instead supply ONLY its physical history
-    # anchor to its first LOCAL memo, with that memo's own policy freshly proved.
-    # A new format memo may likewise use its actual onboarding LOCAL as a
-    # supported storage parent, without changing the onboarding replay meaning.
-    # Neither basis transfers a grant or a saved readiness verdict.
     return _RolePolicy(
         (
             ()
@@ -1864,8 +1841,6 @@ def _read(
                 and manifest.undo_of_receipt_commit is None
                 and manifest.recovery_direction is None
             )
-            # An unpublished format change may follow a LOCAL review memo
-            # whose authority still resides in its validated history.
             memo_roles = memo_roles or pending_format
             checkpoint_roles.append(
                 _CheckpointRole(
@@ -1940,8 +1915,6 @@ def _read(
             tip_manifest, tip_review = manifest, review
         if targets is not None and current in targets:
             target_records[current] = manifest, review
-        # Each generation is independently checked; retaining its raw control
-        # bodies would turn the per-response budget into a lifetime limit.
         controls = {}
         current, generation = manifest.previous, generation - 1
     if generation != 0:
@@ -2034,8 +2007,6 @@ def _read(
         from .attachment_ownership import validate_history_claims
 
         if ownership_demands_out is not None:
-            # The native operation inspector consumes this finite projection
-            # after its existing full authority validation and before release.
             ownership_demands_out.append(
                 (association, tuple(ownership_roles), tuple(ownership_demands))
             )
@@ -3477,8 +3448,6 @@ def capture_checkpoint(
                             )
                         ):
                             return result("refused", "review_bytes_changed")
-            # Git reads regular app-owned spools; raw payload never enters the
-            # bounded control pipe or passes through attributes/filters.
             expected_oids = [
                 _spool_oid(directory, path, record[2], record[3])
                 for path, record in zip(
@@ -3532,7 +3501,6 @@ def capture_checkpoint(
                     != old_binding
                 ):
                     return result("refused", "prepared_review_changed")
-                # The retry materializes the same qualified payload at a new path.
                 reviewed_source = old_binding
             semantic = _semantic(
                 association,
@@ -3668,8 +3636,6 @@ def capture_checkpoint(
                 except _GitTimeout:
                     if len(spools) == 1:
                         raise
-                    # Object writes are content-addressed. The ref has not
-                    # moved, so retry with the original per-file deadlines.
                     for spool, declaration in zip(spools, declarations, strict=True):
                         _owned_export.check()
                         _owned_export.session._ledger.check()

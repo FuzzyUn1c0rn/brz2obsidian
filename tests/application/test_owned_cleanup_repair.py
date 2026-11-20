@@ -250,7 +250,6 @@ def test_ready_owned_cleanup_save_and_matching_copy_restore_one_history_blob(
     object_path = vault / ".git/objects" / protected_oid[:2] / protected_oid[2:]
     assert object_path.resolve().is_relative_to((vault / ".git/objects").resolve())
     assert object_path.is_file()
-    # Only the independently identified loose blob in the owned test fixture is removed.
     object_path.chmod(stat.S_IWRITE)
     object_path.unlink()
     assert (vault / "Later.md").read_bytes() == later

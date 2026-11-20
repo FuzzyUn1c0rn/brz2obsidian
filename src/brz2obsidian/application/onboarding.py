@@ -196,8 +196,6 @@ def _original_payload(operations, history, source, *, _owner=None):
                 and row["token"].casefold() == "categories"
                 for row in old["tag_memberships"]
             ):
-                # The format-8 record has no producer hash seed. Matching the
-                # record cannot establish which exact tag order it emitted.
                 return None
         return payload
     except OSError, ValueError, KeyError, TypeError, AttributeError:
@@ -295,7 +293,6 @@ def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
             else subjects[key].baseline.content
         )
         original[path] = content if _owner is not None else content.data
-    # Created items must all be present; absent source assets remain absent.
     if set(_outputs(original_record, original)) != set(outputs):
         return None
     return original

@@ -216,8 +216,6 @@ def test_historical_constructor_rejects_coherent_new_literal_but_renders_authore
     assert document["text_digest"] == sha256(raw).hexdigest()
     assert next(vault.rglob("*.original")).read_bytes() == raw
 
-    # The public SourceModule composition also renders the unchanged independent
-    # old capture with output9; source admission still uses the captured profile.
     arguments = {
         "source": original_source,
         "snapshot": original_expected,

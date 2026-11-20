@@ -209,7 +209,6 @@ def test_format9_retirement_and_requalification_keep_local_deletion_after_cold_r
     deleted_reference = b"- [[Notes/Leaf.md|Leaf]]\n"
     assert deleted_reference not in home.current.data
     assert home.incoming.data.count(deleted_reference) == 1
-    # Keep the current absence of this link along with the note's deletion.
     edited = home.incoming.data.replace(deleted_reference, b"").replace(
         b"[[Notes/Kept.md|Kept]]", b"[[Moved/Kept.md|Kept]]"
     )

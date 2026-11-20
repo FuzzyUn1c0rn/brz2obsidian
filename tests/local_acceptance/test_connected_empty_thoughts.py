@@ -160,7 +160,6 @@ def test_source_bound_conversion_and_audit_challenges(
 ):
     source, inspection, prior, vault = paired_generations[adapter]
     assert audit(adapter, source, vault)
-    # The independent capture binds the same profile and snapshot in both outputs.
     assert audit(adapter, source, prior)
     old_record, record = (
         json.loads((folder / "migration-record.json").read_bytes())

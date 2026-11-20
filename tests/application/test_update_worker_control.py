@@ -758,8 +758,6 @@ def test_prestart_prepare_cancel_is_bound_before_any_producer_io(tmp_path, monke
         assert results[prepare.request_id].status == "cancelled_before_publication"
         assert results[prepare.request_id].publication == "not_published"
     else:
-        # A completed preparation may win scheduling; a late control cannot
-        # retroactively cancel it. No artificial wait is added to production.
         assert results[cancel.request_id].code == "context_changed"
         assert results[prepare.request_id].status == "prepared_review"
     assert not any(accessed), (
@@ -770,7 +768,6 @@ def test_prestart_prepare_cancel_is_bound_before_any_producer_io(tmp_path, monke
 def test_cancel_cannot_match_another_sequence_reusing_request_identity(tmp_path):
     from pydantic import ValidationError
 
-    # The wire must carry the actual targeted stream generation as well as UUID.
     with pytest.raises(ValidationError):
         WorkerRequest(
             request_id=str(uuid4()),

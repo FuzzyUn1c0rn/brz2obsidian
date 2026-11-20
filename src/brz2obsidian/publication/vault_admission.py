@@ -362,8 +362,6 @@ def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
     current = CheckpointLocator.model_validate_json(raw)
     current_refs = git.call("for-each-ref", "--format=%(refname) %(objectname)")
     association = locator.association
-    # Admission resolves the checkpoint and retains the complete ref snapshot.
-    # Check the exact fully qualified ref in this same fresh observation.
     rows = current_refs.splitlines()
     expected_checkpoint = f"{association.ref} {locator.commit}".encode()
     if (
@@ -732,7 +730,6 @@ class _Inspection:
             self.storage_state.append(verify_directory(gitdir, writable=True))
         else:
             self.repo = self.repo.model_copy(update={"kind": "none"})
-        # Inspect names without entering nested stores or following reparses.
         for directory, names, files in _walk(root):
             base = Path(directory)
             verify_directory(base)
@@ -1741,8 +1738,6 @@ class _Inspection:
             self.consents.append(consent("tracking", "ordinary", included))
 
     def temporary_base(self):
-        # gettempdir() itself creates probe files. Read Python 3.14's candidate
-        # list without probing, then establish actual directory capabilities.
         candidates = (
             [tempfile.tempdir]
             if tempfile.tempdir
@@ -1928,8 +1923,6 @@ class _Inspection:
         if self.recovery_observation is None and self.active_operation is None:
             idle = _IdleCheckpointObservation(self, admission)
         captured = []
-        # Preserve the caller's Git qualification mode and check its resolved
-        # executable below; implicit Windows launchers also bind binary evidence.
         observed, history = _observe_vault(
             self.root,
             subjects=subjects,
@@ -1984,8 +1977,6 @@ class _Inspection:
                 and _same_current_domain(inspection, union[1])
             ):
                 return None
-            # The union proves common current metadata only. The caller still
-            # receives this role's own policies and consent requirements.
             observations[union_key] = union
         observations[key] = fresh
         return observed
@@ -2042,9 +2033,6 @@ class _Inspection:
             return False
         if fresh is None or old is None:
             return False
-        # A terminal RESULT's qualified graph and continuity check prove its
-        # accepted PREPARED grants across publication. Its full policy may
-        # legitimately differ after that publication's topology changes.
         return not (
             (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
             != current.fingerprints
@@ -2127,8 +2115,6 @@ class _Inspection:
             fresh = self._policy_observation(current.subjects, admission, observations)
         except OSError, ValueError, TypeError:
             return False
-        # Pending/rejected grants remain pending/rejected in the saved review.
-        # This proof neither borrows the publication's grants nor grants readiness.
         return (
             fresh is not None
             and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
@@ -2167,9 +2153,6 @@ class _Inspection:
             or role.review_parent_fingerprint != self._state_fingerprint(physical)
         ):
             return False
-        # The parent supplies the exact old source. The vault topology may
-        # have changed before this review, so use the memo's freshly proved
-        # policy and consent requirements rather than the parent's old policy.
         return self._current_role_policy_matches(current, admission, observations)
 
     def _review_locator(self, locator, roles, admission, observations):
@@ -2209,8 +2192,6 @@ class _Inspection:
                     role.policy_context, admission, observations
                 )
             ):
-                # An unpublished preparation can bind either its physical
-                # parent or the review anchor already proved for that parent.
                 for candidate in (physical_parent, context):
                     if role.review_parent_fingerprint == self._state_fingerprint(
                         candidate
@@ -2269,8 +2250,6 @@ class _Inspection:
 
     @staticmethod
     def _format_memo_tips(roles):
-        # Prove the memo as it stood before the next PREPARED used it. The
-        # staged target's policy context cannot qualify the older LOCAL memo.
         tips = {}
         tip = None
         for role in roles:

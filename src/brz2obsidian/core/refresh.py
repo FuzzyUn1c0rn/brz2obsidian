@@ -404,7 +404,6 @@ def advance_refresh(work, returned=None):
             ),
         )
     if work.phase == "close_old":
-        # Preserve the original alternating closure to the identical fixed point.
         return ChildWork(
             ClosureWork(work.old, returned),
             replace(work, phase="close_new", closure_start=returned),

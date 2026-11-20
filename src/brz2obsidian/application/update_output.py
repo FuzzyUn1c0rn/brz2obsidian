@@ -48,8 +48,6 @@ class UpdateOutput:
             if not control:
                 self._latest = None
             self._condition.notify()
-        # The independent control reader must remain available while stdout
-        # is blocked. The serialized producer waits for its own sealed reply.
         if not control:
             done.wait()
             if self._broken:
@@ -85,8 +83,6 @@ class UpdateOutput:
                     elif self._latest is not None:
                         delay = self._next_progress_at - monotonic()
                         if delay > 0:
-                            # Only observations wait. A terminal/control wakes
-                            # this wait and is always selected first.
                             self._condition.wait(timeout=delay)
                             continue
                         observation, self._latest = self._latest, None

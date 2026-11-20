@@ -366,7 +366,6 @@ class _Job:
                     "exited": None,
                     "identity_unavailable": True,
                 }
-                # This is the sole close attempt even when native closure fails.
                 closing, handle = handle, None
                 api.require(api.kernel.CloseHandle(closing))
                 return gap
@@ -390,7 +389,6 @@ class _Job:
                     "exited": None,
                     "identity_unavailable": True,
                 }
-                # This is the sole close attempt even when native closure fails.
                 closing, handle = handle, None
                 api.require(api.kernel.CloseHandle(closing))
                 return gap
@@ -685,7 +683,6 @@ class _Commands:
             raise OSError("Normalized terminal row reservation exhausted")
 
     def check_terminal(self):
-        # The 64 KiB summary reservation is separate from bounded row encodings.
         if (
             len(
                 json.dumps(
@@ -1276,7 +1273,6 @@ def _observe(
             raise OSError("Encoded command evidence exceeds its reserved record")
         if used + len(data) > limit:
             raise OSError("Calibration artifact budget exhausted")
-        # Charge before I/O, including any partial write followed by failure.
         used += len(data)
         offset = offsets.get(name, 0)
         with (output / name).open("xb" if terminal else "ab") as stream:
@@ -1681,7 +1677,6 @@ def _observe(
         write("report.json", report, terminal=True)
     except OSError:
         if (output / "report.json").exists():
-            # A filesystem write failure cannot establish complete evidence.
             raise
         report = {
             "status": "failed",

@@ -286,7 +286,7 @@ def test_unknown_ui_acknowledgment_retains_path_during_edits_and_failed_exports(
         assert window.snapshot.publication == publication
         assert publication.destination in text(window)
         button(window, "Save diagnostic report").click()
-        dialogs.callback(str(tmp_path))  # A directory cannot be replaced by a report.
+        dialogs.callback(str(tmp_path))
         until(
             app,
             lambda: any(

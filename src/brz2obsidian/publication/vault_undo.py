@@ -55,8 +55,6 @@ def _target_from_graph(graph, observation):
     prepared, loaded = observation.owned[origin.prepared_commit]
     if loaded is None or prepared.previous is None:
         raise OSError("Undo target lacks canonical review or previous source")
-    # The original pre-operation authored inventory is the reversal target;
-    # the completed selected inventory is the actual produced endpoint.
     before = {row.path: row for row in origin.before}
     proposed = {row.path: row for row in graph.intent.proposed}
     # A terminal recovery inventory also retains later protected writing.

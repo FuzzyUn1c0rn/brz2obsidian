@@ -2,8 +2,6 @@
 
 import pytest
 
-# Independently extracted/reviewed primary inventory, 2026-10-10.
-# This expected list is not imported from either implementation registry.
 CURRENT_AND_FOREIGN = [
     "a",
     "abbr",

@@ -225,7 +225,6 @@ def test_ico_each_directory_dib_and_extent_near_miss_refuses_without_publication
 
     raw = bytearray((INPUTS / filename).read_bytes())
     fact = next(row for row in ICO_FACTS["payloads"] if row["file"] == filename)
-    # Index1 is nondefault for both containers; the preferred largest body stays intact.
     variant = fact["directory_order"][1]
     entry = 6 + 16
     body = variant["offset"]

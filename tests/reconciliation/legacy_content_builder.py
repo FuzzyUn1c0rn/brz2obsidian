@@ -184,7 +184,7 @@ def retarget_checkpoint(vault, captured, *, review=None, review_content=None):
         )
     if review_content is not None:
         manifest["review_content"] = review_content
-        assert review_content == []  # This recipe only removes the owned role.
+        assert review_content == []
         rows.pop(b"review-content")
     raw = json.dumps(manifest).encode()
     oid = git(vault, "hash-object", "-w", "--stdin", input=raw).strip()

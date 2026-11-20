@@ -459,7 +459,6 @@ def publish(
         error_type = None
     if staging is not None:
         try:
-            # Only this freshly created sibling staging directory is owned.
             _owned_staging(staging, destination, owned_identity)
             _staged_files(staging)
             shutil.rmtree(staging)

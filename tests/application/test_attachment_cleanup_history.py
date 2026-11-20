@@ -1146,8 +1146,6 @@ def test_completed_cleanup_disposition_does_not_reown_manual_path(outcome):
         assert change.identity_review.disassociate_entry_ids == (entry.entry_id,)
         assert change.identity_review.provenance == "explicit_user"
 
-    # These pure native values describe completed disposition only. The native
-    # reader must independently bind their receipt graph and canonical review.
     retained = interpret_attachment_disposition(
         (proof,), original=original, final=final, receipt=receipt, plan=plan
     )
@@ -1181,7 +1179,6 @@ def test_completed_cleanup_disposition_does_not_reown_manual_path(outcome):
                 receipt=receipt,
                 plan=broken,
             )
-    # A later manual file at the same name never creates a new historical owner.
     assert (
         interpret_attachment_disposition(
             (), original=original, final=final, receipt=receipt, plan=plan

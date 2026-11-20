@@ -137,8 +137,6 @@ class UpdateChannel:
         try:
             while True:
                 if self.poisoned:
-                    # Unknown authority is permanent, but every remaining byte
-                    # must still be drained so a writing child can terminate.
                     remaining = self._process.stdout.read(65536)
                     self._observe_stdout(remaining)
                     if not remaining:
@@ -191,7 +189,6 @@ class UpdateChannel:
                     if observation is not None:
                         callback, actual, progress = observation
                         category = "observer_failure"
-                        # User presentation must never run under transport locks.
                         try:
                             callback(actual, progress)
                         except Exception:  # noqa: BLE001 -- loss of observation delivery cannot confer authority.
@@ -246,8 +243,6 @@ class UpdateChannel:
                         return Terminal(
                             phase="may_have_executed", code="protocol_failure"
                         )
-                    # This stream owns sequence allocation. Caller values carry
-                    # no sequencing authority into the persistent worker.
                     request = WorkerRequest.model_validate(
                         request.model_dump(by_alias=True)
                         | {"sequence": self._next_sequence}

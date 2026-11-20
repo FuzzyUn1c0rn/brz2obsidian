@@ -42,7 +42,6 @@ def reviewed_video(record, refuse):
         refuse(
             "unsupported_feature", "Video provider or metadata is unreviewed", affected
         )
-    # Context belongs to the original link, never to the single-video player.
     for key in ("list", "index"):
         if key in query and (len(query[key]) != 1 or not query[key][0]):
             refuse(

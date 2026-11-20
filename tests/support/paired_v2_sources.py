@@ -14,7 +14,6 @@ EMBED = "https://www.youtube.com/embed/SYNTHVID001?start=18"
 
 def paired_v2_sources(path):
     brz, folio = paired_sources(path)
-    # Folio's own named concepts and calendar triplets, never decoded from BRZ.
     data = json.loads(folio.read_bytes())
     data["entries"].append(
         {
@@ -113,7 +112,6 @@ def paired_v2_sources(path):
     )
     folio.write_text(json.dumps(data), encoding="utf-8")
 
-    # Independently encode those meanings in TheBrain's fields/enums/records.
     with ZipFile(brz) as archive:
         parts = {name: archive.read(name) for name in archive.namelist()}
     thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]

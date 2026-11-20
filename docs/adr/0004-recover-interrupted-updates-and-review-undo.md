@@ -14,4 +14,7 @@ completed update merely because its history was recorded.
 The first release offers Undo for the most recent applied import or update,
 presenting the reversal for review and protecting edits made afterwards. Users
 therefore have a recovery path without needing Git knowledge. Reversing older
-operations is deferred.
+operations is deferred. For recovery of an interrupted Undo, its directional
+incoming bytes can be an authored preimage. Ground the generated baseline in
+the retained source role so the restoration target cannot redefine generated
+content.

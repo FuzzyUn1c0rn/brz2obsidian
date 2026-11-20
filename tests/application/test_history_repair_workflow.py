@@ -130,7 +130,7 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     assert object_path.resolve().is_relative_to(vault.resolve())
     assert object_path.is_file()
     object_path.chmod(stat.S_IWRITE)
-    object_path.unlink()  # Damage only this fresh owned fixture's declared blob.
+    object_path.unlink()
     later = b"opening incoming\nlater working bytes after complete copy\n"
     (vault / "Notes/Opening.md").write_bytes(later)
     damaged_bytes = all_bytes(vault)

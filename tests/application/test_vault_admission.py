@@ -222,7 +222,6 @@ def test_effective_builtin_storage_and_inclusion_are_distinct_scoped_current_cho
     assert changed.policy_fingerprint != result.policy_fingerprint
     assert changed.preflight.consents[0].fingerprint != storage_choice.fingerprint
     assert changed.preflight.consents[1].fingerprint != inclusion.fingerprint
-    # Already tracked ignore matches retain tracking and need no inclusion.
     git(vault, "add", "-f", "excluded.md")
     tracked = inspect(vault, subjects=subjects)
     assert tracked.recovery_gaps == ("unrelated.md",)
@@ -410,7 +409,6 @@ def test_inactive_samples_unused_definitions_and_binary_are_supported_but_active
     assert storage(vault) == before
     if os.name == "nt":
         hook.rename(hook.with_name("REFERENCE-TRANSACTION"))
-        # Qualify actual Windows Git lookup of the uppercase physical name.
         git(vault, "hook", "run", "reference-transaction", "--", "committed")
         assert (vault / "EXECUTED").read_bytes() == b"canary\n"
         (vault / "EXECUTED").unlink()
@@ -469,38 +467,34 @@ def test_configured_hook_events_resets_and_effective_disables_are_observed_witho
     assert inspect(vault).status == "supported"
     git(vault, "config", "hook.Friendly.enabled", "true")
     git(vault, "config", "hook.reference-transaction.enabled", "false")
-    assert inspect(vault).status == "refused"  # other event still enabled
+    assert inspect(vault).status == "refused"
     git(vault, "config", "hook.post-index-change.enabled", "false")
     assert inspect(vault).status == "supported"
     git(vault, "config", "--add", "hook.Friendly.event", "")
     git(vault, "config", "--unset", "hook.reference-transaction.enabled")
     git(vault, "config", "--unset", "hook.post-index-change.enabled")
-    assert inspect(vault).status == "supported"  # ordered empty resets both
+    assert inspect(vault).status == "supported"
     git(vault, "config", "--add", "hook.Friendly.event", "reference-transaction")
     git(vault, "config", "hook.reference-transaction.enabled", "false")
     git(vault, "config", "hook.reference-transaction.parallel", "false")
-    assert (
-        inspect(vault).status == "supported"
-    )  # false parallel is no friendly definition
+    assert inspect(vault).status == "supported"
     git(vault, "config", "--unset-all", "hook.Friendly.event")
     git(vault, "config", "hook.Unbound.enabled", "banana")
-    assert inspect(vault).status == "supported"  # ignored invalid enable value
+    assert inspect(vault).status == "supported"
     git(vault, "config", "hook.Friendly.event", "not-a-git-event")
-    assert inspect(vault).status == "supported"  # unused configured event
+    assert inspect(vault).status == "supported"
     git(vault, "config", "--add", "hook.Friendly.event", "reference-transaction")
     git(vault, "config", "hook.reference-transaction.enabled", "2")
     assert inspect(vault).status == "refused"
     git(vault, "config", "--add", "hook.Friendly.event", "")
     git(vault, "config", "--add", "hook.reference-transaction.event", "")
-    assert inspect(vault).status == "supported"  # empty reset precedes name check
+    assert inspect(vault).status == "supported"
     git(vault, "config", "hook.Unbound.parallel", "banana")
-    assert inspect(vault).status == "supported"  # invalid parallel is ignored
+    assert inspect(vault).status == "supported"
     git(vault, "config", "hook.NoCommand.event", "not-a-git-event")
-    assert inspect(vault).status != "supported"  # every enabled binding needs a command
+    assert inspect(vault).status != "supported"
     git(vault, "config", "hook.NoCommand.enabled", "false")
-    assert (
-        inspect(vault).status == "supported"
-    )  # disabled missing command is warning-only
+    assert inspect(vault).status == "supported"
     traditional = vault / ".git/hooks/reference-transaction"
     traditional.write_bytes(b"#!/bin/sh\necho must-not-run\n")
     git(vault, "config", "hook.reference-transaction.enabled", "false")
@@ -639,7 +633,6 @@ def test_storage_layout_and_operation_states_are_precisely_refused_without_repai
 
 
 def test_no_repository_is_supported_but_missing_git_is_typed_and_safe(vault):
-    # Make a second, genuinely repository-free sibling.
     root = fixture_root("none")
     (root / "note.md").write_bytes(b"authored")
     result = inspect(root)
@@ -1131,7 +1124,6 @@ def test_unknown_access_environment_and_resource_observations_never_claim_deleti
     assert "custom_filter" in {f.code for f in literal.findings}
     monkeypatch.delenv("GIT_LITERAL_PATHSPECS")
     (vault / ".gitattributes").unlink()
-    # Filesystem-space observation is a system seam; no real volume is filled.
     usage = namedtuple("Usage", "total used free")
     monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
     space = inspect(vault)

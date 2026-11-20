@@ -129,7 +129,6 @@ def _chain_problems(states, targets):
                 )
                 break
             chain.append(provider)
-        # Each declaration remains independent of cycles and other defects.
         for (failed, declaration), detail in invalid.items():
             if failed in chain:
                 problems[(state.target_id, failed, declaration)] = (

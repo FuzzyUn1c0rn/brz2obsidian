@@ -649,7 +649,6 @@ def icon_proof(raw, *, native=True):
                 "status": "complete-unchanged-historical-pixels",
             }
     proved = []
-    # Every interval, header, alpha condition and total is already checked.
     for frame in frames:
         rgba = _manual_icon_rgba(raw, frame, kind)
         origin = frame["offset"] if kind == "ICO" else 14

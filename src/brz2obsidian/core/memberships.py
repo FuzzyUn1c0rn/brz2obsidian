@@ -108,7 +108,6 @@ def combine_memberships(documents, comparison):
             {e.target_id for e in m.entries} for m in (old, local, source)
         )
         removed = old_ids - source_ids
-        # Removals remain explicit review; additions alone cannot remove authored links.
         if removed:
             raise ValueError("structure_conflict")
         additions = tuple(

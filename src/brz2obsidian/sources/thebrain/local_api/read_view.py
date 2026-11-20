@@ -101,8 +101,6 @@ def _matches_context(value, pin):
 
 
 def _context_unchanged(session, pins):
-    # Model projection remains fresh, once per check. Projection failures retain
-    # their old failure path rather than being retried by the optimization.
     values = _context_values(session)
     if pins.comparison is not None:
         try:
@@ -240,8 +238,6 @@ class CaptureReadView:
             key = dict(self.pins.bindings).get(asset_id)
             if key is None:
                 refuse("The requested captured payload is unknown or unavailable")
-            # Keys were qualified at capture construction and the entire
-            # binding/manifest context is pinned above; check real path owners.
             if (
                 ordinary(self.pins.directory / "payload", directory=True)
                 != self.pins.payload_owner
@@ -313,8 +309,6 @@ class CaptureReadView:
                 )
                 raise primary from None
             finally:
-                # Also verify after stream-close failures; output validation
-                # cannot begin until this original complete check finishes.
                 try:
                     self.session.verify_consistency()
                 except (MigrationFailed, MigrationRefused) as secondary:

@@ -77,8 +77,6 @@ def test_worker_observer_keeps_native_control_live_while_stdout_is_blocked(
 
     def external_native(self, *args, cancel=None, progress=None, **kwargs):
         assert progress is not None
-        # This external native port models rapid object-verification reports;
-        # physical file-transition correctness is owned by test_native_progress.
         for count in range(20000):
             progress(
                 VaultProgress(
