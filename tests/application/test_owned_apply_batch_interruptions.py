@@ -228,6 +228,59 @@ def test_apply_refuses_reordered_result_checkpoint_tree_ids(
     assert rediscovered.receipt_commit is None
 
 
+def test_resumed_apply_acknowledges_cancellation_during_prepared_verification(
+    saved_source_update,
+):
+    vault, saved, ref = saved_source_update
+    before = user_state(vault, owned_ref=ref)
+    locator = vault / ".brz2obsidian" / "locator.json"
+    preparing = False
+    saw_prepared = False
+
+    def progress(row):
+        nonlocal preparing
+        if row.phase == "snapshot_preparation":
+            preparing = True
+
+    def cancel():
+        nonlocal saw_prepared
+        if (
+            not preparing
+            or json.loads(locator.read_bytes())["commit"] == saved.capture.commit
+        ):
+            return False
+        # Request a stop after Apply's first poll at the retained checkpoint.
+        if not saw_prepared:
+            saw_prepared = True
+            return False
+        return True
+
+    cold = UpdateContext()
+    try:
+        resumed = cold.resume(vault, selection_id=str(uuid4()))
+        assert resumed.ready and resumed.binding is not None, resumed.model_dump_json()
+        stopped = cold.apply(resumed.binding, cancel=cancel, progress=progress)
+    finally:
+        cold.close(choice="discard")
+
+    assert saw_prepared
+    assert stopped.status == "cancelled_before_publication", stopped.model_dump_json()
+    assert stopped.code == "cancelled_before_intent"
+    operation = stopped.operation
+    assert operation is not None and operation.history == "prepared"
+    assert operation.published_files == 0 and not operation.recovery_required
+    assert operation.intent_commit is None and operation.stop_commit is None
+    assert operation.result_commit is None and operation.receipt_commit is None
+    assert stopped.history_retained and stopped.checkpoint_commit is not None
+    assert stopped.checkpoint_commit != saved.capture.commit
+    assert git(vault, "rev-parse", ref).decode().strip() == stopped.checkpoint_commit
+    prepared = git(
+        vault, "cat-file", "blob", stopped.checkpoint_commit + ":manifest.json"
+    )
+    assert json.loads(prepared)["boundary"] == "prepared"
+    assert user_state(vault, owned_ref=ref) == before
+
+
 def test_owned_apply_reports_cancellation_after_successful_review_blob_batch(
     ready_source_update, monkeypatch
 ):

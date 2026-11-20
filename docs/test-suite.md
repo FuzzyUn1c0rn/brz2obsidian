@@ -128,9 +128,11 @@ The saved-review desktop worker case exercises the shared Resume and Apply
 backend, including prepared and result checkpoint tree retries and the terminal
 receipt. A separate reordered-response control verifies that result capture
 retains the recoverable intent when Git returns valid tree IDs in the wrong
-order. The pending-input controls exercise Git teardown and diagnostics with
-real subprocesses. The CLI boundary checks cover the supplied saved-review
-identity.
+order. The cold Resume cancellation case checks that a stop during prepared
+checkpoint verification retains the checkpoint and publishes no files. The
+Git process controls cover teardown, diagnostics and rejection of incorrect blob
+bytes when the terminator stalls. The CLI boundary checks cover the supplied
+saved-review identity.
 
 The lifecycle-contract module uses one file selector because all 24 of its test
 functions, including every parameter case, were already selected. This preserves

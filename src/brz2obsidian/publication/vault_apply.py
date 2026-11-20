@@ -2505,7 +2505,25 @@ def _apply_reviewed_update(
             prepared_commit = prepared.commit
             if reused_undo_prepared or reused_format_prepared:
                 operation_generation = prepared.locator.generation
-            if cancel_requested():
+            cancelled = cancel_requested()
+            if not cancelled:
+                tip = (
+                    inspect_history(
+                        root, subjects=subjects, active_operation=operation_id
+                    )
+                    if _owned_export is None
+                    else _inspect_history(
+                        root,
+                        subjects=subjects,
+                        active_operation=operation_id,
+                        _metadata_only=True,
+                        _owners=_owners,
+                    )
+                )
+                # Retained export reads can stop on cancellation during
+                # verification. Acknowledge the stop before interpreting the read.
+                cancelled = cancel_requested()
+            if cancelled:
                 return outcome(
                     "cancelled",
                     "cancelled_before_intent",
@@ -2520,17 +2538,6 @@ def _apply_reviewed_update(
                     recovery=False,
                     message="Cancellation retained preparation without publishing files.",
                 )
-            tip = (
-                inspect_history(root, subjects=subjects, active_operation=operation_id)
-                if _owned_export is None
-                else _inspect_history(
-                    root,
-                    subjects=subjects,
-                    active_operation=operation_id,
-                    _metadata_only=True,
-                    _owners=_owners,
-                )
-            )
             if (
                 tip.status != "intact"
                 or tip.checkpoint is None

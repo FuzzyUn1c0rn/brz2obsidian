@@ -143,17 +143,17 @@ def verify_blobs(argv, *, env, objects, timeout=30):
                             observed_integrity_failure = True
                             fail("Git payload sink made an incomplete write")
                             return
-                terminator = stream.read(1)
-                control(len(terminator))
-                if terminator != b"\n":
-                    observed_integrity_failure = bool(terminator)
-                    raise OSError("Git payload has an invalid batch terminator")
                 if (
                     sha1.hexdigest() != oid.lower()
                     or sha256.hexdigest() != digest.lower()
                 ):
                     observed_integrity_failure = True
                     raise OSError("Git payload digest does not match its declaration")
+                terminator = stream.read(1)
+                control(len(terminator))
+                if terminator != b"\n":
+                    observed_integrity_failure = bool(terminator)
+                    raise OSError("Git payload has an invalid batch terminator")
                 accounted_objects += 1
             extra = stream.read(1)
             control(len(extra))

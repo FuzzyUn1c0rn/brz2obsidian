@@ -119,3 +119,25 @@ def test_raw_batch_timeout_distinguishes_incomplete_header_prefix(
         )
     assert marker.exists()
     assert isinstance(failure.value, _GitTimeout) is prefix_valid
+
+
+def test_raw_batch_rejects_wrong_payload_when_terminator_stalls(tmp_path):
+    script = tmp_path / "git-stalled-terminator.py"
+    requests = f"{_OID}\n".encode()
+    wrong = b"x" * len(_PAYLOAD)
+    output = f"{_OID} blob {len(wrong)}\n".encode() + wrong
+    script.write_text(
+        "import sys, time\n"
+        f"assert sys.stdin.buffer.read() == {requests!r}\n"
+        f"sys.stdout.buffer.write({output!r})\n"
+        "sys.stdout.buffer.flush()\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OSError, match="digest does not match"):
+        verify_blobs(
+            [sys.executable, str(script)],
+            env=os.environ.copy(),
+            objects=((_OID, len(_PAYLOAD), _SHA, None),),
+            timeout=3,
+        )
