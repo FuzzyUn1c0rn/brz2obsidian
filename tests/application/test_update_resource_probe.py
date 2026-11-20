@@ -198,7 +198,6 @@ def test_unavailable_live_process_counter_cannot_qualify_a_family(monkeypatch):
                     return 0
                 return read(handle, counters, size)
 
-            # The external Win32 API is unavailable once for a live owned child.
             read.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
             dll.GetProcessMemoryInfo = unavailable
         return dll
@@ -436,7 +435,6 @@ def test_command_family_survives_optional_live_descendant_memory_gap(
                         and selected_census_handle
                         and int(handle) == selected_census_handle[0]
                     ):
-                        # Only a real successful open proves numeric reuse.
                         selected_census_lifetime_active[:] = [False]
                     return handle
 

@@ -8,8 +8,6 @@ from brz2obsidian.application.contracts import CheckResult, Finding
 from brz2obsidian.vault_check import check_vault as check_current_vault
 from brz2obsidian.vault_check.contracts import VaultCheckResult
 
-# Raw messages, references and candidate lists can contain authored content.
-# Only known codes, static guidance and the affected artifact path are admitted.
 DETAILED_FINDINGS = {
     "provider_cycle": "The full appearance-category chain contains a repeated provider. Review the affected note and selected categories and remove the cycle. An owned icon may still display; it does not repair the independent chain problem.",
     "icon_lookup_depth": "Icon lookup exceeds 8 links. Native dashboards show no inherited icon for this lookup; migration-time body snapshots use the full finite chain. Assign a nearer valid icon or change a selected appearance category, then close and reopen affected category dashboards and Categories overview. Depth alone does not prevent import, update or checking.",

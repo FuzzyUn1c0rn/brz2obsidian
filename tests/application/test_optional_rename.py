@@ -94,7 +94,6 @@ def test_colliding_optional_source_path_stays_disabled_after_keep_replacement():
     collision = inventory_item(
         "other", "entry:other", "Notes/Opening.md", b"Unrelated existing bytes.\n"
     )
-    # Interpret the complete actual collision inventory through the public fixture.
     facts = facts.model_copy(
         update={
             "identity_inventory": facts.identity_inventory + (collision,),

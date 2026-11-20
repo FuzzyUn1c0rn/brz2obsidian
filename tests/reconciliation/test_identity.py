@@ -246,7 +246,6 @@ def test_selected_targets_require_safe_containment_exact_normalization_and_no_co
         unsafe = inventory_item("unsafe", "entry:opening", path, b"original\r\n")
         result = reconcile(facts.model_copy(update={"identity_inventory": (unsafe,)}))
         assert result.changes[0].disposition == "refused"
-    # The asserted subject bytes cannot contradict the selected observed file.
     stale = valid.model_copy(
         update={
             "current": valid.current.model_copy(
@@ -342,14 +341,12 @@ def test_explicit_association_proposes_bound_repairs_without_claiming_duplicate_
         b"copy A",
         b"copy B",
     }
-    # Declaring a selection never makes an omitted duplicate repair complete.
     incomplete = association(facts, review, "copy-b")
     incomplete_result = reconcile(
         facts.model_copy(update={"association_decisions": (incomplete,)})
     )
     assert not incomplete_result.ready
     assert incomplete_result.findings[0].code == "identity_repair_incomplete"
-    # Independent outer inventory can later establish the actual repaired identities.
     cleared = duplicates[0].model_copy(
         update={"identity_state": "missing", "identity": None}
     )
@@ -744,7 +741,6 @@ def test_simultaneous_selected_targets_reject_equality_and_both_ancestor_directi
     assert not stale.ready and all(
         change.disposition == "stale" for change in stale.changes
     )
-    # Re-reviewing the exact competing context still cannot approve the collision.
     first_decision = first_decision.model_copy(
         update={"reviewed_assumptions": stale.changes[0].rename_review.assumptions}
     )
@@ -758,7 +754,6 @@ def test_simultaneous_selected_targets_reject_equality_and_both_ancestor_directi
         change.disposition == "refused" for change in result.changes
     )
     assert {finding.code for finding in result.findings} == {"unsafe_rename_target"}
-    # Declining one optional rename permits the other after its context is reviewed.
     declined = second_decision.model_copy(update={"choice": "keep_path"})
     refreshed = reconcile(
         facts.model_copy(update={"rename_decisions": (first_decision, declined)})

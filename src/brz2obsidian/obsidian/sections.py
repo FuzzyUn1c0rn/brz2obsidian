@@ -124,7 +124,6 @@ def retained_relationship_survives(original, current, heading):
     ):
         return False
     middle = current[len(prefix) : -len(suffix)].splitlines(keepends=True)
-    # A different section in this interval breaks the original section order.
     if any(
         line.lstrip().startswith(b"#") and line.rstrip(b"\r\n") != heading
         for line in middle

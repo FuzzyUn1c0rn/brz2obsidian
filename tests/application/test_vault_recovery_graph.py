@@ -269,8 +269,6 @@ def test_inconsistent_recovery_graph_never_becomes_operation_authority(recovery_
             git(vault, "update-ref", ref, commit)
     assert user_state(vault) == before
 
-    # The original fixture has no copied marker. A live foreign lease must stay
-    # intact through both a semantic owner mismatch and a torn owner record.
     marker = vault / ".git/brz2obsidian"
     assert not marker.exists()
     foreign_id = "f" * 32

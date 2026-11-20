@@ -117,6 +117,13 @@ coverage command. Handoff regressions in `.agents/skills/implement-spec-enhanced
 separate focused selection. Invalid, zero-test or entirely skipped selections
 do not establish passing pytest coverage.
 
+The lint check runs Ruff and enforces the [Python comment ratchet](adr/0014-ratchet-python-comments.md)
+on tracked and unignored Python source, tests, and tools. When retiring existing
+comments, run `python -m tools.check_lint --prune-comments` from the repository
+root with the project interpreter. The baseline accepts deletion-only updates.
+Use [delete-comment](../.agents/skills/delete-comment/SKILL.md) to review comments
+and preserve their rationale or file fixes where appropriate.
+
 The runner defaults to serial pytest. `run --workers 2`, `run --workers 3` or
 `run --workers 4` uses the same scope grouping and disabled restarts as the
 maintained coverage command. Its receipt records the worker count, exact worker

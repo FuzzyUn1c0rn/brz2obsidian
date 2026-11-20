@@ -983,8 +983,6 @@ def _recovery_prepared_matches(
                     and matches(original_proposed.get(path), original_file.content)
                     and current.get(path) == proposed.get(path)
                 ):
-                    # Cover unchanged retained paths only with original ownership
-                    # and the fresh, explicitly selected Current review.
                     if (
                         len(output) == 1
                         and output[0].kind == "resource"
@@ -1309,8 +1307,6 @@ def _inspect_update_status(
             for _, authority in graph.authorities
         }
         targets.update(row[2].result_commit for row in records if row[2] is not None)
-        # These declarations are trusted only after the single complete _read
-        # validates every requested commit and its retained ancestry.
         origins = {}
         for graph in graphs:
             origin = graph.authorities[-1][1]
@@ -2246,9 +2242,6 @@ def _apply_reviewed_update(
                 _inspect_vault_for_recovery,
             )
 
-            # execute_undo has validated this graph and the current review in
-            # this same public call. Reobserve policy/inventory, then check it
-            # again under our new lease; do not repeat the full history walk.
             checkpoint = undo_target.observation.checkpoint
             admission = _inspect_vault_for_recovery(
                 root, undo_target.observation, subjects=subjects
@@ -2522,8 +2515,6 @@ def _apply_reviewed_update(
                         _owners=_owners,
                     )
                 )
-                # An interrupted review read records its cause before admission
-                # translates the error to an unavailable tip.
                 cancelled = (
                     type(_owners) is _ApplyReviewOwners and _owners._read_cancelled
                 )

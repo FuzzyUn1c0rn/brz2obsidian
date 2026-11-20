@@ -115,7 +115,7 @@ def _physical(info):
 def _handle(path, *, directory=False, write=False):
     """Open the named object itself, with maximal compatible sharing."""
     kernel, security = _WINDOWS_BINDINGS
-    rights = 0x80 | 0x20000 | (1 if directory else 0)  # list, metadata and security
+    rights = 0x80 | 0x20000 | (1 if directory else 0)
     rights |= (0x2 | 0x4 | 0x40) if directory and write else 0
     if not directory:
         rights |= 0x80000000 | (0x40000000 if write else 0)
@@ -302,7 +302,6 @@ def _observed_chunks(
         import msvcrt
 
         with _handle(path, write=writable) as (handle, owner):
-            # Duplicate the verified handle before transferring it to Python.
             from ctypes import wintypes
 
             kernel, _ = _WINDOWS_BINDINGS

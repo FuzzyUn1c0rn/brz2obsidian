@@ -32,7 +32,6 @@ def render_document(document, note_path, items, assets):
             relative = posixpath.relpath(
                 assigned.relative_path, posixpath.dirname(note_path) or "."
             )
-            # Keep the original authored image alt/title and replace only its destination.
             replacement = (
                 span.expected_original[: span.destination_start - span.start]
                 + quote(relative, safe="/")

@@ -172,8 +172,6 @@ def test_bound_rename_alternatives_identify_current_and_source_before_acceptance
     )
     assert result.status == "available" and result.binding == opened.binding
     (offer,) = result.offers
-    # The text action identifies the current file; the separate optional rename
-    # action discloses both paths before and after declining the rename.
     assert offer.domain == "text" and offer.choices == ("current", "incoming", "edited")
     assert offer.disclosure == "Current file: Authored/Opening.md"
     assert not offer.detail_omitted

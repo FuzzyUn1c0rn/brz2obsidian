@@ -346,7 +346,7 @@ def test_complete_checker_rejects_coherent_icon_output_corruptions(tmp_path, dam
         record["counts"]["present_assets"] -= 1
         record["counts"]["planned_assets"] -= 1
     elif damage == "missing-copy":
-        copied.unlink()  # This test's disposable handcrafted corruption only.
+        copied.unlink()
     elif damage in {"altered-output", "dropped-nondefault-frame"}:
         changed = (
             ico((2,))["raw"]

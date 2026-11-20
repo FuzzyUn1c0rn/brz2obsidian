@@ -29,8 +29,7 @@ def checkout(tmp_path):
         (target / "__init__.py").write_text('VERSION = "selected"\n')
     (root / "tests").mkdir()
     (root / "tests" / "test_selected.py").write_text(
-        "import brz2obsidian\n"
-        "import pytest\n"
+        "import brz2obsidian\n\n\n"
         "def test_selected():\n"
         "    assert brz2obsidian.VERSION == 'selected'\n",
         encoding="utf-8",
@@ -107,6 +106,87 @@ def pytest_requirement(scope="full", selectors=None, **extra):
         "require_gui": False,
         **extra,
     }
+
+
+def test_lint_rejects_new_comments_even_with_an_existing_comment_removed(checkout):
+    selected = checkout / "tests" / "test_selected.py"
+    value = selected.read_text(encoding="utf-8")
+    selected.write_text(
+        value + '\nLABEL = "# data"\n# new explanation\n', encoding="utf-8"
+    )
+    sibling = checkout / "tests" / "test_new.py"
+    sibling.write_text("import sys  # noqa: F401\n", encoding="utf-8")
+    (checkout / "tools" / "comment-baseline.json").write_text(
+        json.dumps(
+            {"tests/test_selected.py": [hashlib.sha256(b"# old note").hexdigest()]}
+        ),
+        encoding="utf-8",
+    )
+
+    result, _, receipt = run(checkout, "--check", "lint")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert receipt["checks"][0]["status"] == "failed"
+    assert "tests/test_selected.py:8:1: new Python comment" in result.stdout
+    assert "tests/test_new.py:1:13: new Python comment" in result.stdout
+    assert "# data" not in result.stdout
+
+    baseline = checkout / "tools" / "comment-baseline.json"
+    old_baseline = baseline.read_bytes()
+    prune = subprocess.run(
+        [sys.executable, "-m", "tools.check_lint", "--prune-comments"],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert prune.returncode == 1, prune.stdout + prune.stderr
+    assert baseline.read_bytes() == old_baseline
+
+
+def test_lint_requires_pruning_and_accepts_shifted_comments(checkout):
+    baseline = checkout / "tools" / "comment-baseline.json"
+    selected = checkout / "tests" / "test_selected.py"
+    source = selected.read_text(encoding="utf-8")
+    selected.write_text(
+        source + '\nLABEL = "# literal data"\n# retained note\n', encoding="utf-8"
+    )
+    retained = hashlib.sha256(b"# retained note").hexdigest()
+    retired = hashlib.sha256(b"# retired note").hexdigest()
+    baseline.write_text(
+        json.dumps({"tests/test_selected.py": [retained, retired]}), encoding="utf-8"
+    )
+
+    result, _, _ = run(checkout, "--check", "lint")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Remove 1 retired entries" in result.stdout
+
+    prune = subprocess.run(
+        [sys.executable, "-m", "tools.check_lint", "--prune-comments"],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert prune.returncode == 0, prune.stdout + prune.stderr
+    assert json.loads(baseline.read_bytes()) == {"tests/test_selected.py": [retained]}
+
+    selected.write_text("\n" + selected.read_text(encoding="utf-8"), encoding="utf-8")
+    passing, receipt_path, receipt = run(checkout, "--check", "lint")
+    assert passing.returncode == 0, passing.stdout + passing.stderr
+    need = requirements(checkout, [{"id": "lint"}], receipt["environment"])
+    validated = command(
+        "validate",
+        "--checkout",
+        checkout,
+        "--receipt",
+        receipt_path,
+        "--requirements",
+        need,
+    )
+    assert validated.returncode == 0, validated.stdout + validated.stderr
 
 
 def test_focused_check_uses_selected_checkout_and_publishes_valid_receipt(checkout):

@@ -247,7 +247,6 @@ def test_external_exemptions_keep_owned_payload_and_target_source_bound(
         else:
             changed_path = "Attachments/22222222/coherent-false-target.png"
             image["relative_path"] = changed_path
-            # Stay entirely inside this copied disposable vault.
             (vault / changed_path).write_bytes(PNG)
             (vault / IMAGE_PATH).unlink()
             document = next(d for t in record["item_targets"] for d in t["documents"])

@@ -312,7 +312,6 @@ def test_ready_whole_review_applies_exact_note_and_retains_unrelated_user_state(
     git(vault, "update-ref", operation_ref, outcome.receipt_commit)
     assert Operations().inspect_update_status(vault).status == "applied"
 
-    # A real receipt-shaped ref still needs its actual result parent and graph.
     invalid = json.loads(git(vault, "show", f"{outcome.receipt_commit}:receipt.json"))
     invalid["result_commit"] = outcome.checkpoint_commit
     blob = git(
@@ -670,7 +669,6 @@ def test_valid_schema_stop_with_wrong_direction_is_not_operation_authority():
     assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
     assert user_state(vault)["index"] == before["index"]
 
-    # Matching restore tokens are still unsupported for an apply/finish writer.
     changed_intent = json.loads(
         git(vault, "show", f"{outcome.intent_commit}:intent.json")
     )

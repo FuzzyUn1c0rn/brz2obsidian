@@ -200,7 +200,6 @@ def test_attachment_versions_require_complete_valid_staged_references(
     assert (
         partial.binding == first.binding and partial.draft_pending and not partial.ready
     )
-    # Invalid subsets remain safety failures, including per-version destinations.
     bad = [
         ({"reference_id": "0" * 64, "choice": selected[0]},),
         ({"reference_id": refs[0].reference_id, "choice": selected[0]},) * 2,
@@ -737,7 +736,6 @@ def test_remove_choice_uses_bounded_offered_references_and_preserves_other_spans
         assumptions_digest=offer.assumptions_digest,
     )
     assert removed.code == "accepted" and removed.unresolved == 1
-    # The public shared seam also serves non-worker callers; candidate bytes stay local.
     prepared = case.operations.prepare_attachment_cleanup(case.vault).preparation
     native = case.operations.resolve_update_choice(
         prepared,

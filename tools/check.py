@@ -58,8 +58,6 @@ def snapshot(root):
         - {""}
     )
     existing = [name for name in paths if (root / name).is_file()]
-    # Git performs the same clean/eol normalization used when committing. This
-    # does not touch the index. Quoted stdin paths preserve Unicode and spaces.
     names = "".join(
         json.dumps(name, ensure_ascii=False) + "\n" for name in existing
     ).encode("utf-8")
@@ -101,9 +99,6 @@ def snapshot_ref(root, ref):
             if kind != "blob":
                 raise Invalid("Source tree contains unsupported non-file entries")
             files.append({"path": name, "git_blob": blob})
-    # A historical blob may predate today's normalization policy. Read Git
-    # objects in one batch, then apply the reference tree's effective filters
-    # where conversion can matter. Never rewrite the index or fixture bytes.
     blobs = list(dict.fromkeys(item["git_blob"] for item in files))
     stream = io.BytesIO(
         git(
@@ -227,10 +222,14 @@ def pytest_argument_bytes(selectors):
     return raw
 
 
-def command_for(python, run_dir, check, chosen, selector_file=None):
+def command_for(
+    python, run_dir, check, chosen, selector_file=None, *, legacy_lint=False
+):
     argv = [str(python), "-m"]
     if check == "dependency":
         return argv + ["pip", "check"]
+    if check == "lint" and not legacy_lint:
+        return argv + ["tools.check_lint", "--cache-dir", str(run_dir / "ruff-cache")]
     if check in ("lint", "format"):
         return argv + [
             "ruff",
@@ -326,7 +325,6 @@ def child_environment(root, run_dir):
         BRZ_CHECK_COUNTS=str(run_dir / "counts.json"),
         RUFF_CACHE_DIR=str(run_dir / "ruff-cache"),
     )
-    # Caller plugin/argument injections would make the declared selection false.
     env.pop("PYTEST_ADDOPTS", None)
     env.pop("PYTEST_PLUGINS", None)
     return env
@@ -761,6 +759,9 @@ def validate(args):
     )
     if digest(runner_bytes) != receipt["runner"]["sha256"]:
         raise Invalid("Receipt runner identity differs from assessed runner")
+    legacy_lint = args.ref is not None and not any(
+        row["path"] == "tools/check_lint.py" for row in current["files"]
+    )
     rows = receipt.get("checks")
     if (
         not isinstance(rows, list)
@@ -925,6 +926,7 @@ def validate(args):
             row["id"],
             row["selection"],
             origin_run / "pytest.args" if "pytest_args" in row else None,
+            legacy_lint=legacy_lint,
         ):
             raise Invalid(
                 "Recorded check arguments disagree with declared execution selection"

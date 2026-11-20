@@ -119,7 +119,6 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
             if issue:
                 issues.append(issue)
             elif target not in notes:
-                # Its own parse/read diagnostic already explains the unavailable role.
                 unavailable_memberships.add(target)
             elif not category(notes[target][0], target):
                 issues.append(

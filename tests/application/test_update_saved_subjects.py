@@ -57,8 +57,6 @@ def test_unready_both_keeps_approved_secondary_in_local_capture_scope():
     assert (secondary, change.subject_id) in {
         (row.path, row.subject_id) for row in review_subjects(plan.producer_facts, plan)
     }
-    # Native LOCAL capture consumes this canonical per-owner extension even
-    # when another choice prevents whole-plan selected-effects projection.
     assert {
         (row.path, row.subject_id) for row in approved_attachment_subjects(plan)
     } == {

@@ -73,12 +73,9 @@ class UpdateWorker:
         try:
             self._output().reply(request, terminal, end)
         except OSError:
-            # A lost output channel cannot report even the actual native result.
-            # Keep its stream unsealed and request the existing safe stop.
             self._output_failed()
 
     def _output(self):
-        # Started before reader/producer concurrency in serve, or by handle.
         if self._delivery is None:
             self._delivery = UpdateOutput(
                 self.output, failed=self._output_failed, retired=self._retire
@@ -303,8 +300,6 @@ class UpdateWorker:
                 self._perform(request)
             if self.closed:
                 break
-        # The sealed close reply lets the parent release stdin. Join before
-        # interpreter shutdown so no thread still owns buffered standard I/O.
         reader.join()
         try:
             if isinstance(self.context, UpdateContext):

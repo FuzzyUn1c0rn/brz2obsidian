@@ -111,7 +111,6 @@ def _read_checkpoint_payload(
             or sum(row.limit for row in requests) > byte_limit
         ):
             return result("invalid_request")
-        # Page storage plus immutable response copies remain resource-bounded.
         if sum(row.limit for row in requests) > available_memory() // 4:
             return result("insufficient_memory")
         root = Path(vault).absolute()
@@ -145,8 +144,6 @@ def _read_checkpoint_payload(
             ),
             timeout=120,
         )
-        # Recheck current identity/ref/physical association without repeating the
-        # complete graph once per requested file or introducing a trust cache.
         _, _, raw, _ = observe_file(
             root, root / ".brz2obsidian/locator.json", prefix_limit=OUTPUT_BUDGET + 1
         )

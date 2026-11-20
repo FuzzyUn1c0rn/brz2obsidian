@@ -97,12 +97,10 @@ def verified_v2_seed(tmp_path_factory):
     ) == (7, 8, 3, 2, 1, 1)
     record = json.loads((vault / "migration-record.json").read_bytes())
     prepared = source, vault, result, record
-    # A second private case witnesses both file and nested-data isolation.
     sentinel = copy_case(prepared, root / "sentinel")
     expected = isolation_sample(prepared)
 
     def assert_untouched():
-        # Check before reuse: a tainted seed must never prepare another case.
         assert isolation_sample(prepared) == expected, "verified seed was mutated"
         assert isolation_sample(sentinel) == expected, "separate case was mutated"
 

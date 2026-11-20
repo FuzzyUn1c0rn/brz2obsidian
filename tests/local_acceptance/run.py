@@ -257,7 +257,6 @@ def run_acceptance(source_paths, output, pins=None):
         inventories[key] = inventory_before_inclusion(source)
         if key == "E" and pins[key] == INPUTS["E"]:
             check_source_e_raw_inventory(inventories[key])
-    # Explicit per-process source selection also flows into the CLI subprocess.
     expected_src = Path(__file__).resolve().parents[2] / "src"
     assert os.environ.get("PYTHONPATH") and expected_src.resolve() in {
         Path(p).resolve() for p in os.environ["PYTHONPATH"].split(os.pathsep)

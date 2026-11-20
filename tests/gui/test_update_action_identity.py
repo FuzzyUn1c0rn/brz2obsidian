@@ -665,8 +665,6 @@ def test_omitted_action_identity_does_not_promise_missing_path_details(tmp_path)
     vault.mkdir()
     source = tmp_path / "incoming.brz"
     source.write_bytes(b"Controlled outer preparation input")
-    # A valid canonical path is deliberately longer than the existing disclosure
-    # cap. No physical file or OS path-limit claim is involved.
     destination = "Categories/" + "segment/" * 280 + "Native category.md"
     facts = facts_for(existence="absent", incoming=b"Changed source body.\n")
     current = facts.subjects[0].current.model_copy(update={"path": destination})

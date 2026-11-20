@@ -168,7 +168,7 @@ def test_empty_roles_historical_review_write_failure_reports_actual_object_truth
     )
     assert result.status == "failed" and result.code == "capture_unavailable"
     assert marker.read_text(encoding="ascii") == "3"
-    assert result.objects_written is True  # The first review-content blob was verified.
+    assert result.objects_written is True
     assert result.object_storage == ("verified" if after else "possible")
     assert _actual_blob_exists(vault, attempted.read_bytes()) is after
     assert git(vault, "for-each-ref", "refs/brz2obsidian/imports") == b""

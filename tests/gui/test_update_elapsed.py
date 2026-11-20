@@ -105,7 +105,6 @@ def test_elapsed_advances_between_observations_without_changing_operation_truth(
         )
         assert (progress.minimum(), progress.maximum(), progress.value()) == (0, 5, 2)
 
-        # Real Qt time, one retained nonzero observation; no private clock seam.
         QTest.qWait(1400)
         advanced = elapsed_seconds(window)
         assert advanced > initial, "Elapsed must advance without another worker frame"

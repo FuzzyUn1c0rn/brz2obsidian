@@ -33,8 +33,6 @@ def test_format_attachment_controls_show_canonical_current_only_guidance(tmp_pat
     prepared = format_attachment_preparation().model_copy(update={"vault": str(vault)})
 
     class Inputs(Operations):
-        # Only native preparation/history observations are controlled. Core,
-        # canonical pages, persistent worker, codecs, host and Qt stay real.
         def prepare_format_transition(self, path, incoming=None):
             assert (path, incoming) == (str(vault), str(source))
             return UpdateResult(

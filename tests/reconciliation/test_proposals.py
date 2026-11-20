@@ -191,7 +191,6 @@ def test_divergent_changes_and_unknown_originals_offer_exact_unresolved_alternat
         assert change.provenance.rule == (
             "divergent" if baseline.status == "known" else "unknown_original"
         )
-    # Even a matching current/incoming digest cannot manufacture an original.
     unknown = subject.model_copy(
         update={
             "current": CurrentContent(
@@ -358,7 +357,6 @@ def test_closed_frozen_input_rejects_missing_unknown_duplicate_and_ill_typed_fac
         ReconciliationInput.model_validate_json(
             raw.replace('"generation":1', '"generation":1,"generation":2')
         )
-    # Nested duplicate keys must be rejected too.
     with pytest.raises(ValueError, match="Duplicate"):
         ReconciliationInput.model_validate_json(
             raw.replace(
@@ -499,7 +497,6 @@ def test_available_immutable_references_validate_bytes_and_do_not_change_semanti
         and inline.generation != referenced.generation
     )
     assert a.result.data == b.result.data == b"xyz"
-    # Content changes still create a new change, while the subject is stable.
     edited = reconcile(request(original=b"abc", current=b"abc", incoming=b"new"))
     assert edited.changes[0].subject_id == a.subject_id
     assert edited.changes[0].change_id != a.change_id

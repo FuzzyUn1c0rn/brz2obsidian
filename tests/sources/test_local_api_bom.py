@@ -71,7 +71,6 @@ def test_previously_qualified_bom_capture_reopens_but_changed_binding_refuses(
             source = json.loads((capture / "source.json").read_bytes())
             audit = json.loads((capture / "audit.json").read_bytes())
             snapshot = live.snapshot.model_dump(mode="json")
-    # Exact pre-repair successful interpretation: signature and no adaptation.
     snapshot["identity"]["source_sha256"] = snapshot["identity"]["snapshot_digest"] = ""
     snapshot["documents"][0].update(
         text=raw.decode("utf-8"),

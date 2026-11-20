@@ -155,7 +155,6 @@ def test_nonreturned_binary_ancestor_loads_with_capacity_for_tip_and_metadata(
         capacity_observed.append(capacity)
         return capacity
 
-    # Existing external capacity adapter; native Git/storage/admission stay real.
     monkeypatch.setattr(history, "available_memory", available_memory)
     with operations.inspect_update_inputs(vault) as observed:
         assert capacity_observed
@@ -400,7 +399,6 @@ def test_coherent_ancestor_reference_tamper_refuses_and_retires_owned_files(
         "size": len(original),
     }
     poisoned_wire = json.dumps(poisoned, separators=(",", ":")).encode()
-    # This helper creates a root commit, so use it only for generation1.
     retarget_checkpoint(vault, ancestor, review=poisoned_wire)
     bad_ancestor = json.loads(locator_path.read_bytes())["commit"]
     bad_manifest = json.loads(

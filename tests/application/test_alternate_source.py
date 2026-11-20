@@ -520,8 +520,6 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.vault_update_contracts",
         },
         "application/update_facts.py": {
-            # This outer producer reuses attachment interpretation/reference
-            # builders for compatible results; Core still admits the evidence.
             "brz2obsidian.application.attachment_choices",
             "brz2obsidian.application.review_choices",
             "brz2obsidian.obsidian",
@@ -611,8 +609,6 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.publication.vault_history",
             "brz2obsidian.review_codec",
         },
-        # Vault publication roles consume pure reviewed contracts and inward
-        # interpretation; Operations owns their outer composition.
         "publication/source_payload.py": {
             "brz2obsidian.application.source_payload_contracts",
         },
@@ -839,7 +835,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         )
         for file in files:
             if file.name == "wiring.py":
-                continue  # The outer composition explicitly selects implementations.
+                continue
             file_permitted = permitted | application_additions.get(
                 file.relative_to(root).as_posix(), set()
             )

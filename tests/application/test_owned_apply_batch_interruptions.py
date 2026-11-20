@@ -112,7 +112,6 @@ def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
         if argv[-3:] == ["mktree", "-z", "--batch"]:
             current = (vault / _ASSET).read_bytes()
             if current not in timed_out:
-                # Let Git write a real tree before reporting a clean timeout.
                 rows = kwargs["input"].split(b"\0\0", 1)[0] + b"\0"
                 first = read_git(argv[:-1], **dict(kwargs, input=rows))
                 assert first.returncode == 0 and not first.stderr
@@ -249,7 +248,6 @@ def test_resumed_apply_acknowledges_cancellation_during_prepared_verification(
             or json.loads(locator.read_bytes())["commit"] == saved.capture.commit
         ):
             return False
-        # Request a stop after Apply's first poll at the retained checkpoint.
         if not saw_prepared:
             saw_prepared = True
             return False
@@ -297,7 +295,6 @@ def test_owned_apply_reports_cancellation_after_successful_review_blob_batch(
         ):
             assert result.returncode == 0 and not result.stderr
             assert not cancel.is_set(), "The fixture must cancel after the last batch"
-            # This fixture's review content fills one batch and part of the next.
             if len(result.stdout.splitlines()) < 32:
                 cancel.set()
         return result

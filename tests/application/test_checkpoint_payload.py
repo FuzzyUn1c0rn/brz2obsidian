@@ -118,7 +118,6 @@ def test_byte_page_cannot_claim_eof_while_its_suffix_is_omitted():
     fields = literal_page()
     chunk = CheckpointPayloadChunk(**fields)
     assert chunk.data == b"\nB\x00" and chunk.next_offset == 5
-    # Each literal counterexample contradicts one independent range statement.
     for contradiction in (
         {"size": 4, "next_offset": None},
         {"eof": True},
@@ -131,7 +130,6 @@ def test_byte_page_cannot_claim_eof_while_its_suffix_is_omitted():
 
 
 def test_refused_read_cannot_release_a_verified_page_and_codes_are_closed():
-    # Contract shape alone conveys no physical history or publication authority.
     locator = CheckpointLocator(
         schema_id="brz2obsidian.checkpoint-locator",
         schema_version=1,
@@ -169,7 +167,6 @@ def test_refused_read_cannot_release_a_verified_page_and_codes_are_closed():
         "chunks": (),
     }
     assert CheckpointPayloadRead(**(fields | refused)).chunks == ()
-    # Separate contradictions keep one check from masking another check.
     for contradiction in (
         {"code": "history_unavailable"},
         {"locator": None},
@@ -355,7 +352,6 @@ def test_even_prefix_bytes_require_complete_blob_integrity(retained):
     before = state(vault)
     blob.chmod(original_mode | stat.S_IWRITE)
     try:
-        # The requested prefix remains A, but the unread suffix is corrupt.
         blob.write_bytes(zlib.compress(b"blob 7\0A\r\nB\x00\xffX"))
         corrupt = read_checkpoint_payload(vault, **args)
         assert corrupt.status == "refused" and corrupt.chunks == ()

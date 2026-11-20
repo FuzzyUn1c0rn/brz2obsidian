@@ -132,7 +132,6 @@ class ReviewBudget:
         ):
             raise ValueError("Invalid review timeout")
         if not isinstance(self.cancel, Event):
-            # Preserve the public budget validation exception.
             raise ValueError("Review cancellation requires an Event")  # noqa: TRY004
 
 
@@ -210,8 +209,6 @@ class _Ledger:
             self._record_walk(shape.nodes, shape.steps)
             self.check()
         except BaseException:
-            # The exception traceback can retain the entire calculator stack.
-            # Do not release its workspace until the public handler has exited.
             self._failed_workspace += workspace
             raise
         self.release_metadata(workspace)
@@ -236,8 +233,6 @@ class _Ledger:
             "raw_work"
         ) or shape.encoded > self.remaining("encoded"):
             raise OSError("Model validation work budget exhausted")
-        # Reserve the graph, all attempted-branch scratch, and a lifetime record
-        # before the sole model_validate entry below. Old grants stay live.
         self.take("step", 4)  # grant insertion, transfer and eventual unwind
         self.retain_metadata(shape.retained + shape.temporary + _GRANT_M)
         grant = {
@@ -252,8 +247,6 @@ class _Ledger:
             self.take("encoded", shape.encoded)
             result = model.model_validate(value)
         except BaseException:
-            # The exception can still retain a failed validator's self/input.
-            # The caller retires this grant after its sanitized handler exits.
             grant["failed"] = True
             raise
         grant["value"] = result
@@ -271,15 +264,11 @@ class _Ledger:
             self.release_metadata(grant["retained"] + grant["temporary"] + _GRANT_M)
 
     def reserve_file_cleanup(self):
-        # close() currently copies the file map into (path, identity) pairs.
-        # Reserve pair+tuple slot and exists/lstat/unlink iteration before I/O.
         self.take("step", 4)
         self.retain_metadata(96 + 16)
 
     def retire(self):
         self._grants.clear()
-        # Returned pure graphs can remain with the caller. Do not report their
-        # charged M as freed or reset cumulative work on lexical close.
 
 
 @dataclass(frozen=True)
@@ -367,8 +356,6 @@ class _OwnedReviewExport:
     def _stage_sealed(self, effect, output, closure):
         session = self.session
         with session._operation():
-            # This exact closure was co-admitted before export. Its backing
-            # bytes are immutable; registration and scope are still live.
             for record in closure.view.records.values():
                 session._content._check_prepared(record, session._scope)
             content = effect.content
@@ -431,9 +418,6 @@ class ReviewSession:
             observed,
             scratch_parent=scratch_parent,
             budget=ReviewBudget(
-                # Finite cumulative model work spans the whole review lifetime;
-                # it is not live heap and must not be capped by current capacity.
-                # Envelope/semantic admission retains its capacity checks.
                 metadata_limit=maximum,
                 node_limit=maximum,
                 depth_limit=sys.getrecursionlimit(),
@@ -494,7 +478,6 @@ class ReviewSession:
 
         if type(value) is not OpaqueContent:
             return link_state(value, **arguments)
-        # Only an actual complete classification can leave an opaque value here.
         classified = self._assembly_content(value, semantic=False)
         if type(classified) is InlineExactContent:
             return link_state(classified, **arguments)
@@ -599,8 +582,6 @@ class ReviewSession:
                 MappingProxyType(values),
             )
             if select_effects:
-                # Co-admission after projection has just checked the complete
-                # live closure used to select from this canonical review.
                 try:
                     effects = self._drive(SelectedEffectsWork(saved.plan))
                 except (ValueError, OSError, RecursionError) as error:
@@ -629,9 +610,6 @@ class ReviewSession:
     ):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
-            # M counts cumulative model work, not measured live heap. Give it
-            # the same finite native-domain credit as the other work counters;
-            # envelope/semantic admission still uses actual capacity separately.
             metadata_limit=maximum,
             node_limit=maximum,
             depth_limit=sys.getrecursionlimit(),
@@ -1022,7 +1000,6 @@ class ReviewSession:
             registry[record.reference.content_id] = record
         records = tuple(registry.values())
         view = self._content._registration_view(records, self._ledger, self._scope)
-        # Resolve every record against live backing before publishing this view.
         comparison = ContentComparison(
             self._content,
             tuple(record.reference for record in records),
@@ -1302,8 +1279,6 @@ class ReviewSession:
                     <= self._ledger.budget.metadata_limit
                 )
                 if retain_initial:
-                    # The private seed is immutable; the caller freshly
-                    # coadmits the complete current binding view.
                     self._ledger.admit_metadata(retained)
                     prior = retained
                 else:
@@ -1312,9 +1287,6 @@ class ReviewSession:
                 self._initial_review_entry = None
         plan = self._drive(PlanWork(facts, preflight, canonical_prior=prior))
         if prior is None and retain_initial:
-            # Reserve before owning a separate graph. As with other returned
-            # model work, this conservative cumulative charge is not refunded
-            # when the one-entry reference is retired.
             size = self._ledger.admit_metadata((self._record, plan, 0))
             retained = self._admit_values(plan)
             self._coadmit()
@@ -1368,8 +1340,6 @@ class ReviewSession:
         value = OpaqueContent(
             identity=identity, reference=historical, occurrence=occurrence
         )
-        # This binding was just checked, constructed and registered above.
-        # Semantic conversion still verifies the registration and full bytes.
         return self._semantic_value(binding) if inline else value
 
     def _load_retained(self, record, available, references, *, local):
@@ -1470,9 +1440,6 @@ class ReviewSession:
             self._selected = None
             try:
                 if type(raw) is SavedReview:
-                    # Typed caller graph is an explicit convenience cost. The
-                    # first caller-dependent reconstruction is guarded before
-                    # any registration/closure or opaque planner work.
                     saved = self._ledger.construct(SavedReview, raw)
                     saved = self._admit_values(saved)
                 else:

@@ -189,9 +189,6 @@ def encode_response(response: WorkerResponse) -> bytes:
             if result.diagnostic_omission
             else 0
         )
-        # The backend's safe report starts with selected paths/versions/outcome.
-        # Retain a bounded prefix of that already-safe text as well as explicit
-        # omission; do not fabricate missing context or inspect source evidence.
         context = result.diagnostic_text[:8192]
         report = f"brz2obsidian diagnostic report\nOperation: {result.operation}\nOutcome: {result.outcome}\nStatus: {result.status}\nDiagnostic findings omitted: {omitted} (response_limit).\nThe safe diagnostic report exceeded the worker response limit.\nAvailable safe context (possibly incomplete):\n{context}\n"
         bounded = result.model_copy(

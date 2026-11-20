@@ -251,8 +251,6 @@ class HostRunner:
             if self._pending_progress is None:
                 self._progress_scheduled = False
                 return
-        # Requeue behind ordinary commands rather than starving control/terminal
-        # reduction when the presentation consumer is slow.
         try:
             self._commands.submit(self._drain_update_progress)
         except RuntimeError:

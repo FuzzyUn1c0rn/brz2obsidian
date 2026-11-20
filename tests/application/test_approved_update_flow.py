@@ -253,7 +253,6 @@ print(json.dumps({"valid":checked.status,"files":{f.path:f.content.data.decode()
             "Notes/two.md": "two local\n",
         },
     }
-    # Refresh one actual current version; the two independent prior choices survive.
     subject = facts.subjects[2]
     current = subject.current.model_copy(
         update={"content": ExactContent(data=b"one later edit\n")}
@@ -326,7 +325,6 @@ def test_group_rejects_changed_scope_forgery_and_keeps_unsafe_choices_visible():
         facts.model_copy(update={"safety_facts": facts.safety_facts + (unsafe,)}),
         preflight=preflight(),
     )
-    # Other safe conflicts remain eligible; one unsafe identity retains its blocker.
     digest, members = unresolved_current_scope(blocked)
     assert len(members) == 2
     grouped = resolve_review(blocked, keep_current_group_action(blocked, digest))
@@ -495,7 +493,6 @@ def test_owned_worker_group_cancel_save_partial_close_and_resume(monkeypatch):
     )
     assert resumed.binding is not None and resumed.unresolved > 0, resumed
     assert resumed.keep_current_count == partial.keep_current_count
-    # The full current inventory is rechecked once before admitting the group.
     path = case.vault / case.note_path
     path.write_bytes(case.current_note + b"Between-review edit.\r\n")
     changed = worker_context_call(
@@ -524,7 +521,6 @@ def test_owned_worker_group_cancel_save_partial_close_and_resume(monkeypatch):
         grouped
     )
     assert grouped.affected_conflicts == refreshed.keep_current_count
-    # Review actions and Save never publish either authored version.
     assert (
         case.vault / case.note_path
     ).read_bytes() == case.current_note + b"Between-review edit.\r\n"
@@ -743,7 +739,6 @@ def test_first_apply_stop_after_checkpoint_retains_review_and_user_state(monkeyp
         captured.append(result)
         return result
 
-    # This is the native history port: cancel after its real durable reply.
     monkeypatch.setattr(operations, "capture_checkpoint", capture)
     stopped = operations.apply_update(
         prepared.preparation, cancel=lambda: bool(captured)
@@ -2378,7 +2373,6 @@ def test_owned_mixed_group_and_reselect_keep_automatic_note_and_worker_usable(
             "references", binding=active.binding, requirement_id=asset.requirement_id
         )
         assert references.references and not references.draft_pending
-        # Opening then discarding an unstaged reference view sends no mutation.
         offers = send("choices", binding=active.binding).offers
         again = next(
             row
@@ -2830,7 +2824,6 @@ def test_mixed_automatic_apply_has_owned_reviewed_undo_with_exact_preimage():
         and proof.outputs[0].target_existence == "absent"
     )
     assert type(undo).model_validate_json(undo.model_dump_json()) == undo
-    # An absent decision never lets another selected change own this creation.
     wrong = created.model_copy(
         update={
             "operation_reversal": proof.model_copy(

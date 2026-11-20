@@ -290,7 +290,6 @@ def captured():
         )
         assert batch == expected_batch
         yield operations, container, vault, source, result
-    # Retain this explicitly owned fixture and its audit evidence.
 
 
 def test_missing_required_blob_refuses_read_and_capture_without_repair(captured):

@@ -206,7 +206,6 @@ def test_view_rejects_nesting_concurrent_use_reentry_and_escaped_access(capture)
     view = session.payload_read_view()
     with pytest.raises(MigrationRefused), view.open_payload(ASSET):
         pass
-    # The unopened failed object cannot be revived.
     with pytest.raises(MigrationRefused), view:
         pytest.fail("Admission must fail before yielding a failed view")
     view = session.payload_read_view()
@@ -605,8 +604,6 @@ def test_view_retains_primary_failure_and_safe_secondary_closure_findings(
                 pytest.raises(expected) as caught,
                 session.payload_read_view() as reader,
             ):
-                # Entry completes unmodified; inject only at the public selected
-                # stream and the subsequent fresh full-check descriptor.
                 state["armed"] = True
                 if primary == "escaped":
                     context = reader.open_payload(ASSET)

@@ -11,7 +11,6 @@ from tests.support.local_api_payloads import PNG, PayloadApi, attachment
 IDS = {name: identity(i) for i, name in enumerate("ABCDEFGTU", 10)}
 TITLES = {1: "Entry", **{i: name for i, name in enumerate("ABCDEFGTU", 10)}}
 KINDS = {10: 2, 11: 2, 12: 2, 14: 2, 17: 4, 18: 4}
-# a, b, relation, meaning, direction: independent reviewed source encodings.
 EDGES = (
     (10, 11, 1, 3, -1),
     (11, 12, 1, 3, -1),

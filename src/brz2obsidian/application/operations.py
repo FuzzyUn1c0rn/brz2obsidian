@@ -1173,7 +1173,6 @@ class ApplicationSession:
             and effect.request.operation != "validate_destination"
             for effect in effects
         ):
-            # Applies equally to future primary operations using this contract.
             self._diagnostic_generation += 1
             self._diagnostic_text = ""
             state = state.model_copy(update={"retry_operation": None})
@@ -1181,7 +1180,6 @@ class ApplicationSession:
             self._closed = True
             self._diagnostic_generation += 1
             self._diagnostic_text = ""
-            # Retain summary facts in the final update, but release its report.
             if state.result is not None:
                 state = state.model_copy(
                     update={

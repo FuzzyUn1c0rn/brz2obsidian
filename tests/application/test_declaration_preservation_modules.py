@@ -36,7 +36,6 @@ ROOTS = (
 )
 FIXTURE = Path(__file__).parents[1] / "fixtures/minimal"
 ROOT_BYTES = tuple((name, (FIXTURE / name).read_bytes()) for name in ROOTS)
-# One authored, immutable red 4x2 PNG; no per-case image generation.
 IMAGE = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000004000000020802000000f0caea34"
     "0000001049444154789c63fccf80004c486c0600193501031b2f4b120000000049454e44ae426082"

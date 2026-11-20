@@ -26,8 +26,6 @@ def test_bound_worker_pages_binary_output_metadata_and_refuses_retired_bindings(
     )
 
     class NativePreparation(Operations):
-        # Controlled outer preparation port, returning a real canonical Core
-        # review. This owns wire/context delivery, not physical Native admission.
         def prepare_update(self, path, source, **kwargs):
             assert path == str(vault)
             return UpdateResult(

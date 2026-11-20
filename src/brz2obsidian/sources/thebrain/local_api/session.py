@@ -426,8 +426,6 @@ class LocalApiSession:
                 proven_documents, proven_context = self._metadata_proof
                 if documents != proven_documents or context != proven_context:
                     refuse("The pinned capture metadata association changed")
-                # Every file was fully measured above. Identical retained bytes
-                # and frozen associations reuse the initial semantic proof.
                 return
             parsed = {
                 key: parse_json(raw.decode("utf-8")) for key, raw in documents.items()

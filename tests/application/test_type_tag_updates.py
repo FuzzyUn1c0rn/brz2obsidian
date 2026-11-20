@@ -574,8 +574,6 @@ def exercise_partial_update(update_root, operations, vault, original):
         expected[item] = change.incoming.data.replace(old_paragraph, local).replace(
             b"[[Categories/B.md", b"[[Categories/B local.md"
         )
-    # Incoming T's related link still names the source filename. The explicit
-    # rename requires a reviewed text choice for that reference as well.
     t_change = next(
         c for c in prepared.review.proposal.changes if c.item_id == IDS["T"]
     )
@@ -594,8 +592,6 @@ def exercise_partial_update(update_root, operations, vault, original):
         prepared,
         resolved_only=True,
     )
-    # Related B/D/F links name selected file versions. Explicitly resubmitting
-    # these chosen texts binds their references after the other text choices.
     prepared = choose_edited(
         operations, prepared, IDS["B"], expected[IDS["B"]], "requalify-B"
     )
@@ -648,8 +644,6 @@ def exercise_partial_update(update_root, operations, vault, original):
     targets = {r["item_key"]: r for r in record["item_targets"]}
     assert sum(r["created"] for r in targets.values()) == 10
     assert len({r["relative_path"] for r in targets.values() if r["created"]}) == 10
-    # The exact explicitly selected Incoming DATA record retains the source
-    # inventory. The native source identity and chosen bytes bind the local path.
     assert targets[IDS["B"]]["relative_path"] == "Categories/B.md"
     assert b_properties["source_collection_id"] == BRAIN
     assert b_properties["source_item_id"] == IDS["B"]
@@ -687,8 +681,6 @@ def exercise_partial_update(update_root, operations, vault, original):
         vault / "Tag memberships.md"
     ).read_text(encoding="utf-8")
     assert check_vault(vault).outcome == "clean"
-    # The retained preimages also specify later Undo precisely: C's new source
-    # tagT is converter-owned, while its local prose must survive the reversal.
     (update_root / "v2-undo-preimages.json").write_text(
         json.dumps(
             {"C": original_c.hex(), "D": original_d.hex(), "I": original_i.hex()}

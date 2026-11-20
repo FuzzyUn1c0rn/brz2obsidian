@@ -195,7 +195,6 @@ def test_forged_wrappers_and_invalid_resume_never_return_historically_ready_auth
     invalid = resume_review(loaded, ill_typed, preflight=preflight())
     assert invalid.status == "refused" and invalid.code == "invalid_current_facts"
     assert invalid.plan is None and not invalid.ready
-    # A constructed unready wrapper cannot authorize a forged historical cache.
     altered = loaded.model_copy(
         update={
             "saved": saved.model_copy(

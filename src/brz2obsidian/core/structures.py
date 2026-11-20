@@ -200,7 +200,6 @@ def structure_proposal(
         )
     except ValueError as error:
         return unresolved(str(error))
-    # Copy untouched current spans exactly; only validated source scalar entries move.
     data, cursor, fields = b"", 0, []
     for field in current.fields:
         data += current.content.data[cursor : field.span.start]

@@ -197,7 +197,6 @@ def test_fresh_context_resumes_saved_binary_original_source_update(monkeypatch, 
     assert user_state(vault, owned_ref=seed.ref) == before
     del warm, opened, chosen, page, converted
 
-    # This new context cannot obtain the 16MiB ORIGINAL through eager tip load.
     capacity = 96 * 1024 * 1024
     assert 9 * size + 64 * 1024 * 1024 > capacity
     capacity_observed = []

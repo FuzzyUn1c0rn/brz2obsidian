@@ -38,7 +38,6 @@ def dump_json(value):
 def expanded(value):
     if type(value) is str:
         try:
-            # Preserve all duplicate declarations inside opaque serialized JSON.
             value = json.loads(
                 value, parse_float=Decimal, object_pairs_hook=lambda p: p
             )

@@ -341,7 +341,6 @@ def resource_case(tmp_path, shape):
     data = json.loads(baseline.manifest_path.read_bytes())
     graph_path = baseline.manifest_path.parent / data["graphs"][identity(2)]
     graph = json.loads(graph_path.read_bytes())
-    # Modify the present image resource only. Raw note/PDF/TXT controls survive.
     resource = graph["attachments"][1]
     resource.update(type=1, location="opaque.png")
     payload = PNG

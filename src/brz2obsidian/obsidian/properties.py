@@ -15,8 +15,6 @@ def property_memberships(plan, targets):
     for membership in plan.tag_memberships:
         if membership.native:
             tags[membership.item_key].add(tokens[membership.tag_key])
-    # Add the role tag to the same set. Copying the set can change the order of
-    # case-fold ties, which is observable when reproducing format-8 bytes.
     for item in plan.analysis.snapshot.items:
         if item.role == "definition":
             tags[item.key].add("categories")

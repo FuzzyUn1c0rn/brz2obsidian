@@ -75,7 +75,6 @@ def relationships(raw):
             value is False for field, value in r.items() if field.startswith("Is")
         ), "raw reviewed relationship flags"
         if signature == (1, 1, 1, 3) and roles == (1, 1):
-            # Child Relation1 fixes parent A/child B; backward arrow is separate.
             kind = "hierarchy"
         elif signature == (1, 3, 1, -1) and roles in {
             (1, 2),
@@ -84,7 +83,6 @@ def relationships(raw):
             (2, 4),
             (4, 2),
         }:
-            # Normal jump contributes connectivity, never instance membership.
             kind = "related"
         elif (
             signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 7)}

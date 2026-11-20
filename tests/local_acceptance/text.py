@@ -189,9 +189,6 @@ _HTML_TOKEN = re.compile(
     + r"|<\?[\s\S]*?\?>|<![A-Za-z][^>]*>"
     + r"|<!\[CDATA\[[\s\S]*?\]\]>"
 )
-# Current qualification must notice parser-active Unicode separators before
-# rejecting them against the narrower ASCII literal policy. Recognition grants
-# no admission; the historical scanner/default remains unchanged.
 _CURRENT_HTML_TOKEN = re.compile(_HTML_TOKEN.pattern.replace(_HTML_SPACE, r"\s"))
 
 
@@ -213,7 +210,6 @@ def _line_view(line, *, interrupt=False, empty_lists=False):
         elif listing:
             number = re.match(r"[0-9]+", listing[1].lstrip())
             if interrupt and not owner and number and int(number[0]) != 1:
-                # A non-1 ordered marker cannot interrupt a raw paragraph.
                 break
             # CommonMark 5.2: a wide marker gap consumes one space, leaving
             # at least four as code indentation. Never fabricate an opener.
@@ -388,8 +384,6 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _tables=None):
                 empty_lists=_tables is not None and not paragraph,
             )
         if continuing is not None and not separator_line:
-            # Existing prefixes precede a new marker. A non-1 ordered marker
-            # cannot interrupt that paragraph within its actual quote/list.
             container_owner = prior_owner + container_owner
             quotes = sum(kind == "quote" for kind, _ in container_owner)
         if quotes != previous_quotes:
@@ -579,7 +573,6 @@ def generated_boundary(prefix):
 def active_mask(body, *, autolinks=True, inline_only=False, _code_spans=None):
     """Lexically protect constructs in source order with exact raw coordinates."""
     if inline_only:
-        # A reference display label is an inline fragment, not a new block.
         regions, mask = [(0, len(body))], list(body)
     else:
         regions, mask, _ = _inline_regions(body)
@@ -621,8 +614,6 @@ def active_mask(body, *, autolinks=True, inline_only=False, _code_spans=None):
             if stop is None and body[cursor] == "<":
                 html = _HTML_TOKEN.match(body, cursor, finish)
                 if html:
-                    # HTML consumes its own quoted attributes before Markdown
-                    # punctuation/code handling. Retain raw token coordinates.
                     cursor = html.end()
                     continue
             if stop is not None:
@@ -644,8 +635,6 @@ def inline_candidates(body, *, inline_only=False):
     """Find balanced active phrases, distinguishing bracket text from links."""
     scan = active_mask(body, autolinks=False, inline_only=inline_only)
     mask = list(scan)
-    # Balanced brackets recognize whole outer phrases, including an image inside
-    # a forgotten thought link. Escaped brackets never change nesting depth.
     candidates = []
     cursor = 0
     while cursor < len(scan):
@@ -675,8 +664,6 @@ def inline_candidates(body, *, inline_only=False):
         start = index + 1
         while start < len(body) and body[start] in " \t\r\n":
             start += 1
-        # The opening phrase is proven active. Its destination owns escapes;
-        # the literal mask may have replaced escaped punctuation with spaces.
         if body[start : start + 1] == "<":
             stop = body.find(">", start + 1)
             destination_start, destination_end = start + 1, stop
@@ -735,7 +722,6 @@ def _current_literal_name(token):
 def literal_edits(body, *, allow_literal_tokens=False):
     token_pattern = _CURRENT_HTML_TOKEN if allow_literal_tokens else _HTML_TOKEN
     scan = active_mask(body)
-    # Labels are active; balanced whole phrases establish destinations/titles.
     mask = list(scan)
     for _, finish, _, _, start, _ in inline_candidates(body)[0]:
         # The opening angle delimiter belongs to a destination too. Checking

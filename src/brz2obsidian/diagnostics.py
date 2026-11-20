@@ -4,8 +4,6 @@ import unicodedata
 
 from brz2obsidian.contracts import DiagnosticSubject
 
-# A reason is admitted with its original code. The pair prevents a foreign rule
-# or a familiar rule on an unrelated failure from inventing an explanation.
 REASONS = {
     ("incomplete_source", "api_total_capture_limit"): (
         "the configured total API capture limit was reached.",
@@ -133,8 +131,6 @@ _KNOWN_MESSAGES = {
     "Type field, graph type and assignment links disagree": "relationship_conflict",
 }
 
-# Broad codes remain compatible. Their explanation states only facts supported by
-# that code; detailed causes require a reviewed (code, reason) above.
 CODE_EXPLANATIONS = {
     "source_type_cycle": (
         "the source type assignments contain a cycle, including a possible self-assignment.",

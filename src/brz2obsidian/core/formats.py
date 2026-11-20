@@ -4,8 +4,6 @@ from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import REVIEWABLE_OUTPUT_FORMATS, FormatReview
 
 
-# Historical review replay retains its recorded generation. Application admission
-# separately selects the current format for new source-update operations.
 def output_semantics(identity):
     """Compatibility meaning excludes informational source-module release metadata."""
     return identity.model_dump(mode="json", exclude={"module_version"})

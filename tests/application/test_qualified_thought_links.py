@@ -8,7 +8,6 @@ from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_forgotten_workflow import forget, rewrite
 from tests.application.test_graph_workflow import graph_archive, identity
 
-# Literal GUID-byte/base64url known answers, independent of the decoder.
 BRAIN_TOKEN = "EREREREREUGBEREREREREQ"
 TARGET_TOKEN = "AAAAAAAAAAAAAAAAAAAAAg"
 QUALIFIED = f"brain://api.thebrain.com/{BRAIN_TOKEN}/{TARGET_TOKEN}"

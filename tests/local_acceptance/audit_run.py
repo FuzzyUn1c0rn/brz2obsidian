@@ -118,8 +118,6 @@ def compare_pair(source, baseline, profile_version):
             for row in api_relations.values()
             if row["kind"] == "tag"
         }
-        # These preserve declared endpoint order and arrow metadata, rather
-        # than assuming every source declaration has equivalent navigation.
         brz_navigation = {
             (kinds[row["Id"]], row["ThoughtIdA"], row["ThoughtIdB"], row["Direction"])
             for row in raw["links.json"]
@@ -339,8 +337,6 @@ def capture_api(
     credential,
 ):
     """Public conversion plus independent raw evidence, then post-capture audit."""
-    # Orchestration may use public production workflows. Expected-fact modules
-    # remain standard-library-only and never import their normalization helpers.
     from brz2obsidian.application.wiring import local_api_workflow
     from brz2obsidian.sources.thebrain.local_api import (
         LocalApiConfig,

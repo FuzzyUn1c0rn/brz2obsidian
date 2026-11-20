@@ -652,7 +652,6 @@ def test_window_close_preserves_local_and_worker_drafts_until_explicit_discard(
         )
         editor.setPlainText("Unsaved writing must stay visible")
         if draft == "worker_lease":
-            # Public producer command establishes an idle uncommitted lease without choosing it.
             state = window.runner.session.update_snapshot
             window.runner.submit_update(
                 {

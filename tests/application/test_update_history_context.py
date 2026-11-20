@@ -535,7 +535,6 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
         assert result.status == "accepted", result.code
         return result.plan
 
-    # The distinct linked binary creates real canonical changed-document ownership.
     binary_change = next(c for c in origin.proposal.changes if c.path == linked.path)
     binary_offer = next(
         o
@@ -579,7 +578,6 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
         ),
     )
 
-    # Observe only fresh in-memory fixture bytes. No physical history is manufactured.
     targets = next(
         a.attachment_candidate.targets
         for a in origin.approvals

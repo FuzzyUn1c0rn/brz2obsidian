@@ -371,8 +371,6 @@ def capture_owner(
         raw = directory.path / f"{len(client.requests):016x}.bin"
         note_bytes = None
         if selected == "note_original":
-            # Qualify scope before any original note bytes reach disk. The
-            # transport applies the same payload/aggregate/deadline bounds.
             with BytesIO() as stream:
                 client.request(
                     "attachment-content",
@@ -593,9 +591,6 @@ def validate_payload_binding(source, snapshot, audit):
                 "text_adaptations": (),
             }
         )
-        # A prior capture can retain the leading signature as ordinary text.
-        # Its absence of a signature-deletion edit selects exactly that prior
-        # interpretation; fresh captures always declare the exact deletion.
         signature_removed = bool(
             document.text_adaptations
             and document.text_adaptations[0].start == 0
@@ -620,8 +615,6 @@ def validate_payload_binding(source, snapshot, audit):
             )
         ]
         expected = None
-        # Compare complete interpretations, including findings when text is
-        # unchanged. Legacy options only validate frozen captures, never live.
         legacy_bom = raw.startswith("\ufeff") and not signature_removed
         for (
             preserve_bom,

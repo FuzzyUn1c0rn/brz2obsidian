@@ -660,7 +660,6 @@ def test_repair_and_recovery_wire_claims_keep_exact_dependencies_and_authority(c
         from tests.reconciliation.test_proposals import request
         from tests.reconciliation.test_resolution import preflight
 
-        # A real public S1 value supplies the review's shape, not Git authority.
         review = prepare_review(request(), preflight=preflight()).model_dump(
             mode="json"
         )

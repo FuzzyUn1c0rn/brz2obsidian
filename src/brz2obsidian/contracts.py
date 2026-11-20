@@ -21,7 +21,6 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
-# Generated output versions and the note grammar shared by recent versions.
 CURRENT_OUTPUT_FORMAT = 9
 QUALIFIED_OUTPUT_FORMATS = (8, 9)
 REVIEWABLE_OUTPUT_FORMATS = (7, *QUALIFIED_OUTPUT_FORMATS)
@@ -781,8 +780,6 @@ def _copy_content(value, update, deep):
     if changed_bytes and "identity" not in changes:
         fields["identity"] = None
     fields.update(changes)
-    # The constructor checks every field, including unknown updates, exact
-    # inline identity and the complete historical reference declaration.
     result = type(value)(**fields)
     if changed_bytes or result.identity != value.identity:
         if changes.get("occurrence") is not None:
@@ -2156,8 +2153,6 @@ class LinkTargetFacts(ReconciliationContract):
     file_roles: FileRoleFacts | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    # Read-only association to retained generated content. It creates neither
-    # a reconciliation subject nor permission to write this resource.
     resource_origin: RetainedAttachmentOwnership | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

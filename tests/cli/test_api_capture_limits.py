@@ -66,7 +66,6 @@ def test_cli_tiny_total_bound_refuses_then_finite_bound_completes(
         )
     result = json.loads(capsys.readouterr().out)
     assert result["outcome"] == "clean"
-    # Home is created; the empty, isolated Alone thought has no note to create.
     assert result["counts"]["planned_notes"] == 1
     if operation == "convert":
         record = json.loads((destination / "migration-record.json").read_bytes())

@@ -389,7 +389,6 @@ def test_sealed_history_reply_requires_consistent_readiness_and_native_outcome(
 
     assert not sealed(directions).ready
     for kind in ("recovery", "repair"):
-        # Cleanup-only recovery and repair legitimately have no S1 direction/review.
         ready = directions.model_copy(
             update={
                 "status": "prepared_review",

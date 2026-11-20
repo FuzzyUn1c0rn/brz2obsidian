@@ -25,7 +25,6 @@ def main() -> int:
             from brz2obsidian.application.update_worker import serve_updates
 
             return serve_updates(request, incoming, sys.stdout.buffer)
-        # One-shot migrations still require exact EOF before any operation.
         if incoming.read(1):
             raise ProtocolFailure("Unexpected request continuation")
     except ProtocolFailure, OSError:

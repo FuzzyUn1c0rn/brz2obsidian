@@ -96,7 +96,6 @@ def render_link_replacement(
         original = occurrence.raw[start:end]
         if original.startswith(b"<") and original.endswith(b">"):
             destination = "<" + destination + ">"
-        # Retain the original Markdown label and embed marker byte for byte.
         replacement = (
             occurrence.raw[:start] + destination.encode() + occurrence.raw[end:]
         )

@@ -247,7 +247,6 @@ def test_opaque_current_contract_rejects_other_versions_at_constructor_and_publi
     cls = SourceSnapshot if contract == "snapshot" else SourcePolicy
     with pytest.raises(ValidationError):
         cls(**(value.model_dump() | {"contract_version": version}))
-    # Explicitly bypass construction to prove analyze revalidates inbound versions.
     bypassed = value.model_copy(update={"contract_version": version})
     with pytest.raises(MigrationRefused) as refused:
         analyze(

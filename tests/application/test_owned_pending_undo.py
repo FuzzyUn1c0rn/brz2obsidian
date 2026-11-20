@@ -325,7 +325,6 @@ def test_fresh_owned_undo_retry_reobserves_pending_ignored_binary_grant(monkeypa
         reader.start()
         client.start()
         try:
-            # The same MainThread that prepared the owned review performs it.
             code = worker.serve(incoming_pipe)
         finally:
             release.set()

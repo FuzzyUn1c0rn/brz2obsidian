@@ -158,8 +158,6 @@ def test_incomparable_missing_policy_queries_keep_their_own_consent(monkeypatch)
         == second_policy.policy_continuity_fingerprint
     )
     assert user_state(vault) == before
-    # A real rule edit invalidates the alias, even if a combined metadata query
-    # could compare the two now-current scopes with one another.
     try:
         (vault / ".gitattributes").write_bytes(attributes + b"Notes/Opening.md text\n")
         changed = operations.inspect_vault(vault, subjects=second)

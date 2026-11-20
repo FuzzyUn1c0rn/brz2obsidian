@@ -19,7 +19,6 @@ def mixed_v3_archive(path):
         parts = {name: archive.read(name) for name in archive.namelist()}
     thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
     thoughts[-1].update(Name="Excluded secret", ForgottenDateTime="2025-01-02T01:02:03")
-    # Collision naming must consider the included reserved and created subjects.
     thoughts[9]["Name"] = "Empty"
     parts["thoughts.json"] = b"\n".join(json.dumps(t).encode() for t in thoughts)
     links = [json.loads(line) for line in parts["links.json"].splitlines()]

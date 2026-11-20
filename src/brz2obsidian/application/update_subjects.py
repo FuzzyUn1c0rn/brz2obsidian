@@ -108,8 +108,6 @@ def review_subjects(facts, review=None, *, effects=None):
                         or sum(path == row.path for path, _ in declared) > 1
                     ):
                         continue
-                    # One physical write has the selected effect's actual owner.
-                    # Its scoped tracking/storage consent must use that same owner.
                     paths = {
                         key: value for key, value in paths.items() if key[0] != row.path
                     }

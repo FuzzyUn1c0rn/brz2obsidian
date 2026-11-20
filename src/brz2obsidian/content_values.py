@@ -38,7 +38,6 @@ def require_inline(value):
     while pending:
         item = pending.pop()
         if isinstance(item, OpaqueContent):
-            # Opaque is a valid content value; this refuses unavailable bytes.
             raise ValueError(  # noqa: TRY004
                 "Pure review requires available inline content"
             )

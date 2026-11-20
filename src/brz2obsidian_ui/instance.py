@@ -66,7 +66,7 @@ class _WindowsActivation:
         self.api.SetForegroundWindow.restype = wintypes.BOOL
 
     def restore(self, hwnd):
-        self.api.ShowWindowAsync(hwnd, 9)  # SW_RESTORE; posts without waiting.
+        self.api.ShowWindowAsync(hwnd, 9)
 
     def foreground(self, hwnd):
         return bool(self.api.SetForegroundWindow(hwnd))
@@ -83,7 +83,6 @@ class _WindowsActivation:
 
         self.api.FlashWindowEx.argtypes = [ctypes.POINTER(FlashInfo)]
         self.api.FlashWindowEx.restype = wintypes.BOOL
-        # FLASHW_ALL: flash both taskbar and caption, without forcing focus.
         details = FlashInfo(ctypes.sizeof(FlashInfo), hwnd, 3, 3, 0)
         self.api.FlashWindowEx(ctypes.byref(details))
 

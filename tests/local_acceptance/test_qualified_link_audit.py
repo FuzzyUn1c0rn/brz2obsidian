@@ -618,8 +618,6 @@ def test_supported_profile_scope_cache_keeps_qualified_uri_boundary_after_caught
         nonlocal attempted
         if path.resolve() == target and not attempted:
             attempted = True
-            # The public outer audit has already qualified profile4. A nested
-            # supported profile must establish its own source interpretation.
             with pytest.raises(AssertionError, match=reason):
                 qualify_scope(baseline, profile_version="3")
             current = qualify_scope(baseline, profile_version="4")

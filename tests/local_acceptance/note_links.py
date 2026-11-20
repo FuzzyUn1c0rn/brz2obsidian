@@ -64,8 +64,6 @@ def markdown_destination(authored):
                 entity[2:] if hexadecimal else entity[1:], 16 if hexadecimal else 10
             )
             character = _entity_character(value)
-            # Destination references retain invalid spellings; inline labels
-            # instead emit U+FFFD. Their numeric widths also differ.
             return character if character is not None else match[0]
         return html5.get(entity + ";", match[0])
 

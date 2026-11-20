@@ -115,7 +115,6 @@ def test_absent_history_onboarding_saves_unknown_binary_originals(monkeypatch):
         capacity_observed.append(capacity)
         return capacity
 
-    # Change only the external capacity report after real conversion/admission.
     for module in (native, history, lifecycle, checkpoint_payload):
         monkeypatch.setattr(module, "available_memory", available_memory)
     context = UpdateContext(operations=operations)

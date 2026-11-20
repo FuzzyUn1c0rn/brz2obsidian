@@ -34,7 +34,6 @@ def tag_listing(roles, titles, names, created, tokens, assignments, *, output_ve
     )
 
     def linked(key):
-        # Labels use the same independently reviewed Markdown escaping rule.
         from .checker import wiki
 
         return wiki(names[key], titles[key])

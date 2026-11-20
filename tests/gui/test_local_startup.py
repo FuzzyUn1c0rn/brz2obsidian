@@ -108,7 +108,6 @@ def test_unavailable_preferences_do_not_bypass_or_prevent_instance_ownership(
         def quit(self):
             self.exited.set()
 
-    # The default coordination resolver uses this disposable user-profile root.
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "Profile"))
     app = QApplication.instance() or QApplication([])
     blocked = tmp_path / "Unavailable preferences"

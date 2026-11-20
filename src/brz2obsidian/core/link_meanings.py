@@ -223,7 +223,6 @@ def _semantic(value):
             if name not in ("file_roles", "resource_origin", "relationship_heading")
             or getattr(value, name) is not None
         }
-        # These spellings are lookup alternatives, not authored occurrence order.
         if isinstance(value, ReferenceTarget):
             result["representations"] = sorted(set(value.representations))
         elif isinstance(value, LinkQuery):

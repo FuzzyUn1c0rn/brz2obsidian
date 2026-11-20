@@ -176,7 +176,7 @@ def test_changed_candidate_byte_with_original_proofs_has_no_load_authority(
     ]
     assert output["path"] == "Assets/data (incoming-ba7816bf).bin"
     assert output["content"] == {"data": "YWJj", "reference": None}
-    output["content"]["data"] = "YWJk"  # Literal abc -> abd; preserve all old proofs.
+    output["content"]["data"] = "YWJk"
     tampered = json.dumps(record, separators=(",", ":"), ensure_ascii=True).encode()
     assert len(tampered) == len(original)
     assert sum(a != b for a, b in zip(original, tampered, strict=True)) == 1
@@ -471,8 +471,6 @@ def test_edited_prose_and_reference_choice_create_owned_composed_content(
     saved = save_review(accepted.plan)
     assert saved.status == "saved"
     original_wire = saved.record.model_dump_json()
-    # Caller serialization uses the unchanged default v1 codec. Raw ingress
-    # selects descriptors; the separate typed convenience test stays inline.
     wire_bytes = original_wire.encode("utf-8")
     inline_loaded = load_review(original_wire)
     assert inline_loaded.status == "loaded" and not inline_loaded.ready
@@ -855,16 +853,16 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
         ("legacy:consent", "storage", "accept"),
     ]
     cases = (
-        raw[:-1],  # Truncated envelope.
-        raw + b" true",  # A second value after a complete envelope.
+        raw[:-1],
+        raw + b" true",
         raw.replace(
             b'{"schema_id":',
             b'{"schema_id":"brz2obsidian.saved-review","schema_id":',
             1,
-        ),  # Duplicate member occurrence, even with the same value.
-        b"\xff" + raw,  # Invalid UTF-8.
-        raw.replace(b'"data":"YWJj"', b'"data":"YW@j"', 1),  # Invalid base64.
-        raw.replace(b'"data":"YWJj"', b'"data":"Y"', 1),  # Incomplete base64.
+        ),
+        b"\xff" + raw,
+        raw.replace(b'"data":"YWJj"', b'"data":"YW@j"', 1),
+        raw.replace(b'"data":"YWJj"', b'"data":"Y"', 1),
         # A padded block ends at the streaming boundary; more data follows.
         raw.replace(b'"data":"YWJj"', b'"data":"' + b"A" * 4092 + b'YQ==YQ=="', 1),
         # The first content value is decoded before either bad continuation.

@@ -76,7 +76,6 @@ def mixed_source_packet(case="tags"):
     tagged = case != "zero-tags"
     brain = identity(1)
     created, modified = "2026-09-13T11:12:13Z", "2026-10-02T16:17:18+02:00"
-    # All eleven required raw wire fields are authored explicitly, even exclusions.
     thoughts = []
     for key, title, kind, provider, forgotten, foreground, background in (
         (2, "Home", 1, None, None, None, None),
@@ -1001,7 +1000,6 @@ def negative_mixed_source_packet(case):
         for path, raw in list(files.items()):
             if not (path.startswith("responses/") and path.endswith(".json")):
                 continue
-            # The explicitly bound 404 body above is plaintext, never a wire DTO.
             if path == "responses/thoughts/" + identity(999) + ".json":
                 continue
             value = json.loads(raw)

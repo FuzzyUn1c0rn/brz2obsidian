@@ -69,7 +69,6 @@ def test_actual_reversal_row_reaches_editor_and_commits_small_bytes_through_hist
     selected = []
 
     class NativePorts(Operations):
-        # Controlled outer storage observations; Core choices and worker leases are real.
         def inspect_history(self, path, **kwargs):
             return absent_history()
 

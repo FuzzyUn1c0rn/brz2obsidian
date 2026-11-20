@@ -32,7 +32,6 @@ def frozen_graph_baselines(tmp_path_factory):
                     profile_version=profile_version,
                 )
                 with module.open(LocalApiSourceRef(BRAIN)) as session:
-                    # Retained filenames are the accepted public capture format.
                     capture = next(parent.glob("brz2obsidian-api-*"))
                     baselines[profile_version] = (
                         json.loads((capture / "source.json").read_bytes()),

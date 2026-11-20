@@ -268,7 +268,6 @@ def coverage(directory, ledger, *, allow_missing=False):
             )
             links[key] = edge
             candidates.update((edge["thoughtIdA"], edge["thoughtIdB"]))
-    # Frontier growth is bounded by the retained response byte/request limits.
     pending = set(candidates)
     while pending:
         key = pending.pop()
@@ -418,7 +417,6 @@ def build_baseline(directory, expected_sha256, *, qualification):
         for key, row in links.items()
         if not excluded.intersection((row["thoughtIdA"], row["thoughtIdB"]))
     }
-    # Separate direction controls retain their own source/Brain and file pins.
     prefix = "qualification/"
     control_manifest = prefix + "manifest-" + qualification.fingerprint + ".json"
     assert control_manifest not in {

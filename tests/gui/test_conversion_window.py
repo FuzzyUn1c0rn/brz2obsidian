@@ -312,9 +312,7 @@ def test_conversion_outcomes_render_receipt_path_or_retained_inputs_without_infe
         text = window_text(window)
         assert title in text
         assert "conversion_created" not in text and "conversion_failed" not in text
-        assert not (
-            tmp_path / "Fresh vault"
-        ).exists()  # Only the injected receipt is authority here.
+        assert not (tmp_path / "Fresh vault").exists()
         name = next(
             field
             for field in window.findChildren(QLineEdit)

@@ -54,7 +54,7 @@ class _WindowsJob:
         if not self.handle:
             raise ctypes.WinError(ctypes.get_last_error())
         information = Information()
-        information.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        information.basic.flags = 0x2000
         if not self.kernel.SetInformationJobObject(
             self.handle, 9, ctypes.byref(information), ctypes.sizeof(information)
         ):
@@ -125,7 +125,7 @@ class _SuspendedPopen(subprocess.Popen):
                 creationflags | 4,
                 env,
                 cwd,
-                startup,  # CREATE_SUSPENDED
+                startup,
             )
             self._child_created = True
             self._handle = subprocess.Handle(process)
@@ -212,7 +212,6 @@ def read_git(argv, *, env, input=None, timeout=30):
             stream.close()
 
     def input_failure(error):
-        # Killing the timed-out child can interrupt the pipe write or close.
         if (
             timed_out
             and isinstance(error, OSError)

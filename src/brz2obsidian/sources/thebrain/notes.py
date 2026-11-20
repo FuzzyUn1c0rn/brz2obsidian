@@ -272,8 +272,6 @@ class _MappedText(str):
 
 class _MappedBlock(StateBlock):
     def getLines(self, begin, end, indent, keepLastLF):
-        # Mirror the base parser's indentation removal, retaining the origin
-        # of partially expanded tabs. Check the result against its own method.
         parts, offsets = [], []
         for line in range(begin, end):
             first = line_start = self.bMarks[line]

@@ -162,8 +162,6 @@ def callouts(text, operations=None, ownership=None, origins=None):
             if line == original:
                 line_origins = origins[begin:offset]
             else:
-                # The rebuilt marker is generated; only the trimmed authored
-                # title and original line ending are copied source pieces.
                 title_start = marker.start(5) + len(marker[5]) - len(marker[5].lstrip())
                 title_end = marker.end(5) - len(marker[5]) + len(marker[5].rstrip())
                 lead = len(line) - len(marker[6]) - len(title)
@@ -265,7 +263,6 @@ def tables(
         rows = []
         for following in range(index + 1, len(lines)):
             parts = row_cells(lines[following])
-            # A literal comment pipe cannot be converted into a native delimiter.
             if parts is None:
                 if lines[following].lstrip().startswith("|"):
                     rows = []
@@ -345,7 +342,6 @@ def tables(
                     len(generated_header) if blank_header and following == index else 0
                 )
                 position = offsets[following] + local_start
-                # Comments own backticks too; code spans are not inferred there.
                 if (
                     "<!--" in lines[following][:local_start]
                     and "-->"
@@ -808,7 +804,6 @@ def contents(text, operations=None, ownership=None, origins=None):
             else re.search(r"(?:^|\s)\^([A-Za-z0-9-]+)$", name)
         )
         if ident:
-            # An ID sheltered inside an inline code span is visible text.
             original = lines[heading["end"]].rstrip("\r\n")
             caret = original.rfind("^")
             if caret < 0 or mask[offsets[heading["end"]] + caret] != "^":

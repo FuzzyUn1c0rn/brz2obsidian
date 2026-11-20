@@ -66,8 +66,6 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
     page_queues = []
 
     class ReviewChannel:
-        # Typed controlled worker transport; the real HostRunner/session and
-        # actual Qt presentation are exercised. No Native planner is repeated.
         closed = False
         poisoned = False
         binding = None

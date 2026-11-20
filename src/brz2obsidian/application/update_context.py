@@ -82,7 +82,6 @@ class UpdateContext:
         self._history.binding = self._history.admission = None
         request_identity(selection_id)
         self._reset_history()
-        # Selecting new work retires the prior handle even if preparation refuses.
         self._binding = self._preparation = None
         self._reference_drafts.clear()
         self._revision += 1
@@ -982,8 +981,6 @@ class UpdateContext:
             stopped = check_saved(saved)
             if stopped is not None:
                 return stopped
-            # The previous Load/Resume route tried owned Resume again even
-            # when Load used the legacy reader.
             return self._restore_saved(vault, resume=True, cancel=cancel)
         return (
             self._operations.resume_update(vault)
@@ -1346,7 +1343,6 @@ class UpdateContext:
                 or any(len(row) > 160 for row in self._last_findings),
             }
         )
-        # Native debt has its own inspection/recovery route and supersedes refresh.
         if result.publication in ("partial", "unknown") or result.status in (
             "publication_unknown",
             "recovery_required",

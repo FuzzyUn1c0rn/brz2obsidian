@@ -200,7 +200,6 @@ class ApiRecording:
                 ):
                     raise RecordingError("Invalid or over-budget recording request")
                 host = self._upstream.hostname
-                # localhost is pinned to a loopback address, never re-resolved.
                 connection = http.client.HTTPConnection(
                     "127.0.0.1" if host == "localhost" else host,
                     self._upstream.port,

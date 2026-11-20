@@ -267,7 +267,6 @@ class MainWindow(QMainWindow):
         diagnostic_actions=None,
         completion_actions=None,
     ):
-        # C is a light sheet; keep native controls in the same app-local scheme.
         QApplication.styleHints().setColorScheme(Qt.ColorScheme.Light)
         super().__init__()
         self.setWindowTitle("brz2obsidian")
@@ -1175,7 +1174,6 @@ class MainWindow(QMainWindow):
         self._diagnostic_busy = True
         self.diagnostic_path.clear()
         self.diagnostic_feedback.setText("Copying diagnostic details…")
-        # Obtain only a native integer on the Qt thread; the adapter accesses no Qt object.
         perform = partial(
             self.diagnostic_actions.copy_report, owner_window=int(self.winId())
         )

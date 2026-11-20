@@ -439,8 +439,6 @@ def test_saved_unready_cleanup_resumes_from_current_source_and_fresh_ownership(
     def save_native_checkpoint(
         vault, source, *, review, source_binding, observed_source, **kwargs
     ):
-        # Controlled native persistence boundary. Actual Git publication and
-        # canonical graph replay are checked by the separate real graph owner.
         stored = save_review(review)
         assert stored.status == "saved"
         loaded = load_review(stored.record.model_dump_json())
@@ -730,7 +728,6 @@ def test_cleanup_refresh_scopes_reference_writes_to_one_actual_writer(tmp_path):
                 original = observed.inspect
 
                 def inspect(*, subjects):
-                    # Existing native admission accepts one subject per physical path.
                     if len({row.path for row in subjects}) != len(subjects):
                         raise OSError(
                             "Current scoped admission changed or is incomplete"

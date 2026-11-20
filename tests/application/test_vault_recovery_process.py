@@ -425,8 +425,6 @@ def test_retained_undo_kind_finishes_with_verified_undone_receipt_without_new_mo
     assert (vault / "Notes/Closing.md").read_bytes() == b"closing incoming\n"
     assert (vault / "Notes/Opening.md").read_bytes() == b"opening authored\r\n"
 
-    # Fixture-only durable undo origin, over exact canonical original history
-    # and real partial bytes. Production latest-Undo publication belongs to #275.
     operation_refs = (
         git(vault, "for-each-ref", "--format=%(refname)", "refs/brz2obsidian/imports")
         .decode()

@@ -67,7 +67,6 @@ def test_reversal_declares_exact_opaque_versions_and_distinguishes_absence():
 
 
 def test_legacy_mapping_gate_is_distinct_from_typed_and_current_content():
-    # New declarations are imported in the call so the initial RED executes.
     from brz2obsidian.contracts import (
         ContentIdentity,
         ContentValue,
@@ -219,7 +218,6 @@ def test_opaque_declarations_do_not_authorize_public_reconciliation():
         size=3,
     )
     opaque = OpaqueContent(identity=identity)
-    # A consistent no-change declaration is a value, not permission to act.
     declared = ProposedChange.model_validate(
         change.model_dump()
         | {"original": opaque, "current": opaque, "incoming": opaque, "result": opaque}

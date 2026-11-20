@@ -185,7 +185,6 @@ def test_explicit_review_task_is_revealed_after_layout_without_later_scroll_jump
                 ),
             )
             button("Edit result for Notes/Opening.md").click()
-            # Replace this task before its deferred layout/reveal can run.
             queue.setCurrentRow(
                 next(
                     i

@@ -24,7 +24,7 @@ def supported_durable_volume(path):
     drive_type = kernel.GetDriveTypeW
     drive_type.argtypes = [wintypes.LPCWSTR]
     drive_type.restype = wintypes.UINT
-    if drive_type(volume_path.value) != 3:  # DRIVE_FIXED
+    if drive_type(volume_path.value) != 3:
         return False
     filesystem = ctypes.create_unicode_buffer(256)
     get_volume = kernel.GetVolumeInformationW
@@ -78,7 +78,7 @@ def _ordinary_streams(path):
     try:
         if data.name != "::$DATA" or following(handle, ctypes.byref(data)):
             raise OSError("Alternate file streams need separate qualification")
-        if ctypes.get_last_error() != 38:  # ERROR_HANDLE_EOF
+        if ctypes.get_last_error() != 38:
             raise ctypes.WinError(ctypes.get_last_error())
     finally:
         kernel.FindClose(handle)
@@ -204,7 +204,6 @@ def retained_metadata(path, *, copy_to=None):
     mode = stat.S_IMODE(info.st_mode)
     attributes = getattr(info, "st_file_attributes", 0)
     if os.name == "nt":
-        # Archive and normal attributes are the qualified ordinary file class.
         if attributes & ~(0x20 | 0x80):
             raise OSError("Special file attributes need separate qualification")
         _ordinary_streams(path)

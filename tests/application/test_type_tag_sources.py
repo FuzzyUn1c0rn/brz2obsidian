@@ -317,7 +317,6 @@ def test_deep_type_chain_counts_are_direct_and_navigation_cycles_remain_allowed(
 def test_source_type_cycle_beyond_native_icon_limit_refuses_whole_chain(
     tmp_path, adapter
 ):
-    # H0's provider H9 closes all ten type definitions into a source cycle.
     fields = TYPE_FIELDS | {30: 39}
     edges = (*EDGES, (39, 30, 1, 3, -1))
     with source_transport(adapter, edges=edges, type_fields=fields, deep=True) as (
@@ -345,7 +344,7 @@ def test_source_type_cycle_beyond_native_icon_limit_refuses_whole_chain(
     assert {
         f"00000000-0000-0000-0000-{number:012x}" for number in range(30, 40)
     } <= set(issue.affected)
-    assert len(issue.affected) == 20  # Ten distinct items and ten relationships.
+    assert len(issue.affected) == 20
     assert issue.subject is not None and issue.evidence
     assert not (tmp_path / "vault").exists()
 

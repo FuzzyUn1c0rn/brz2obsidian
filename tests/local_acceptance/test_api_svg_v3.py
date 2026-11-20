@@ -218,8 +218,6 @@ def svg_case(
         }
     ]
     if raw_note != document_text:
-        # A broad source-owned replay is a permitted alternative to atomic
-        # segmentation. Exact before/after come from caller-owned literal pairs.
         home["documents"][0]["text_adaptations"] = [
             {
                 "kind": "literal_text"
@@ -820,7 +818,6 @@ def svg_source_packet(case="plain"):
 
     brain, home, child, definition, tag = map(identity, (1, 2, 3, 4, 5))
 
-    # Independently authored DTOs qualified in raw packets01/02; no defaults.
     created = "2026-09-12T14:05:06Z"
     modified = "2026-10-01T09:07:08+02:00"
     thoughts = [
@@ -886,8 +883,6 @@ def svg_source_packet(case="plain"):
         },
     ]
     by_id = {row["id"]: row for row in thoughts}
-    # Each tuple and endpoint was independently authored in source_case before SVG
-    # normalization. Names/colour/default-width marker/dates are new explicit facts.
     links = [
         {
             "id": identity(key),
@@ -1044,8 +1039,6 @@ def svg_source_packet(case="plain"):
             row,
             subject=key,
         )
-        # Adjacencies are independently literal facts. Multiple one-way links share
-        # one neighbor identity but retain both complete relationship inventories.
         graph = {
             "activeThought": row,
             "parents": [by_id[home]] if key == child else [],

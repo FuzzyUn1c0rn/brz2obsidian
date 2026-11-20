@@ -1556,7 +1556,6 @@ def test_changed_used_alias_meaning_reopens_binary_review_with_same_authored_byt
         == "resolved"
     )
     selection, candidate = attachment_candidate(facts, "both")
-    # Preserve the existing target's reviewed alias on the current output only.
     candidate = candidate.model_copy(
         update={
             "targets": tuple(

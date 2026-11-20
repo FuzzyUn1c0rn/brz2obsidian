@@ -618,8 +618,6 @@ def check_new_image_preservation(
         ), "source image/icon actual filename"
     paths = [assets[key]["relative_path"].casefold() for key in selected]
     assert len(paths) == len(set(paths)), "distinct image/icon storage identities"
-    # Raw declarations determine all binding roles. Assigned paths are checked
-    # separately for source bytes before they are used to locate rendered text.
     bindings = {}
     materialized = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
     materialized.update(key for key, row in thoughts.items() if row["kind"] == 2)
@@ -1221,16 +1219,12 @@ def audit_baseline(baseline, *, profile_version="1"):
             assert has_measured_pdf(
                 baseline, attachments, attachment["sourceId"], profile_version, proofs
             ), "missing TXT lacks measured same-owner PDF"
-    # This independent parser consumes only raw Markdown and owner/role/name
-    # dictionaries. API DTOs and API outcomes remain the source oracle; no BRZ
-    # flags, path maps, absent-note interpretation or archive scope is reused.
     for attachment in attachments.values():
         if attachment["isNotes"]:
             body = scoped_note_text(
                 baseline, attachment["id"], profile_version=profile_version
             )
             if profile_version in {"3", "4", "5"}:
-                # Validate authored grammar before protecting generated code.
                 body = image_api_document_text(
                     baseline, attachment["id"], body, profile_version
                 )
@@ -1346,9 +1340,7 @@ def check_navigation(
             ).strip():
                 selected.add(attachment["sourceId"])
         else:
-            asset = assets[
-                key
-            ]  # independently checked against the raw declaration/bytes
+            asset = assets[key]
             if (
                 asset["availability"] == "external"
                 and asset["role"] in {"file", "url", "directory"}
@@ -1745,7 +1737,6 @@ def check_svg_notes(
                 )
                 required.append("- " + wiki(relative, label))
         tail = body[cursor:]
-        # Retain full block context, while only generated suffix supplies targets.
         syntax = list(body)
         if metadata_span:
             begin, end = metadata_span
@@ -1900,7 +1891,6 @@ def check_scope_records(baseline, record, scoped, attachments, raw_links):
         }
 
     for owner, graph in graphs.items():
-        # Retain original wire metadata even if an excluded type is unassigned.
         expected["thought:" + owner] = baseline.json(baseline.data["graphs"][owner])[
             "activeThought"
         ]
