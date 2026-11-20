@@ -155,10 +155,10 @@ class _Ledger:
         self.retain_metadata(_FIXED_M)
 
     def check(self):
-        if self.budget.cancel.is_set():
-            raise _ReviewCancelled("Review cancelled")
-        if time.monotonic() >= self.deadline:
-            raise OSError("Review cancelled or time budget exhausted")
+        cancelled = self.budget.cancel.is_set()
+        if cancelled or time.monotonic() >= self.deadline:
+            error = _ReviewCancelled if cancelled else OSError
+            raise error("Review cancelled or time budget exhausted")
 
     def remaining(self, name):
         return getattr(self.budget, name + "_limit") - self.used[name]
