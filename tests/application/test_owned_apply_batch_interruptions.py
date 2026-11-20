@@ -90,15 +90,21 @@ def ready_source_update():
         context.close(choice="discard")
 
 
-@pytest.mark.parametrize("entry_point", ("cli", "worker"))
-def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
-    ready_source_update, monkeypatch, capsys, entry_point
-):
-    vault, context, binding, _ = ready_source_update
+@pytest.fixture
+def saved_source_update(ready_source_update):
+    vault, context, binding, ref = ready_source_update
     saved = context.save(binding)
     assert saved.ready and saved.binding is not None, saved.model_dump_json()
     assert saved.capture is not None and saved.capture.commit is not None
     context.close(saved.binding, choice="discard")
+    return vault, saved, ref
+
+
+@pytest.mark.parametrize("entry_point", ("cli", "worker"))
+def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
+    saved_source_update, monkeypatch, capsys, entry_point
+):
+    vault, saved, _ = saved_source_update
     read_git = vault_history.read_git
     timed_out = set()
 
@@ -166,6 +172,60 @@ def test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout(
         assert json.loads(raw)["boundary"] == boundary
     receipt = git(vault, "cat-file", "blob", operation.receipt_commit + ":receipt.json")
     assert json.loads(receipt)["status"] == "applied"
+
+
+def test_apply_refuses_reordered_result_checkpoint_tree_ids(
+    saved_source_update, monkeypatch
+):
+    vault, saved, ref = saved_source_update
+    read_git = vault_history.read_git
+    swapped = False
+
+    def reorder_result_trees(argv, **kwargs):
+        nonlocal swapped
+        result = read_git(argv, **kwargs)
+        if (
+            not swapped
+            and argv[-3:] == ["mktree", "-z", "--batch"]
+            and (vault / _ASSET).read_bytes() == _INCOMING
+        ):
+            assert result.returncode == 0 and not result.stderr
+            oids = result.stdout.splitlines(keepends=True)
+            if len(set(oids)) > 1:
+                other = next(index for index, oid in enumerate(oids) if oid != oids[0])
+                oids[0], oids[other] = oids[other], oids[0]
+                result.stdout = b"".join(oids)
+                swapped = True
+        return result
+
+    cold = UpdateContext()
+    try:
+        resumed = worker_context_call(
+            cold,
+            {"command": "resume", "vault": str(vault), "selection_id": str(uuid4())},
+        )
+        assert resumed.ready and resumed.binding is not None, resumed.model_dump_json()
+        assert resumed.binding.checkpoint_commit == saved.capture.commit
+        monkeypatch.setattr(vault_history, "read_git", reorder_result_trees)
+        outcome = worker_context_call(
+            cold, {"command": "apply", "binding": resumed.binding}
+        )
+    finally:
+        cold.close(choice="discard")
+
+    assert swapped
+    assert outcome.status == "recovery_required", outcome.model_dump_json()
+    operation = outcome.operation
+    assert operation is not None and operation.publication == "complete"
+    assert operation.published_files == operation.planned_files == 4
+    assert operation.intent_commit and operation.checkpoint_commit
+    assert operation.result_commit is None and operation.receipt_commit is None
+    assert (vault / _ASSET).read_bytes() == _INCOMING
+    assert git(vault, "rev-parse", ref).decode().strip() == operation.checkpoint_commit
+    rediscovered = Operations().inspect_update_status(vault)
+    assert rediscovered.status == "content_complete", rediscovered.model_dump_json()
+    assert rediscovered.intent_commit == operation.intent_commit
+    assert rediscovered.receipt_commit is None
 
 
 def test_owned_apply_reports_cancellation_after_successful_review_blob_batch(

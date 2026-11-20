@@ -126,7 +126,9 @@ establish both.
 
 The saved-review desktop worker case exercises the shared Resume and Apply
 backend, including prepared and result checkpoint tree retries and the terminal
-receipt. The pending-input controls exercise Git teardown and diagnostics with
+receipt. A separate reordered-response control verifies that result capture
+retains the recoverable intent when Git returns valid tree IDs in the wrong
+order. The pending-input controls exercise Git teardown and diagnostics with
 real subprocesses. The CLI boundary checks cover the supplied saved-review
 identity.
 

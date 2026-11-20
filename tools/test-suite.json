@@ -5,6 +5,7 @@
     "tests/application/test_recovery_both_image_roles.py",
     "tests/application/test_owned_update_handoff.py",
     "tests/application/test_owned_apply_batch_interruptions.py::test_apply_retains_prepared_and_result_after_clean_tree_batch_timeout[worker]",
+    "tests/application/test_owned_apply_batch_interruptions.py::test_apply_refuses_reordered_result_checkpoint_tree_ids",
     "tests/application/test_owned_apply_batch_interruptions.py::test_git_timeout_with_pending_input_preserves_output_and_diagnostics",
     "tests/application/test_review_session.py",
     "tests/application/test_vault_repair.py::test_one_capture_matching_copy_restores_missing_declared_source_blob",

@@ -401,18 +401,17 @@ class _Git:
         for depth in range(len(levels) - 1, -1, -1):
             trees = levels[depth]
             batch = b"".join(self._tree_rows(rows) + b"\0" for rows in trees.values())
+            expected = [self._tree_oid(rows) for rows in trees.values()]
             try:
                 raw = self.call("mktree", "-z", "--batch", input=batch)
             except _GitTimeout as error:
                 if len(trees) == 1:
                     raise
-                expected = [self._tree_oid(rows) for rows in trees.values()]
                 _check_timed_out_object_ids(
                     error, expected, "Checkpoint tree batch output changed"
                 )
                 # Only the batch deadline expired. Each immutable tree still
                 # has its own write deadline, with the same readback below.
-                oids = []
                 for rows, expected_oid in zip(trees.values(), expected, strict=True):
                     oid = self.tree(
                         (name, mode, object_id)
@@ -420,22 +419,20 @@ class _Git:
                     )
                     if oid != expected_oid:
                         raise OSError("Checkpoint tree write changed")
-                    oids.append(oid)
             else:
-                oids = raw.decode().splitlines()
-            if len(oids) != len(trees) or any(
-                len(oid) != 40 or set(oid) - set("0123456789abcdef") for oid in oids
-            ):
-                raise OSError("Incomplete checkpoint tree write")
-            controls.update(dict.fromkeys(oids, "tree"))
+                if raw.decode().splitlines() != expected:
+                    raise OSError("Checkpoint tree batch output changed")
+            controls.update(dict.fromkeys(expected, "tree"))
             if depth:
-                for path, oid in zip(trees, oids, strict=True):
+                for path, oid in zip(trees, expected, strict=True):
                     levels[depth - 1].setdefault(path[:-1], {})[path[-1]] = (
                         "040000",
                         oid,
                     )
         _control_objects(self, controls, {})
-        return [(path[0], "040000", oid) for path, oid in zip(trees, oids, strict=True)]
+        return [
+            (path[0], "040000", oid) for path, oid in zip(trees, expected, strict=True)
+        ]
 
 
 def _spool(root, directory, paths=None, *, offset=0):
