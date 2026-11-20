@@ -12,6 +12,7 @@ import tempfile
 import time
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
+from io import BytesIO
 from itertools import zip_longest
 from pathlib import Path
 from threading import TIMEOUT_MAX, Event
@@ -21,7 +22,9 @@ from uuid import uuid4
 from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
 from brz2obsidian.contracts import ImmutableContentReference
 from brz2obsidian.publication.vault_native import (
+    _check_owned_directory,
     _observed_chunks,
+    available_memory,
     observe_file,
     verify_directory,
 )
@@ -82,10 +85,17 @@ class VerifiedStage:
 
 
 @dataclass(frozen=True, eq=False)
+class _MemoryBacking:
+    """Exact immutable bytes sealed after an owned Git stream verifies."""
+
+    data: bytes
+
+
+@dataclass(frozen=True, eq=False)
 class _PreparedRegistration:
     session: object
     reference: ImmutableContentReference
-    backing: Path
+    backing: Path | _MemoryBacking
     mode: str
     origin: tuple
     published_input: bool = False
@@ -105,7 +115,7 @@ class _RegistrationView:
         session._require_private_scope(scope)
         rows = {}
         for record in records:
-            session._check_prepared(record, scope)
+            session._require_prepared_record(record)
             previous = rows.get(record.reference.content_id)
             if previous is not None and previous is not record:
                 raise OSError("Conflicting prepared registration")
@@ -119,10 +129,16 @@ class _RegistrationView:
             raise OSError("Registration view belongs to another owner")
         self.session._require_private_scope(self.scope)
 
+    def _check_live(self, session):
+        if session is not self.session:
+            raise OSError("Registration view belongs to another owner")
+        self.session._require_private_scope(self.scope, filesystem=False)
+
     def resolve(self, reference):
-        self.check(self.session)
+        self._check_live(self.session)
         record = self.records.get(reference.content_id)
         if record is None or record.reference != reference:
+            self.check(self.session)
             raise OSError("Content is outside the verified registration view")
         self.session._check_prepared(record, self.scope)
         return record.reference, record.backing, record.mode
@@ -131,7 +147,9 @@ class _RegistrationView:
 class _RetainedReviewRead:
     """Owned retained bytes during admission, never current-vault authority."""
 
-    def __init__(self, git, manifest, commit, *, capacity, envelope_size):
+    def __init__(
+        self, git, manifest, commit, *, capacity, envelope_size, memory_spool=False
+    ):
         from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 
         from .vault_history import _Git
@@ -154,7 +172,35 @@ class _RetainedReviewRead:
         self.git, self.manifest, self.commit = git, manifest, commit
         self.capacity, self.envelope_size = capacity, envelope_size
         self.semantic_size = 0
+        self.memory_spool = memory_spool
+        self.spool_limit = 0
+        self.spooled = 0
         self._open = True
+
+    def budget_spool(self, payload_bytes, owned_bytes):
+        self.spooled = owned_bytes
+        if self.memory_spool:
+            # Leave room for the whole set to become semantic evidence later.
+            headroom = (
+                self.capacity
+                - 4 * self.envelope_size
+                - 9 * payload_bytes
+                - 64 * 1024 * 1024
+                - self.spooled
+            )
+            self.spool_limit = min(
+                2 * 1024 * 1024, self.spooled + max(0, headroom) // 2
+            )
+
+    def reserve_spool(self, size):
+        if (
+            not self.spool_limit
+            or size > 65536
+            or self.spooled + size > self.spool_limit
+        ):
+            return False
+        self.spooled += size
+        return True
 
     def _check(self):
         if not self._open or self._anchors != (
@@ -165,7 +211,10 @@ class _RetainedReviewRead:
 
     def reserve_semantic(self, size):
         if (
-            4 * self.envelope_size + 9 * (self.semantic_size + size) + 64 * 1024 * 1024
+            4 * self.envelope_size
+            + 9 * (self.semantic_size + size)
+            + self.spooled
+            + 64 * 1024 * 1024
             > self.capacity
         ):
             raise OSError("Insufficient current memory for retained semantic bytes")
@@ -208,15 +257,20 @@ class ContentSession:
         self._prepared = {}
         self._prepared_digests = {}
         self._retained_semantic = {}
+        self._spooled_bytes = 0
+        self._spool_acquisitions = False
 
     @classmethod
-    def _retained_review(cls, git, manifest, commit, *, capacity, envelope_size):
+    def _retained_review(
+        cls, git, manifest, commit, *, capacity, envelope_size, memory_spool=False
+    ):
         observation = _RetainedReviewRead(
             git,
             manifest,
             commit,
             capacity=capacity,
             envelope_size=envelope_size,
+            memory_spool=memory_spool,
         )
         parent = git.inspection.temporary_base()
         if parent is None:
@@ -233,7 +287,9 @@ class ContentSession:
         source = self._observation
         if type(source) is not _RetainedReviewRead:
             raise OSError("Retained review byte owner required")
-        self._budget(sum(available[sha][1] for sha in references), (1 << 63) - 1)
+        payload_bytes = sum(available[sha][1] for sha in references)
+        self._budget(payload_bytes, (1 << 63) - 1)
+        source.budget_spool(payload_bytes, self._spooled_bytes)
 
         class Sink:
             def __init__(self, output):
@@ -245,16 +301,19 @@ class ContentSession:
                 ledger.check()
                 return written
 
-        paths = {}
+        backings = {}
         ordered = sorted(references)
         for offset in range(0, len(ordered), 32):
             batch, outputs = ordered[offset : offset + 32], {}
             with ExitStack() as streams:
                 for sha in batch:
-                    ledger.reserve_file_cleanup()
                     ledger.retain_metadata(848)
                     ledger.raw_pass(available[sha][1])
-                    paths[sha], outputs[sha] = self._new_file()
+                    if source.reserve_spool(available[sha][1]):
+                        outputs[sha] = BytesIO()
+                    else:
+                        ledger.reserve_file_cleanup()
+                        backings[sha], outputs[sha] = self._new_file()
                     streams.callback(outputs[sha].close)
                 verify_blobs(
                     [*source.git.prefix, "cat-file", "--batch"],
@@ -265,10 +324,13 @@ class ContentSession:
                     ),
                     timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
                 )
-                for output in outputs.values():
+                for sha, output in outputs.items():
                     ledger.check()
-                    output.flush()
-                    os.fsync(output.fileno())
+                    if type(output) is BytesIO:
+                        backings[sha] = _MemoryBacking(output.getvalue())
+                    else:
+                        output.flush()
+                        os.fsync(output.fileno())
         records = {}
         for sha in sorted(references):
             oid, size = available[sha]
@@ -297,9 +359,11 @@ class ContentSession:
                 oid,
             )
             record = _PreparedRegistration(
-                self, reference, paths[sha], "100644", origin
+                self, reference, backings[sha], "100644", origin
             )
             self._prepared[reference.content_id] = record
+            if type(record.backing) is _MemoryBacking:
+                self._spooled_bytes += size
             records[sha] = record
         return records
 
@@ -374,6 +438,21 @@ class ContentSession:
         self._files[path] = (info.st_dev, info.st_ino)
         return path, stream
 
+    def _seal_small_backing(self, path, reference, ledger, scope):
+        if (
+            not self._spool_acquisitions
+            or reference.size > 65536
+            or self._spooled_bytes + reference.size > 2 * 1024 * 1024
+            or available_memory() < 64 * 1024 * 1024 + 2 * reference.size
+        ):
+            return path
+        with closing(self._read_owned(path, reference, ledger, scope)) as chunks:
+            data = b"".join(chunks)
+        scope.check(self)
+        self._unlink_owned_file(path)
+        self._spooled_bytes += len(data)
+        return _MemoryBacking(data)
+
     def _import_physical(self, root, row, ledger, scope):
         """Register an actual rendered file; a declaration alone is insufficient."""
         self._require_private_scope(scope, ledger)
@@ -409,15 +488,19 @@ class ContentSession:
             sha256=sha,
             size=info.st_size,
         )
+        backing = self._seal_small_backing(backing, reference, ledger, scope)
         self._values[reference.content_id] = (
             reference,
             backing,
             mode,
             ("rendered_source", str(root), anchor, row.path, identity, row),
         )
-        with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
-            for _ in chunks:
-                pass
+        if type(backing) is _MemoryBacking:
+            self._prepare_registered(reference, ledger, scope)
+        else:
+            with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
+                for _ in chunks:
+                    pass
         return reference
 
     def _detach(self):
@@ -472,16 +555,16 @@ class ContentSession:
         )
 
     def _check_prepared(self, record, scope):
-        self._require_private_scope(scope)
-        if (
-            type(record) is not _PreparedRegistration
-            or record.session is not self
-            or self._prepared.get(record.reference.content_id) is not record
-        ):
-            raise OSError("Registration was not prepared by this content owner")
-        info = record.backing.lstat()
-        if self._files.get(record.backing) != (info.st_dev, info.st_ino):
-            raise OSError("Prepared backing identity changed")
+        memory = (
+            type(record) is _PreparedRegistration
+            and type(record.backing) is _MemoryBacking
+        )
+        self._require_private_scope(scope, filesystem=not memory)
+        self._require_prepared_record(record)
+        if not memory:
+            info = record.backing.lstat()
+            if self._files.get(record.backing) != (info.st_dev, info.st_ino):
+                raise OSError("Prepared backing identity changed")
         if record.published_input and self._values.get(record.reference.content_id) != (
             record.reference,
             record.backing,
@@ -489,6 +572,14 @@ class ContentSession:
             record.origin,
         ):
             raise OSError("Physical registration origin changed")
+
+    def _require_prepared_record(self, record):
+        if (
+            type(record) is not _PreparedRegistration
+            or record.session is not self
+            or self._prepared.get(record.reference.content_id) is not record
+        ):
+            raise OSError("Registration was not prepared by this content owner")
 
     def _prepare_registered(self, reference, ledger, scope):
         self._require_private_scope(scope, ledger)
@@ -508,7 +599,7 @@ class ContentSession:
         ledger.retain_metadata(512 + 80 * len(records))
         return _RegistrationView(self, records, scope)
 
-    def _require_private_scope(self, scope, ledger=None):
+    def _require_private_scope(self, scope, ledger=None, *, filesystem=True):
         if (
             type(self) is not ContentSession
             or type(scope) is not _PrivateOperation
@@ -517,22 +608,46 @@ class ContentSession:
             and scope.ledger is not ledger
         ):
             raise OSError("Actual live owned content operation required")
-        scope.check(self)
+        if filesystem:
+            scope.check(self)
+        else:
+            scope._check_live(self)
+
+    def _read_memory_backing(self, backing, reference, scope, check):
+        scope._check_live(self)
+        registration = self._prepared.get(reference.content_id)
+        if (
+            registration is None
+            or registration.reference != reference
+            or registration.backing is not backing
+        ):
+            raise OSError("Memory backing is not registered with this owner")
+        data = backing.data
+        for offset in range(0, len(data), 65536):
+            check()
+            yield data[offset : offset + 65536]
+        scope._check_live(self)
+        check()
 
     def _read_owned(self, backing, reference, ledger, scope):
-        if type(scope) is _PrivateOperation:
+        memory = type(backing) is _MemoryBacking
+        if memory or type(scope) is _PrivateOperation:
             scope._check_live(self)
         else:
             scope.check(self)
         ledger.check()
         ledger.raw_pass(reference.size)
+        if memory:
+            return self._read_memory_backing(backing, reference, scope, ledger.check)
 
         def chunks():
-            scope.check(self)
+            if type(scope) is _PrivateOperation:
+                scope._check_live(self)
+            else:
+                scope.check(self)
             ledger.check()
             expected = self._files.get(backing)
-            info = backing.lstat()
-            if (info.st_dev, info.st_ino) != expected:
+            if expected is None:
                 raise OSError("Owned backing identity changed")
             with closing(
                 _observed_chunks(
@@ -540,6 +655,7 @@ class ContentSession:
                     backing,
                     expected_size=reference.size,
                     read_chunk_limit=65536,
+                    owned_identity=(self._anchor, expected),
                 )
             ) as observed:
                 while True:
@@ -564,6 +680,8 @@ class ContentSession:
 
     def _stage_decoded(self, reference, ledger, scope):
         reference, backing, mode = scope.resolve(reference)
+        if type(backing) is _MemoryBacking:
+            scope.check(self)
         self._budget(reference.size, reference.size)
         ledger.reserve_file_cleanup()
         path, output = self._new_file()
@@ -607,6 +725,128 @@ class ContentSession:
             scope=scope,
         )
 
+    def _acquire_small_current(self, rows, ledger, scope):
+        """Read exact admitted files before returning any results from the group."""
+        if (
+            len(rows) < 2
+            or len(rows) > 32
+            or sum(row.size for row in rows) > 4 * 1024 * 1024
+        ):
+            return None
+        observed = self._require_current_observation()
+        self._require_private_scope(scope, ledger)
+        self._check()
+        inventory = {row.path: row for row in observed.history.admission.inventory}
+        if any(
+            row != inventory.get(row.path) or row.exclusion in ("cache", "temporary")
+            for row in rows
+        ):
+            raise OSError("Current files differ from the admitted inventory")
+
+        def recheck():
+            scope.check(self)
+
+        references = {}
+        for row in rows:
+            scope.check(self)
+            transfer = _Transfer(
+                timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+                cancel=ledger.budget.cancel,
+            )
+            references[row.path] = self._capture_row(
+                row,
+                "current",
+                None,
+                transfer,
+                ledger.remaining("raw_work"),
+                ledger,
+                scope,
+                recheck,
+            )
+        self._check()
+        return references
+
+    def _acquire_small_source(self, locator, ledger, scope):
+        """Read one bounded retained source inventory under a single observation."""
+        from .git_payload import verify_blobs
+        from .git_read import _GitTimeout
+        from .vault_history import _Git
+
+        observed = self._require_current_observation()
+        self._require_private_scope(scope, ledger)
+        checkpoint = observed.history.checkpoint
+        if checkpoint is None or checkpoint.locator != locator:
+            raise OSError("Current retained source locator required")
+        rows = checkpoint.manifest.source
+        size = sum(row.size for row in rows)
+        if len(rows) < 2 or len(rows) > 32 or size > 4 * 1024 * 1024:
+            return None
+        self._check()
+        if checkpoint.status != "valid":
+            raise OSError("Current retained source locator required")
+        if (
+            size > ledger.remaining("raw_work")
+            or shutil.disk_usage(self._directory).free < size
+        ):
+            # The serial path can retire identical spools between reads.
+            return None
+        transfer = _Transfer(
+            timeout=min(
+                120 * len(rows), max(0.001, ledger.deadline - time.monotonic())
+            ),
+            cancel=ledger.budget.cancel,
+            _native=True,
+        )
+        git = _Git(observed._root, observed._inspection.executable)
+        acquired = []
+        try:
+            with ExitStack() as outputs:
+                for row in rows:
+                    scope.check(self)
+                    ledger.reserve_file_cleanup()
+                    backing, output = self._new_file()
+                    outputs.enter_context(output)
+                    acquired.append((row, backing, output))
+                verify_blobs(
+                    [*git.prefix, "cat-file", "--batch"],
+                    env=git.env,
+                    objects=tuple(
+                        (
+                            row.object_id,
+                            row.size,
+                            row.sha256,
+                            transfer.sink(output, row.size),
+                        )
+                        for row, _, output in acquired
+                    ),
+                    timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
+                )
+                for _, _, output in acquired:
+                    transfer.check()
+                    output.flush()
+                    os.fsync(output.fileno())
+        except _GitTimeout:
+            # Preserve the serial per-file allowance for a slow batch. No
+            # reference exists until all spools have passed verification.
+            for _, backing, _ in acquired:
+                scope.check(self)
+                self._unlink_owned_file(backing)
+            return None
+        references = {
+            row.path: self._register_acquired(
+                row,
+                backing,
+                ("source", row.path, locator, row),
+                transfer,
+                ledger,
+                scope,
+            )
+            for row, backing, _ in acquired
+        }
+        self._check()
+        transfer.check()
+        return references
+
     def _acquire(
         self,
         path,
@@ -648,6 +888,13 @@ class ContentSession:
         row = next((row for row in rows if row.path == path), None)
         if row is None or getattr(row, "exclusion", None) in ("cache", "temporary"):
             raise OSError("Content path is unavailable in the admitted origin")
+        return self._capture_row(
+            row, role, locator, transfer, byte_limit, ledger, scope, self._check
+        )
+
+    def _capture_row(
+        self, row, role, locator, transfer, byte_limit, ledger, scope, recheck
+    ):
         self._budget(row.size, byte_limit)
         if ledger is not None:
             ledger.reserve_file_cleanup()
@@ -693,8 +940,13 @@ class ContentSession:
                 )
             output.flush()
             os.fsync(output.fileno())
-        self._check()
+        recheck()
         transfer.check()
+        return self._register_acquired(
+            row, backing, (role, row.path, locator, row), transfer, ledger, scope
+        )
+
+    def _register_acquired(self, row, backing, origin, transfer, ledger, scope):
         if ledger is None:
             self._copy(row, backing, _Discard(), transfer)
         else:
@@ -723,6 +975,8 @@ class ContentSession:
             backing.unlink()
             del self._files[backing]
             backing = previous_backing
+        elif ledger is not None:
+            backing = self._seal_small_backing(backing, row, ledger, scope)
         reference = ImmutableContentReference(
             content_id=self._namespace + ":" + uuid4().hex,
             sha256=row.sha256,
@@ -734,9 +988,11 @@ class ContentSession:
             reference,
             backing,
             row.mode,
-            (role, path, locator, row),
+            origin,
         )
         self._digests[row.sha256] = (reference, backing)
+        if type(backing) is _MemoryBacking:
+            self._prepare_registered(reference, ledger, scope)
         return reference
 
     def _compare_backings(self, backing, previous_ref, previous_backing, transfer):
@@ -858,28 +1114,32 @@ class ContentSession:
         self._digests.clear()
         self._prepared.clear()
         self._prepared_digests.clear()
+        self._spooled_bytes = 0
         if not self._directory.exists():
             return
         try:
             if verify_directory(self._directory) != self._anchor:
                 raise OSError("Content scratch identity changed")
-            for path, identity in tuple(self._files.items()):
+            for path in tuple(self._files):
                 if not path.exists():
                     continue
-                info = path.lstat()
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or info.st_nlink != 1
-                    or (info.st_dev, info.st_ino) != identity
-                ):
-                    raise OSError("Owned content file identity changed")
-                path.unlink()
-                del self._files[path]
+                self._unlink_owned_file(path)
             self._directory.rmdir()
         except OSError as error:
             raise OSError(
                 f"Owned content scratch retained at {self._directory}"
             ) from error
+
+    def _unlink_owned_file(self, path):
+        info = path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != self._files.get(path)
+        ):
+            raise OSError("Owned content file identity changed")
+        path.unlink()
+        del self._files[path]
 
 
 class _DecodedImport:
@@ -978,6 +1238,10 @@ class _DecodedImport:
                         if a != b:
                             raise OSError("Prepared digest has unequal exact bytes")
                 backing = previous.backing
+            else:
+                backing = self.session._seal_small_backing(
+                    backing, reference, self.ledger, self.scope
+                )
             record = _PreparedRegistration(
                 self.session, reference, backing, "100644", origin
             )
@@ -1071,8 +1335,7 @@ class _PrivateOperation:
 
     def check(self, session):
         self._check_live(session)
-        if verify_directory(session._directory) != session._anchor:
-            raise OSError("Content scratch identity changed")
+        _check_owned_directory(session._directory, session._anchor)
 
     def resolve(self, reference):
         self.check(self.session)

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from brz2obsidian.publication.git_payload import verify_blobs
+from brz2obsidian.publication.git_read import _GitTimeout
 
 _PAYLOAD = b"\x00\xffliteral\r\n"
 _OID = hashlib.sha1(
@@ -90,3 +91,53 @@ def test_raw_batch_timeout_terminates_owned_descendant_process():
                 assert kernel.WaitForSingleObject(handle, 2000) == 0
             finally:
                 kernel.CloseHandle(handle)
+
+
+@pytest.mark.parametrize("prefix_valid", (True, False), ids=("valid", "invalid"))
+def test_raw_batch_timeout_distinguishes_incomplete_header_prefix(
+    tmp_path, prefix_valid
+):
+    script = tmp_path / "git-partial-header.py"
+    marker = tmp_path / "sent"
+    requests = f"{_OID}\n".encode()
+    header = _OID[:12].encode() if prefix_valid else b"unexpected"
+    script.write_text(
+        "import pathlib, sys, time\n"
+        f"assert sys.stdin.buffer.read() == {requests!r}\n"
+        f"pathlib.Path({str(marker)!r}).touch()\n"
+        f"sys.stdout.buffer.write({header!r})\n"
+        "sys.stdout.buffer.flush()\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OSError) as failure:
+        verify_blobs(
+            [sys.executable, str(script)],
+            env=os.environ.copy(),
+            objects=((_OID, len(_PAYLOAD), _SHA, None),),
+            timeout=3,
+        )
+    assert marker.exists()
+    assert isinstance(failure.value, _GitTimeout) is prefix_valid
+
+
+def test_raw_batch_rejects_wrong_payload_when_terminator_stalls(tmp_path):
+    script = tmp_path / "git-stalled-terminator.py"
+    requests = f"{_OID}\n".encode()
+    wrong = b"x" * len(_PAYLOAD)
+    output = f"{_OID} blob {len(wrong)}\n".encode() + wrong
+    script.write_text(
+        "import sys, time\n"
+        f"assert sys.stdin.buffer.read() == {requests!r}\n"
+        f"sys.stdout.buffer.write({output!r})\n"
+        "sys.stdout.buffer.flush()\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OSError, match="digest does not match"):
+        verify_blobs(
+            [sys.executable, str(script)],
+            env=os.environ.copy(),
+            objects=((_OID, len(_PAYLOAD), _SHA, None),),
+            timeout=3,
+        )

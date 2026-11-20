@@ -19,7 +19,11 @@ from itertools import zip_longest
 
 from brz2obsidian.content_fingerprints import LegacyObject
 from brz2obsidian.contracts import ContentIdentity, ImmutableContentReference
-from brz2obsidian.publication.content_session import ContentSession, _Transfer
+from brz2obsidian.publication.content_session import (
+    ContentSession,
+    _MemoryBacking,
+    _Transfer,
+)
 from brz2obsidian.publication.vault_native import _observed_chunks
 
 _MAX = (1 << 63) - 1
@@ -336,23 +340,39 @@ class ContentComparison:
 
     def _read(self, reference, work, transfer):
         transfer.check()
+        backing = self._backings[reference.content_id]
+        if type(backing) is _MemoryBacking:
+            self._scope._check_live(self._session)
+            work.reserve(reference.size)
+            return self._session._read_memory_backing(
+                backing, reference, self._scope, transfer.check
+            )
         self._check()
         work.reserve(reference.size)
 
         def chunks():
             transfer.check()
-            self._check()
-            backing = self._backings[reference.content_id]
+            if self._scope is None:
+                self._check()
+            else:
+                self._scope._check_live(self._session)
             expected = self._session._files.get(backing)
-            before = backing.lstat()
-            if (before.st_dev, before.st_ino) != expected:
-                raise OSError("Owned backing identity changed")
+            if self._scope is None:
+                before = backing.lstat()
+                if (before.st_dev, before.st_ino) != expected:
+                    raise OSError("Owned backing identity changed")
+                owned_identity = None
+            else:
+                if expected is None:
+                    raise OSError("Owned backing identity changed")
+                owned_identity = (self._session._anchor, expected)
             with closing(
                 _observed_chunks(
                     self._session._directory,
                     backing,
                     expected_size=reference.size,
                     read_chunk_limit=_CHUNK,
+                    owned_identity=owned_identity,
                 )
             ) as observed:
                 while True:

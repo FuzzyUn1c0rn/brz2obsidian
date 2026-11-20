@@ -362,13 +362,16 @@ def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
     current = CheckpointLocator.model_validate_json(raw)
     current_refs = git.call("for-each-ref", "--format=%(refname) %(objectname)")
     association = locator.association
+    # Admission resolves the checkpoint and retains the complete ref snapshot.
+    # Check the exact fully qualified ref in this same fresh observation.
+    rows = current_refs.splitlines()
+    expected_checkpoint = f"{association.ref} {locator.commit}".encode()
     if (
         current != locator
         or verify_directory(root) != association.vault_anchor
         or verify_directory(root / ".git") != association.git_anchor
         or current_refs != refs
-        or git.call("rev-parse", "--verify", association.ref).decode().strip()
-        != locator.commit
+        or expected_checkpoint not in rows
         or any(_existing_git_operation_blockers(root / ".git"))
     ):
         raise OSError("Current checkpoint association or references changed")
@@ -376,7 +379,7 @@ def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
         if _exists(root / ".git" / "brz2obsidian") or any(
             line.split(b" ", 1)[0].startswith(b"refs/brz2obsidian/imports/")
             and b"/operations/" in line.split(b" ", 1)[0]
-            for line in current_refs.splitlines()
+            for line in rows
         ):
             raise OSError("Idle checkpoint acquired operation evidence")
     else:

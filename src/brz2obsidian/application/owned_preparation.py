@@ -22,6 +22,7 @@ from brz2obsidian.core.resolution import (
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
 from brz2obsidian.publication.vault_history import (
+    _ApplyReviewOwners,
     _binding_signature,
     _checkpoint_review_metadata,
     _Git,
@@ -58,6 +59,10 @@ class _OwnedPreparation:
         self._history_observation = self._history_origin = None
         self._history_origin_commit = None
         self._history_values = {}
+        self._apply_review_owners = None
+        self._apply_source_update = False
+        self._borrowed_apply_session = False
+        self._apply_resume = None
         self._readonly_initial = self._readonly_initial_seed = None
 
     def _stage_readonly_initial(self, result):
@@ -118,7 +123,12 @@ class _OwnedPreparation:
         return False
 
     def _observe(self, vault, expected=None, *, expected_absent=False, _recovery=False):
-        fresh = _UpdateRead(vault, _metadata_only=True, _recovery=_recovery)
+        fresh = _UpdateRead(
+            vault,
+            _metadata_only=True,
+            _recovery=_recovery,
+            _apply_review_owners=self._apply_review_owners if not _recovery else None,
+        )
         fresh.__enter__()
         try:
             if expected_absent and fresh.history.status != "absent":
@@ -157,6 +167,7 @@ class _OwnedPreparation:
             commit,
             capacity=lifecycle.available_memory(),
             envelope_size=manifest.review_size,
+            memory_spool=self._apply_source_update,
         )
         self._session._content._observation = retained
         try:
@@ -174,8 +185,16 @@ class _OwnedPreparation:
 
     def _physical_payload(self, root, rows):
         values = {}
+        current = Path(root).absolute() == self.observed._root
+        references = None
+        if current and self._apply_source_update:
+            references = self._session._content._acquire_small_current(
+                rows, self._session._ledger, self._session._scope
+            )
         for row in rows:
-            if Path(root).absolute() == self.observed._root:
+            if references is not None:
+                reference = references[row.path]
+            elif current:
                 reference = self._session._content._acquire_current(
                     row.path, self._session._ledger, self._session._scope
                 )
@@ -542,17 +561,26 @@ class _OwnedPreparation:
             return _executed(result, preparation.kind)
 
     def _source_payload(self, checkpoint):
+        references = None
+        if self._apply_source_update:
+            references = self._session._content._acquire_small_source(
+                checkpoint.locator, self._session._ledger, self._session._scope
+            )
         result = {}
         for row in checkpoint.manifest.source:
-            reference = self._session._content._acquire(
-                row.path,
-                role="source",
-                locator=checkpoint.locator,
-                byte_limit=self._session._ledger.remaining("raw_work"),
-                timeout=120,
-                cancel=self._session._ledger.budget.cancel,
-                ledger=self._session._ledger,
-                scope=self._session._scope,
+            reference = (
+                references[row.path]
+                if references is not None
+                else self._session._content._acquire(
+                    row.path,
+                    role="source",
+                    locator=checkpoint.locator,
+                    byte_limit=self._session._ledger.remaining("raw_work"),
+                    timeout=120,
+                    cancel=self._session._ledger.budget.cancel,
+                    ledger=self._session._ledger,
+                    scope=self._session._scope,
+                )
             )
             value = self._session._owned_value(reference)
             result[row.path] = (
@@ -613,14 +641,22 @@ class _OwnedPreparation:
                 lifecycle.available_memory(),
                 _cancel=self._cancel,
             )
+            self._session._batch_current = self._apply_source_update
+            self._session._content._spool_acquisitions = self._apply_source_update
 
-    def restore(self, vault, *, resume=False, cancel=None):
-        """Project saved history lexically, or retain a freshly resumed owner."""
+    def restore(self, vault, *, resume=False, cancel=None, check_saved=None):
+        """Read saved history, optionally checking identity before resuming it."""
         from .update_contracts import UpdateResult
 
         self._cancel.probe = cancel
         history = None
         kind = None
+        # Guarded Resume begins with Load's refusal semantics.
+        resuming = resume and check_saved is None
+        if resume:
+            self._apply_review_owners = _ApplyReviewOwners(
+                memory_spool=True, cancel=self._cancel
+            )
         try:
             history = self._observe(vault)
             history, stopped = lifecycle._history(
@@ -648,11 +684,22 @@ class _OwnedPreparation:
             ):
                 return None
             kind = checkpoint.metadata[10]
-            self._start_session()
-            self._tip = self._load_tip(checkpoint)
+            self._apply_source_update = resume and kind == "source_update"
+            borrowed = (
+                self._apply_review_owners._borrow_local(self.observed, checkpoint)
+                if self._apply_source_update
+                else None
+            )
+            if borrowed is None:
+                self._start_session()
+                self._tip = self._load_tip(checkpoint)
+            else:
+                self._session, self._tip = borrowed
+                self._tip_commit = checkpoint.locator.commit
+                self._borrowed_apply_session = True
             plan = self._tip.saved.plan
-            if not resume:
-                return UpdateResult(
+            if not resume or check_saved is not None:
+                saved = UpdateResult(
                     kind=plan.facts.format_operation.kind,
                     status="unresolved",
                     code="revalidation_required",
@@ -666,6 +713,14 @@ class _OwnedPreparation:
                     checkpoint=checkpoint.locator,
                     vault=history.admission.vault,
                 )
+                if not resume:
+                    return saved
+                # Apply checks the verified identity before using this same
+                # owner to restore Incoming and revalidate Current.
+                stopped = check_saved(saved)
+                if stopped is not None:
+                    return stopped
+                resuming = True
             if plan.facts.format_operation.kind in (
                 "source_update",
                 "format_transition",
@@ -673,6 +728,18 @@ class _OwnedPreparation:
             ):
                 result = self._resume_update(history, plan)
                 self.preparation = result.preparation
+                if (
+                    self._apply_source_update
+                    and result.ready
+                    and result.code == "unchanged"
+                    and result.preparation is not None
+                    and result.preparation.source_ref is None
+                ):
+                    self._apply_resume = (
+                        result,
+                        self.observed.current_domain_matcher(),
+                        history.checkpoint.manifest,
+                    )
                 return result
             from .onboarding import _reobserve_onboarding
             from .update_contracts import UpdatePreparation
@@ -725,11 +792,11 @@ class _OwnedPreparation:
                         action="review_tracking",
                     )
                 return refused(
-                    "resume_unavailable" if resume else "saved_update_unavailable",
+                    "resume_unavailable" if resuming else "saved_update_unavailable",
                     history,
                 )
             return lifecycle._refused(
-                "resume_unavailable" if resume else "saved_update_unavailable",
+                "resume_unavailable" if resuming else "saved_update_unavailable",
                 history,
             )
         finally:
@@ -741,6 +808,7 @@ class _OwnedPreparation:
 
     def _resume_update(self, history, plan):
         checkpoint = history.checkpoint
+        exact_retained_plan = self._apply_source_update and plan is self._tip.saved.plan
         with self._session._operation():
             plan = self._session._admit_values(plan)
             baseline = self._source_payload(checkpoint)
@@ -794,10 +862,16 @@ class _OwnedPreparation:
                 )
             facts = self._session._admit_values(facts)
             self._session._coadmit()
-            canonical = self._session._replay(plan)
-            if canonical is None:
-                raise OSError("invalid_review")
-            effects = self._session._drive(SelectedEffectsWork(canonical))
+            if exact_retained_plan:
+                # The verified saved plan supplies the subject queries.
+                # resume_review still replays against that fresh admission.
+                canonical = plan
+                effects = None
+            else:
+                canonical = self._session._replay(plan)
+                if canonical is None:
+                    raise OSError("invalid_review")
+                effects = self._session._drive(SelectedEffectsWork(canonical))
             scoped = self.observed.inspect(
                 subjects=lifecycle._subjects(facts, canonical, effects=effects),
                 new_operation="format_transition" if maintenance else None,
@@ -1054,12 +1128,16 @@ class _OwnedPreparation:
                 self._session._ledger.release_failed()
 
     def _publication_export(self, plan):
-        export = self._session._freeze_export(plan)
-        export.effects = self._session.select_review_effects(export.saved.plan)
+        export = self._session._freeze_export(
+            plan, select_effects=self._apply_source_update
+        )
+        if export.effects is None:
+            export.effects = self._session.select_review_effects(export.saved.plan)
         if export.effects.status != "selected":
             raise OSError("Whole current owned review required")
         self._session._content._detach()
         self.observed = None
+        export._apply_review_owners = self._apply_review_owners
         return export
 
     def choices(self, plan):
@@ -1351,7 +1429,10 @@ class _OwnedPreparation:
         ):
             raise lifecycle._ExcludedDependency
 
-    def _reobserve(self, preparation):
+    def _reobserve(self, preparation, *, for_apply=False):
+        resume, self._apply_resume = self._apply_resume, None
+        if self._session is not None:
+            self._session._apply_proved_plan = None
         if preparation.kind == "onboarding":
             from .onboarding import reobserve_onboarding
 
@@ -1386,6 +1467,36 @@ class _OwnedPreparation:
             != preparation.source_binding
         ):
             raise OSError("source_payload_changed")
+        if (
+            for_apply
+            and resume is not None
+            and resume[0].preparation is self.preparation
+            and resume[0].preparation == preparation
+            and resume[2] == history.checkpoint.manifest
+            and resume[1](self.observed)
+        ):
+            with self._session._operation():
+                plan = self._session._admit_values(preparation.review)
+                self._recheck_resumed_payloads(history, preparation)
+                scoped = self._scoped(history, plan.facts, plan)
+                if scoped.admission.preflight == plan.preflight:
+                    # Resume proved this graph against the same inputs. Fresh
+                    # admission rechecks history, Current and its policy, and
+                    # co-admission rechecks every live retained backing.
+                    self._session._coadmit()
+                    if (
+                        self.operations.observe_reviewed_source(
+                            preparation.payload_directory, plan
+                        )
+                        != preparation.source_binding
+                    ):
+                        raise OSError("source_payload_changed")
+                    self._session._apply_proved_plan = resume[0].preparation.review
+                    return (
+                        scoped,
+                        resume[0].model_copy(update={"code": "current"}),
+                        None,
+                    )
         with self._session._operation():
             plan = self._session._admit_values(preparation.review)
             self._session._coadmit()
@@ -1512,6 +1623,26 @@ class _OwnedPreparation:
                 _owner=self,
             )
             return history, result, baseline
+
+    def _recheck_resumed_payloads(self, history, preparation):
+        # Keep exact live byte comparisons with Resume's owned registrations.
+        # The admission inventory identifies candidates for those comparisons.
+        current_paths = {
+            origin[1]
+            for _, _, _, origin in self._session._content._values.values()
+            if origin[0] == "current"
+        }
+        self._source_payload(history.checkpoint)
+        lifecycle._read_physical(
+            preparation.payload_directory, preparation.source_binding.files, _owner=self
+        )
+        lifecycle._read_physical(
+            preparation.vault,
+            tuple(
+                row for row in history.admission.inventory if row.path in current_paths
+            ),
+            _owner=self,
+        )
 
     def refresh(self, preparation, *, source=None, cancel=None):
         self._cancel.probe = cancel
@@ -1876,16 +2007,21 @@ class _OwnedPreparation:
 
     def close(self):
         self._clear_readonly_initial()
+        self._apply_resume = None
         if self._closed:
             return
         self._closed = True
         try:
-            if self._session is not None:
-                self._session.close()
+            try:
+                if self._session is not None and not self._borrowed_apply_session:
+                    self._session.close()
+            finally:
+                if self.observed is not None:
+                    self.observed.__exit__()
+                    self.observed = None
         finally:
-            if self.observed is not None:
-                self.observed.__exit__()
-                self.observed = None
+            if self._apply_review_owners is not None:
+                self._apply_review_owners.close()
         self._remove_owned(self._directory, self._anchor)
 
     def _remove_owned(self, directory, anchor):

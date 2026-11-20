@@ -10,6 +10,7 @@ import tempfile
 import zlib
 from contextlib import ExitStack
 from dataclasses import dataclass
+from itertools import batched
 from pathlib import Path
 from typing import NamedTuple
 
@@ -44,7 +45,7 @@ from brz2obsidian.core import (
     select_review_effects,
 )
 from brz2obsidian.publication.git_payload import verify_blobs
-from brz2obsidian.publication.git_read import OUTPUT_BUDGET, read_git
+from brz2obsidian.publication.git_read import OUTPUT_BUDGET, _GitTimeout, read_git
 from brz2obsidian.publication.vault_admission import (
     HOOKS,
     _configured_hook_state,
@@ -351,18 +352,87 @@ class _Git:
                 children.setdefault(head, []).append((tail, mode, oid))
             else:
                 children[head] = (mode, oid)
-        rows = []
         for name, value in sorted(children.items()):
             if isinstance(value, list):
-                mode, oid = "040000", self.tree(value)
+                children[name] = "040000", self.tree(value)
+        return (
+            self.call("mktree", "-z", input=self._tree_rows(children)).decode().strip()
+        )
+
+    @staticmethod
+    def _tree_rows(entries):
+        return b"".join(
+            f"{mode} {'tree' if mode == '040000' else 'blob'} {oid}\t".encode("ascii")
+            + name.encode("utf-8")
+            + b"\0"
+            for name, (mode, oid) in sorted(entries.items())
+        )
+
+    @staticmethod
+    def _tree_oid(entries):
+        # Git sorts directory names as if followed by a slash.
+        rows = [
+            (name.encode("utf-8"), mode, oid) for name, (mode, oid) in entries.items()
+        ]
+        rows.sort(key=lambda row: row[0] + (b"/" if row[1] == "040000" else b""))
+        body = b"".join(
+            mode.lstrip("0").encode("ascii") + b" " + name + b"\0" + bytes.fromhex(oid)
+            for name, mode, oid in rows
+        )
+        return hashlib.sha1(
+            f"tree {len(body)}\0".encode("ascii") + body, usedforsecurity=False
+        ).hexdigest()
+
+    def checkpoint_trees(self, inventories):
+        """Write trees by depth, with per-tree deadlines after a clean timeout."""
+        levels = [{}]
+        for role, inventory in inventories:
+            levels[0][(role,)] = {}
+            for row in inventory:
+                parts = (role, *row.path.split("/"))
+                depth = len(parts) - 2
+                while len(levels) <= depth:
+                    levels.append({})
+                levels[depth].setdefault(parts[:-1], {})[parts[-1]] = (
+                    row.mode,
+                    row.object_id,
+                )
+        controls = {}
+        for depth in range(len(levels) - 1, -1, -1):
+            trees = levels[depth]
+            batch = b"".join(self._tree_rows(rows) + b"\0" for rows in trees.values())
+            expected = [self._tree_oid(rows) for rows in trees.values()]
+            try:
+                raw = self.call("mktree", "-z", "--batch", input=batch)
+            except _GitTimeout as error:
+                if len(trees) == 1:
+                    raise
+                _check_timed_out_object_ids(
+                    error, expected, "Checkpoint tree batch output changed"
+                )
+                # Only the batch deadline expired. Each immutable tree still
+                # has its own write deadline, with the same readback below.
+                for rows, expected_oid in zip(trees.values(), expected, strict=True):
+                    oid = self.tree(
+                        (name, mode, object_id)
+                        for name, (mode, object_id) in rows.items()
+                    )
+                    if oid != expected_oid:
+                        raise OSError("Checkpoint tree write changed")
             else:
-                mode, oid = value
-            rows.append(
-                f"{mode} {'tree' if mode == '040000' else 'blob'} {oid}\t".encode()
-                + name.encode("utf-8")
-                + b"\0"
-            )
-        return self.call("mktree", "-z", input=b"".join(rows)).decode().strip()
+                if raw.decode().splitlines() != expected:
+                    raise OSError("Checkpoint tree batch output changed")
+            controls.update(dict.fromkeys(expected, "tree"))
+            if depth:
+                for path, oid in zip(trees, expected, strict=True):
+                    levels[depth - 1].setdefault(path[:-1], {})[path[-1]] = (
+                        "040000",
+                        oid,
+                    )
+        _control_objects(self, controls, {})
+        return [
+            (path[0], "040000", oid) for path, oid in zip(trees, expected, strict=True)
+        ]
 
 
 def _spool(root, directory, paths=None, *, offset=0):
@@ -516,6 +586,39 @@ def _spool_oid(directory, path, size, sha):
     if info.st_size != size or actual_sha != sha:
         raise OSError("Captured spool changed")
     return oid.hexdigest()
+
+
+def _check_timed_out_object_ids(error, expected, message):
+    partial = error.stdout.replace(b"\r\n", b"\n")
+    if partial.endswith(b"\r"):
+        partial = partial[:-1] + b"\n"
+    expected_stdout = "".join(f"{oid}\n" for oid in expected).encode("ascii")
+    if not expected_stdout.startswith(partial):
+        raise OSError(message) from error
+
+
+def _write_review_spools(git, spools, declarations):
+    expected = [oid for oid, _, _, _ in declarations]
+    try:
+        raw = git.call(
+            "hash-object",
+            "-w",
+            "--no-filters",
+            "--stdin-paths",
+            input=_quoted_paths(spools),
+        )
+    except _GitTimeout as error:
+        _check_timed_out_object_ids(
+            error, expected, "Saved review byte object write changed"
+        )
+        raise
+    if raw.decode().splitlines() != expected:
+        raise OSError("Saved review byte object write changed")
+    verify_blobs(
+        [*git.prefix, "cat-file", "--batch"],
+        env=git.env,
+        objects=tuple(declarations),
+    )
 
 
 def _control_objects(git, requested, cache):
@@ -679,6 +782,243 @@ def _restore_review(record, payloads, manifest):
     return restored.loaded
 
 
+class _ExactBlobSink:
+    def __init__(self, expected):
+        self.expected = memoryview(expected)
+        self.offset = 0
+
+    def write(self, block):
+        end = self.offset + len(block)
+        if self.expected[self.offset : end] != block:
+            raise OSError("Retained review blob differs from the owned export")
+        self.offset = end
+        return len(block)
+
+
+def _verify_review_batches(git, declarations, *, compact):
+    argv = [*git.prefix, "cat-file", "--batch"]
+    if compact:
+        complete = tuple(declarations())
+        try:
+            verify_blobs(argv, env=git.env, objects=complete, timeout=120)
+        except _GitTimeout:
+            # No integrity failure was observed. Rebuild any partial sinks.
+            del complete
+        else:
+            return
+    for batch in batched(declarations(), 32):
+        verify_blobs(argv, env=git.env, objects=batch, timeout=120)
+
+
+class _ApplyReviewOwners(ExitStack):
+    """Retain exact local and prepared proofs during otherwise fresh inspections."""
+
+    def __init__(
+        self,
+        *,
+        local_owner=None,
+        retain_prepared=False,
+        memory_spool=False,
+        cancel=None,
+    ):
+        super().__init__()
+        self._proofs = {}
+        self._local_owner = local_owner
+        self._retain_prepared = retain_prepared
+        self._memory_spool = memory_spool
+        self._resume_cancel = cancel
+        self._borrowed_session = None
+        self._prepared_export = None
+        self._prepared_metadata = None
+        self._read_cancelled = False
+        self._checkpoint_graphs = (
+            local_owner._checkpoint_graphs
+            if type(local_owner) is _ApplyReviewOwners
+            else {}
+        )
+
+    def _retain_prepared_export(self, git, commit, manifest, export):
+        if (
+            self._retain_prepared
+            and type(self._local_owner) is _ApplyReviewOwners
+            and manifest.boundary == "prepared"
+            and manifest.recovery_direction is None
+            and manifest.undo_of_receipt_commit is None
+            and self._prepared_export is None
+            and export is not None
+            and len(export.raw) <= 2 * 1024 * 1024
+            and sum(value.identity.size for value in export.values.values())
+            <= 2 * 1024 * 1024
+        ):
+            self._prepared_export = (git.root, commit, manifest, export)
+
+    def _read_prepared_export(self, git, manifest, verified, commit, include_review):
+        from brz2obsidian.core.resume import _load_result
+
+        root, expected_commit, expected_manifest, export = self._prepared_export
+        if (git.root, commit) != (root, expected_commit):
+            return None
+        if manifest != expected_manifest:
+            raise OSError("Captured prepared checkpoint has a different manifest")
+        if available_memory() < 4 * len(export.raw) + 64 * 1024 * 1024:
+            return None
+        export.check()
+        references = frozenset(export.values)
+        available = _review_role_objects(manifest, references)
+
+        def declarations():
+            yield (
+                manifest.review_object,
+                manifest.review_size,
+                manifest.review_sha256,
+                _ExactBlobSink(export.raw),
+            )
+            for sha in sorted(references):
+                oid, size = available[sha]
+                if size != export.values[sha].identity.size:
+                    raise OSError("Captured prepared payload differs in size")
+                with io.BytesIO() as expected:
+                    export.copy(sha, expected)
+                    yield oid, size, sha, _ExactBlobSink(expected.getvalue())
+
+        _verify_review_batches(git, declarations, compact=32 <= len(references) < 128)
+        export.check()
+        if self._prepared_metadata is None:
+            review = _load_result("loaded", export.saved, export.effects).loaded
+            self._prepared_metadata = (
+                _checkpoint_review_metadata(manifest, review, references),
+                review,
+            )
+        metadata, review = self._prepared_metadata
+        verified.update(available[sha][0] for sha in references)
+        return metadata, review if include_review else None
+
+    def _borrow_local(self, observed, checkpoint):
+        """Attach an admitted Current observation to the exact retained owner."""
+        proof = self._proofs.get("local")
+        if self._borrowed_session is not None or proof is None:
+            return None
+        root, commit, manifest, session, _, review, _ = proof
+        if (root, commit, manifest) != (
+            observed._root,
+            checkpoint.locator.commit,
+            checkpoint.manifest,
+        ) or session._ledger.budget.cancel is not self._resume_cancel:
+            return None
+        # Keep the fresh retained-byte check immediately before the caller's
+        # guarded identity check. The earlier traversal only supplies the parse.
+        self._read_proof(
+            _Git(root, observed._executable),
+            manifest,
+            set(),
+            commit,
+            False,
+            self,
+            "local",
+        )
+        session._content._attach(observed)
+        session._batch_current = True
+        session._content._spool_acquisitions = True
+        self._borrowed_session = session
+        return session, review
+
+    def read(self, git, manifest, verified, *, commit, include_review):
+        cache = self if self._local_owner is None else self._local_owner
+        local = cache._proofs.get("local")
+        if (
+            self._retain_prepared
+            and local is not None
+            and manifest.boundary == "prepared"
+            and manifest.recovery_direction is None
+            and manifest.undo_of_receipt_commit is None
+            and (git.root, manifest.previous) == local[:2]
+        ):
+            if self._prepared_export is not None:
+                prepared = self._read_prepared_export(
+                    git, manifest, verified, commit, include_review
+                )
+                if prepared is not None:
+                    return prepared
+            return self._read_proof(
+                git, manifest, verified, commit, include_review, self, "prepared"
+            )
+        if manifest.boundary == "local" and not manifest.proposed:
+            return cache._read_proof(
+                git, manifest, verified, commit, include_review, self, "local"
+            )
+        return None
+
+    def _read_proof(self, git, manifest, verified, commit, include_review, phase, role):
+        proof = self._proofs.get(role)
+        if proof is None:
+            if not include_review:
+                return None
+            with ExitStack() as trial:
+                review, references, session = _read_owned_checkpoint_review(
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                    owners=trial,
+                    memory_spool=self._memory_spool,
+                    resume_cancel=self._resume_cancel if role == "local" else None,
+                )
+                metadata = _checkpoint_review_metadata(
+                    manifest, review, frozenset(references)
+                )
+                if metadata[10] == "source_update":
+                    self.enter_context(trial.pop_all())
+                    self._proofs[role] = (
+                        git.root,
+                        commit,
+                        manifest,
+                        session,
+                        metadata,
+                        review,
+                        tuple(session._closure.view.records.values()),
+                    )
+                    self.callback(self._proofs.pop, role)
+                else:
+                    phase.enter_context(trial.pop_all())
+            return metadata, review
+
+        root, retained_commit, retained_manifest, session, metadata, review, records = (
+            proof
+        )
+        if (git.root, commit) != (root, retained_commit):
+            return None
+        if manifest != retained_manifest:
+            raise OSError("Repeated checkpoint has a different manifest")
+
+        # Reuse the parse and replay only. The current traversal still owns
+        # admission and checks all role edges, declarations and lineage.
+        references = metadata[3]
+        available = _review_role_objects(manifest, references)
+        envelope = (
+            manifest.review_object,
+            manifest.review_size,
+            manifest.review_sha256,
+            None,
+        )
+
+        def declarations():
+            yield envelope
+            for sha in sorted(references):
+                oid, size = available[sha]
+                yield oid, size, sha, None
+
+        compact = (
+            self._resume_cancel is not None
+            and 32 <= len(references) < 128
+            and manifest.review_size + sum(available[sha][1] for sha in references)
+            <= 4 * 1024 * 1024
+        )
+        _verify_review_batches(git, declarations, compact=compact)
+        session._verify_retained_backings(records)
+        verified.update(available[sha][0] for sha in references)
+        return metadata, review if include_review else None
+
+
 class CheckpointReviewMemo:
     """Per-traversal review metadata with at most one retained parsed tip.
 
@@ -701,6 +1041,23 @@ class CheckpointReviewMemo:
         commit=None,
         _owners=None,
     ):
+        if type(_owners) is _ApplyReviewOwners and commit is not None:
+            try:
+                retained = _owners.read(
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                    include_review=include_review,
+                )
+            except OSError as error:
+                from brz2obsidian.application.review_session import _ReviewCancelled
+
+                if isinstance(error, _ReviewCancelled):
+                    _owners._read_cancelled = True
+                raise
+            if retained is not None:
+                return retained
         key = (
             manifest.review_object,
             manifest.boundary == "local" and not manifest.proposed,
@@ -713,7 +1070,7 @@ class CheckpointReviewMemo:
                     if _owners is None
                     else _read_owned_checkpoint_review(
                         git, manifest, verified, commit=commit, owners=_owners
-                    )
+                    )[:2]
                 )
                 self._entries[key] = _checkpoint_review_metadata(
                     manifest, review, references
@@ -754,7 +1111,7 @@ class CheckpointReviewMemo:
                     if _owners is None
                     else _read_owned_checkpoint_review(
                         git, manifest, verified, commit=commit, owners=_owners
-                    )
+                    )[:2]
                 )
             if self._tip_review is None:
                 self._tip_key, self._tip_review = key, review
@@ -781,26 +1138,38 @@ def _checkpoint_review_metadata(manifest, review, references):
 
 def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
     with ExitStack() as owners:
-        review, references = _read_owned_checkpoint_review(
+        review, references, _ = _read_owned_checkpoint_review(
             git, manifest, verified, commit=commit, owners=owners
         )
         return _checkpoint_review_metadata(manifest, review, references)
 
 
-def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
+def _read_owned_checkpoint_review(
+    git, manifest, verified, *, commit, owners, memory_spool=False, resume_cancel=None
+):
     from brz2obsidian.application.review_session import ReviewSession
 
-    if type(owners) is not ExitStack:
+    if type(owners) not in (ExitStack, _ApplyReviewOwners):
         raise OSError("Lexical retained review ownership required")
     record, references, available = _review_reference_graph(git, manifest)
+    if memory_spool:
+        # The raw discriminator only selects the byte transport. Canonical
+        # replay below still qualifies the review and its operation kind.
+        kind = record
+        for key in ("plan", "facts", "format_operation", "kind"):
+            kind = kind.get(key) if type(kind) is dict else None
+        memory_spool = kind == "source_update"
     session = owners.enter_context(
         ReviewSession._retained_review(
             git,
             manifest,
             commit,
             capacity=available_memory(),
+            memory_spool=memory_spool,
+            cancel=resume_cancel,
         )
     )
+    session._batch_current = memory_spool and resume_cancel is not None
     review = session._load_retained(
         record,
         available,
@@ -808,7 +1177,7 @@ def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
         local=manifest.boundary == "local" and not manifest.proposed,
     )
     verified.update(available[sha][0] for sha in references)
-    return review, references
+    return review, references, session
 
 
 def _review_reference_graph(git, manifest):
@@ -833,6 +1202,10 @@ def _review_reference_graph(git, manifest):
         record, references = _review_references(raw)
     except RecursionError as error:
         raise OSError("Saved review envelope exceeds its bounded nesting") from error
+    return record, references, _review_role_objects(manifest, references)
+
+
+def _review_role_objects(manifest, references):
     all_roles = (
         *manifest.source,
         *manifest.vault,
@@ -857,7 +1230,7 @@ def _review_reference_graph(git, manifest):
         )
     }:
         raise OSError("Saved review references are not closed over the owned graph")
-    return record, references, available
+    return available
 
 
 def read_checkpoint_review(git, manifest, verified):
@@ -1151,6 +1524,94 @@ class _MetadataHistory:
     status: str = "intact"
 
 
+def _checkpoint_graph(git, current, controls, owners):
+    graphs = owners._checkpoint_graphs if type(owners) is _ApplyReviewOwners else None
+    key = git.root, current
+    previous = graphs.get(key) if graphs is not None else None
+    if previous is not None:
+        requested, original, decoded = previous
+        fresh = _control_objects(git, requested, controls)
+        if fresh != original:
+            raise OSError("Owned checkpoint control bytes changed")
+        return decoded
+
+    commit_raw = _control_objects(git, {current: "commit"}, controls)[current]
+    headers, separator, _ = commit_raw.partition(b"\n\n")
+    trees = [
+        line[5:].decode("ascii")
+        for line in headers.splitlines()
+        if line.startswith(b"tree ")
+    ]
+    parents = [
+        line[7:].decode("ascii")
+        for line in headers.splitlines()
+        if line.startswith(b"parent ")
+    ]
+    if (
+        not separator
+        or len(trees) != 1
+        or any(
+            len(oid) != 40 or set(oid) - set("0123456789abcdef")
+            for oid in (*trees, *parents)
+        )
+    ):
+        raise OSError("Invalid owned commit edges")
+    raw = git.call("ls-tree", "-r", "-t", "-z", current)
+    entries = {}
+    for row in raw.split(b"\0"):
+        if not row:
+            continue
+        data, path = row.split(b"\t", 1)
+        mode, kind, oid = data.decode("ascii").split()
+        path = path.decode("utf-8")
+        if path in entries or not _safe_relative(path):
+            raise OSError("Unsafe or duplicate owned graph path")
+        if kind not in ("blob", "tree"):
+            raise OSError("Unknown owned graph object kind")
+        entries[path] = mode, kind, oid
+    root_names = {path for path in entries if "/" not in path}
+    required_names = {
+        "association.json",
+        "manifest.json",
+        "source",
+        "vault",
+        "preimage",
+        "proposed",
+    }
+    if root_names not in (
+        required_names,
+        required_names | {"review.json"},
+        required_names | {"review.json", "review-content"},
+    ):
+        raise OSError("Required checkpoint graph roles are missing or unknown")
+    requested = {current: "commit", trees[0]: "tree"}
+    requested.update(
+        {oid: "tree" for _, kind, oid in entries.values() if kind == "tree"}
+    )
+    for path in ("association.json", "manifest.json"):
+        mode, kind, oid = entries[path]
+        if (mode, kind) != ("100644", "blob"):
+            raise OSError("Invalid checkpoint metadata edge")
+        requested[oid] = "blob"
+    objects = _control_objects(git, requested, controls)
+    manifest = CheckpointManifest.model_validate_json(
+        objects[entries["manifest.json"][2]]
+    )
+    actual_association = VaultAssociation.model_validate_json(
+        objects[entries["association.json"][2]]
+    )
+
+    decoded = parents, entries, manifest, actual_association
+    if (
+        graphs is not None
+        and len(graphs) < 4
+        and len(raw) <= 128 * 1024
+        and sum(len(value) for value in objects.values()) <= 256 * 1024
+    ):
+        graphs[key] = requested, objects, decoded
+    return decoded
+
+
 def _read(
     root,
     git,
@@ -1223,70 +1684,8 @@ def _read(
         if current in visited:
             raise OSError("Cyclic owned checkpoint history")
         visited.add(current)
-        commit_raw = _control_objects(git, {current: "commit"}, controls)[current]
-        headers, separator, _ = commit_raw.partition(b"\n\n")
-        trees = [
-            line[5:].decode("ascii")
-            for line in headers.splitlines()
-            if line.startswith(b"tree ")
-        ]
-        parents = [
-            line[7:].decode("ascii")
-            for line in headers.splitlines()
-            if line.startswith(b"parent ")
-        ]
-        if (
-            not separator
-            or len(trees) != 1
-            or any(
-                len(oid) != 40 or set(oid) - set("0123456789abcdef")
-                for oid in (*trees, *parents)
-            )
-        ):
-            raise OSError("Invalid owned commit edges")
-        raw = git.call("ls-tree", "-r", "-t", "-z", current)
-        entries = {}
-        for row in raw.split(b"\0"):
-            if not row:
-                continue
-            data, path = row.split(b"\t", 1)
-            mode, kind, oid = data.decode("ascii").split()
-            path = path.decode("utf-8")
-            if path in entries or not _safe_relative(path):
-                raise OSError("Unsafe or duplicate owned graph path")
-            if kind not in ("blob", "tree"):
-                raise OSError("Unknown owned graph object kind")
-            entries[path] = mode, kind, oid
-        root_names = {path for path in entries if "/" not in path}
-        required_names = {
-            "association.json",
-            "manifest.json",
-            "source",
-            "vault",
-            "preimage",
-            "proposed",
-        }
-        if root_names not in (
-            required_names,
-            required_names | {"review.json"},
-            required_names | {"review.json", "review-content"},
-        ):
-            raise OSError("Required checkpoint graph roles are missing or unknown")
-        requested = {trees[0]: "tree"}
-        requested.update(
-            {oid: "tree" for _, kind, oid in entries.values() if kind == "tree"}
-        )
-        for path in ("association.json", "manifest.json"):
-            mode, kind, oid = entries[path]
-            if (mode, kind) != ("100644", "blob"):
-                raise OSError("Invalid checkpoint metadata edge")
-            requested[oid] = "blob"
-        objects = _control_objects(git, requested, controls)
-        manifest = CheckpointManifest.model_validate_json(
-            objects[entries["manifest.json"][2]]
-        )
-        actual_association = VaultAssociation.model_validate_json(
-            objects[entries["association.json"][2]]
+        parents, entries, manifest, actual_association = _checkpoint_graph(
+            git, current, controls, _owners
         )
         if (
             actual_association != association
@@ -1832,7 +2231,13 @@ class _UpdateRead:
     """Single-use lexical reader; never accepted by capture or apply."""
 
     def __init__(
-        self, vault, *, git_executable=None, _metadata_only=False, _recovery=False
+        self,
+        vault,
+        *,
+        git_executable=None,
+        _metadata_only=False,
+        _recovery=False,
+        _apply_review_owners=None,
     ):
         self._root = Path(vault).absolute()
         self._executable = git_executable
@@ -1848,7 +2253,11 @@ class _UpdateRead:
         self._metadata_only = _metadata_only
         self._recovery = _recovery
         self._recovery_status = None
-        self._owners = ExitStack()
+        self._owners = (
+            _ApplyReviewOwners(local_owner=_apply_review_owners)
+            if _apply_review_owners is not None
+            else ExitStack()
+        )
 
     def __enter__(self):
         from .vault_admission import (
@@ -2096,6 +2505,23 @@ class _UpdateRead:
         )
         self._check()
         return result
+
+    def current_domain_matcher(self):
+        """Retain the entry observation for comparison after this reader closes."""
+        from .vault_admission import _same_current_domain
+
+        if not self._open or self._inspection is None:
+            raise OSError("Completed current input observation required")
+        initial = self._inspection
+
+        def matches(current):
+            return (
+                current._open
+                and current._inspection is not None
+                and _same_current_domain(initial, current._inspection)
+            )
+
+        return matches
 
     def inspect(self, *, subjects, new_operation=None):
         from .vault_admission import _same_current_domain
@@ -3211,47 +3637,59 @@ def capture_checkpoint(
                 for row in inventory
             }
             review_content = []
-            for sha in sorted(set(review_payloads) - role_hashes):
-                payload = review_payloads[sha]
-                spool = directory / ("review-content-" + sha)
-                if _owned_export is None:
-                    spool.write_bytes(payload)
-                    payload_size = len(payload)
-                else:
-                    with spool.open("xb", buffering=0) as output:
-                        _owned_export.copy(sha, output)
-                    payload_size = payload.identity.size
-                expected_oid = _spool_oid(directory, spool, payload_size, sha)
-                declaration = (expected_oid, payload_size, sha, None)
-                written_declarations += (declaration,)
+            review_hashes = sorted(set(review_payloads) - role_hashes)
+            group_size = 1
+            if (
+                type(_owners) is _ApplyReviewOwners
+                and _owned_export is not None
+                and sum(review_payloads[sha].identity.size for sha in review_hashes)
+                <= 4 * 1024 * 1024
+            ):
+                group_size = 32
+            for hashes in batched(review_hashes, group_size):
+                spools, declarations = [], []
+                for sha in hashes:
+                    payload = review_payloads[sha]
+                    spool = directory / ("review-content-" + sha)
+                    if _owned_export is None:
+                        spool.write_bytes(payload)
+                        payload_size = len(payload)
+                    else:
+                        with spool.open("xb", buffering=0) as output:
+                            _owned_export.copy(sha, output)
+                        payload_size = payload.identity.size
+                    oid = _spool_oid(directory, spool, payload_size, sha)
+                    spools.append(spool)
+                    declarations.append((oid, payload_size, sha, None))
+                written_declarations += tuple(declarations)
                 object_storage = "possible"
-                actual_oid = (
-                    git.call(
-                        "hash-object",
-                        "-w",
-                        "--no-filters",
-                        "--stdin-paths",
-                        input=_quoted_paths((spool,)),
-                    )
-                    .decode()
-                    .strip()
-                )
-                if actual_oid != expected_oid:
-                    raise OSError("Saved review byte object write changed")
-                verify_blobs(
-                    [*git.prefix, "cat-file", "--batch"],
-                    env=git.env,
-                    objects=(declaration,),
-                )
+                try:
+                    _write_review_spools(git, spools, declarations)
+                except _GitTimeout:
+                    if len(spools) == 1:
+                        raise
+                    # Object writes are content-addressed. The ref has not
+                    # moved, so retry with the original per-file deadlines.
+                    for spool, declaration in zip(spools, declarations, strict=True):
+                        _owned_export.check()
+                        _owned_export.session._ledger.check()
+                        _write_review_spools(git, (spool,), (declaration,))
+                if group_size > 1:
+                    _owned_export.check()
+                    # After the last successful group, Apply handles
+                    # cancellation once the prepared checkpoint is retained.
+                    if hashes[-1] != review_hashes[-1]:
+                        _owned_export.session._ledger.check()
                 objects, object_storage = True, "verified"
-                review_content.append(
+                review_content.extend(
                     CheckpointFile(
                         path=sha,
                         mode="100644",
-                        size=payload_size,
+                        size=size,
                         sha256=sha,
-                        object_id=actual_oid,
+                        object_id=oid,
                     )
+                    for oid, size, sha, _ in declarations
                 )
             review_oid = None
             if review_raw is not None:
@@ -3345,28 +3783,40 @@ def capture_checkpoint(
                 metadata.append((path, "100644", oid))
             if review_oid is not None:
                 metadata.append(("review.json", "100644", review_oid))
-            roots = []
-            for role, inventory in (
+            inventories = (
                 ("source", source_rows),
                 ("vault", vault_rows),
                 ("preimage", preimage_rows),
                 ("proposed", proposed_rows),
-            ):
-                control_write_pending = True
-                object_storage = "possible"
-                role_tree = git.tree([(f.path, f.mode, f.object_id) for f in inventory])
-                _control_objects(git, {role_tree: "tree"}, {})
-                objects, object_storage, control_write_pending = True, "verified", False
-                roots.append((role, "040000", role_tree))
+            )
             if review_content:
+                inventories += (("review-content", review_content),)
+            batch_trees = (
+                type(_owners) is _ApplyReviewOwners
+                and type(_owners._local_owner) is _ApplyReviewOwners
+                and sum(len(rows) for _, rows in inventories) <= 512
+                and sum(len(f.path) for _, rows in inventories for f in rows) <= 65536
+            )
+            if batch_trees:
                 control_write_pending = True
                 object_storage = "possible"
-                review_tree = git.tree(
-                    [(f.path, f.mode, f.object_id) for f in review_content]
-                )
-                _control_objects(git, {review_tree: "tree"}, {})
+                roots = git.checkpoint_trees(inventories)
                 objects, object_storage, control_write_pending = True, "verified", False
-                roots.append(("review-content", "040000", review_tree))
+            else:
+                roots = []
+                for role, inventory in inventories:
+                    control_write_pending = True
+                    object_storage = "possible"
+                    role_tree = git.tree(
+                        [(f.path, f.mode, f.object_id) for f in inventory]
+                    )
+                    _control_objects(git, {role_tree: "tree"}, {})
+                    objects, object_storage, control_write_pending = (
+                        True,
+                        "verified",
+                        False,
+                    )
+                    roots.append((role, "040000", role_tree))
             control_write_pending = True
             object_storage = "possible"
             tree = git.tree([*metadata, *roots])
@@ -3405,6 +3855,8 @@ def capture_checkpoint(
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, metadata_dir / "locator.json")
+            if type(_owners) is _ApplyReviewOwners:
+                _owners._retain_prepared_export(git, commit, manifest, _owned_export)
         return result(
             "captured",
             "retained",

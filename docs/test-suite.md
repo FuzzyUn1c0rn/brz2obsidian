@@ -124,6 +124,16 @@ affect elapsed time. Historical timings and failed measurements do not predict
 the current candidate's wall time or coverage; its fresh complete bundle must
 establish both.
 
+The saved-review desktop worker case exercises the shared Resume and Apply
+backend, including prepared and result checkpoint tree retries and the terminal
+receipt. A separate reordered-response control verifies that result capture
+retains the recoverable intent when Git returns valid tree IDs in the wrong
+order. The cold Resume cases cover a stop during prepared checkpoint verification
+and an independent Git read failure followed by a stop. Both preserve the
+checkpoint and publish no files. The Git process controls cover teardown,
+diagnostics and rejection of incorrect blob bytes when the terminator stalls.
+The CLI boundary checks cover the supplied saved-review identity.
+
 The lifecycle-contract module uses one file selector because all 24 of its test
 functions, including every parameter case, were already selected. This preserves
 the executed cases while keeping both Windows command lines below the process

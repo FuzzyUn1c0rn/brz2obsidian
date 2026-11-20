@@ -926,7 +926,7 @@ class UpdateContext:
             return self._cancelled_inspection(result)
         return self._project(result)
 
-    def resume(self, vault, *, selection_id, cancel=None):
+    def resume(self, vault, *, selection_id, cancel=None, _check_saved=None):
         if (
             self._preparation is not None
             or self._history.preparation is not None
@@ -940,7 +940,9 @@ class UpdateContext:
         self._revision += 1
         if cancel is not None and cancel():
             return self._cancelled_inspection()
-        result = self._restore_saved(vault, resume=True, cancel=cancel)
+        result = self._restore_saved(
+            vault, resume=True, cancel=cancel, check_saved=_check_saved
+        )
         self._kind = result.kind
         if (
             cancel is not None
@@ -952,14 +954,16 @@ class UpdateContext:
             return self._cancelled_inspection(result)
         return self._retain(result, selection_id=selection_id)
 
-    def _restore_saved(self, vault, *, resume=False, cancel=None):
+    def _restore_saved(self, vault, *, resume=False, cancel=None, check_saved=None):
         from .operations import Operations
 
         self._retire_owner()
         if type(self._operations) is Operations:
             owner = self._operations._new_owned_preparation()
             try:
-                result = owner.restore(vault, resume=resume, cancel=cancel)
+                result = owner.restore(
+                    vault, resume=resume, cancel=cancel, check_saved=check_saved
+                )
                 if (
                     result is not None
                     and result.preparation is not None
@@ -971,6 +975,16 @@ class UpdateContext:
             finally:
                 if self._owner is not owner:
                     owner.close()
+        if check_saved is not None:
+            saved = self._operations.load_update(vault)
+            if saved.status != "unresolved" or saved.code != "revalidation_required":
+                return saved
+            stopped = check_saved(saved)
+            if stopped is not None:
+                return stopped
+            # The previous Load/Resume route tried owned Resume again even
+            # when Load used the legacy reader.
+            return self._restore_saved(vault, resume=True, cancel=cancel)
         return (
             self._operations.resume_update(vault)
             if resume

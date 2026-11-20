@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from threading import TIMEOUT_MAX, Event
 from types import MappingProxyType
 from uuid import uuid4
+from weakref import ref
 
 from pydantic import BaseModel
 
@@ -51,7 +52,7 @@ from brz2obsidian.core.refresh import RefreshWork
 from brz2obsidian.core.resolution import ActionWork, PlanWork
 from brz2obsidian.core.resume import _load_result, _resume_result
 from brz2obsidian.core.selected_effects import SelectedEffectsWork, _refused
-from brz2obsidian.publication.content_session import ContentSession
+from brz2obsidian.publication.content_session import ContentSession, _MemoryBacking
 from brz2obsidian.publication.legacy_content import ContentComparison, LegacyContentSlot
 from brz2obsidian.review_codec import LegacyDecoder
 
@@ -135,6 +136,10 @@ class ReviewBudget:
             raise ValueError("Review cancellation requires an Event")  # noqa: TRY004
 
 
+class _ReviewCancelled(OSError):
+    """The review operation observed its cancellation event."""
+
+
 class _Ledger:
     def __init__(self, budget):
         self.budget = budget
@@ -150,8 +155,10 @@ class _Ledger:
         self.retain_metadata(_FIXED_M)
 
     def check(self):
-        if self.budget.cancel.is_set() or time.monotonic() >= self.deadline:
-            raise OSError("Review cancelled or time budget exhausted")
+        cancelled = self.budget.cancel.is_set()
+        if cancelled or time.monotonic() >= self.deadline:
+            error = _ReviewCancelled if cancelled else OSError
+            raise error("Review cancelled or time budget exhausted")
 
     def remaining(self, name):
         return getattr(self.budget, name + "_limit") - self.used[name]
@@ -297,6 +304,8 @@ class _OwnedReviewExport:
     """One owner-minted canonical export; declarations cannot mint this grant."""
 
     effects = None
+    _apply_review_owners = None
+    _sealed_closure_ref = None
 
     def check(self, plan=None):
         if self.session._publication_export is not self or self.session._closed:
@@ -331,6 +340,14 @@ class _OwnedReviewExport:
         self.check()
         if self.session._selected is not self.effects:
             raise OSError("Current canonical selected effects required")
+        closure = self._sealed_closure_ref() if self._sealed_closure_ref else None
+        if (
+            closure is not None
+            and closure is self.session._closure
+            and any(row is effect for row in self.effects.files)
+        ):
+            self._stage_sealed(effect, output, closure)
+            return
         staged = self.session.stage_effect(effect)
         with (
             self.session._operation(),
@@ -346,6 +363,36 @@ class _OwnedReviewExport:
             for block in chunks:
                 if output.write(block) != len(block):
                     raise OSError("Incomplete selected stage copy")
+
+    def _stage_sealed(self, effect, output, closure):
+        session = self.session
+        with session._operation():
+            # This exact closure was co-admitted before export. Its backing
+            # bytes are immutable; registration and scope are still live.
+            for record in closure.view.records.values():
+                session._content._check_prepared(record, session._scope)
+            content = effect.content
+            binding = session._binding(
+                content.occurrence,
+                content.identity,
+                content.reference,
+                published=True,
+                inline=content.data if type(content) is InlineExactContent else None,
+            )
+            if type(binding.registration.backing) is not _MemoryBacking:
+                raise OSError("Selected effect is outside the sealed export closure")
+            with closing(
+                session._content._read_owned(
+                    binding.registration.backing,
+                    binding.registration.reference,
+                    session._ledger,
+                    session._scope,
+                )
+            ) as chunks:
+                for block in chunks:
+                    if output.write(block) != len(block):
+                        raise OSError("Incomplete selected stage copy")
+            session._check()
 
 
 class ReviewSession:
@@ -365,6 +412,9 @@ class ReviewSession:
         self._physical = {}
         self._record = None
         self._initial_review_entry = None
+        self._apply_proved_plan = None
+        self._retained_resume_proof = None
+        self._batch_current = False
         self._retain_initial_review = False
         self._closed = False
         self._selected = None
@@ -475,21 +525,25 @@ class ReviewSession:
             raise OSError("Owned canonical review changed")
         return _inspect_canonical_choices(canonical)
 
-    def _freeze_export(self, plan):
+    def _freeze_export(self, plan, *, select_effects=False):
         import json
 
         from brz2obsidian.publication.vault_history import _stored_model_fields
 
+        admitted_for_apply = (
+            select_effects and plan is not None and self._apply_proved_plan is plan
+        )
         with self._operation():
             plan = self._admit_values(plan)
             self._coadmit()
-            canonical = self._replay(plan)
+            canonical = plan if admitted_for_apply else self._replay(plan)
             if canonical is None:
                 raise OSError("Only canonical owned review can be exported")
             saved = SavedReview(
                 schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
             )
             values = {}
+            plain_fields = {} if select_effects else None
 
             def project(value):
                 if isinstance(value, (InlineExactContent, OpaqueContent)):
@@ -507,7 +561,13 @@ class ReviewSession:
                         "reference": project(value.reference),
                     }
                 if type(value) is bytes:
-                    item = self._admit_values(InlineExactContent(data=value))
+                    self._ledger.check()
+                    item = plain_fields.get(value) if plain_fields is not None else None
+                    if item is None:
+                        item = self._admit_values(InlineExactContent(data=value))
+                        if plain_fields is not None and len(plain_fields) < 1024:
+                            self._ledger.retain_metadata(128)
+                            plain_fields[value] = item
                     values.setdefault(item.identity.sha256, item)
                     return {"__brz2obsidian_review_blob__": item.identity.sha256}
                 if isinstance(value, BaseModel):
@@ -538,6 +598,21 @@ class ReviewSession:
                 raw,
                 MappingProxyType(values),
             )
+            if select_effects:
+                # Co-admission after projection has just checked the complete
+                # live closure used to select from this canonical review.
+                try:
+                    effects = self._drive(SelectedEffectsWork(saved.plan))
+                except (ValueError, OSError, RecursionError) as error:
+                    raise OSError("Whole current owned review required") from error
+                if effects.status != "selected":
+                    raise OSError("Whole current owned review required")
+                export.effects = self._selected = effects
+                if admitted_for_apply and all(
+                    type(record.backing) is _MemoryBacking
+                    for record in self._closure.view.records.values()
+                ):
+                    export._sealed_closure_ref = ref(self._closure)
             self._publication_export = export
         return export
 
@@ -549,7 +624,9 @@ class ReviewSession:
         return _load_result("loaded", saved, effects).loaded
 
     @classmethod
-    def _retained_review(cls, git, manifest, commit, *, capacity):
+    def _retained_review(
+        cls, git, manifest, commit, *, capacity, memory_spool=False, cancel=None
+    ):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
             # M counts cumulative model work, not measured live heap. Give it
@@ -564,7 +641,7 @@ class ReviewSession:
             request_limit=maximum,
             step_limit=maximum,
             timeout=TIMEOUT_MAX,
-            cancel=Event(),
+            cancel=Event() if cancel is None else cancel,
         )
         result = cls.__new__(cls)
         result._ledger = _Ledger(budget)
@@ -575,6 +652,7 @@ class ReviewSession:
             commit,
             capacity=capacity,
             envelope_size=manifest.review_size,
+            memory_spool=memory_spool,
         )
         result._initialize_state()
         result._retain_initial_review = True
@@ -590,6 +668,8 @@ class ReviewSession:
 
     def _invalidate(self):
         self._initial_review_entry = None
+        self._apply_proved_plan = None
+        self._retained_resume_proof = None
         self._operation_key = self._outstanding = self._selected = None
         self._content._clear_retained_semantic()
 
@@ -691,10 +771,19 @@ class ReviewSession:
         if (identity.sha256, identity.size) != (reference.sha256, reference.size):
             raise OSError("Registered content identity changed")
         if inline is not None:
+            backing = binding.registration.backing
+            if type(backing) is _MemoryBacking:
+                self._ledger.raw_pass(reference.size)
+                if inline != backing.data:
+                    raise OSError(
+                        "Inline bytes differ from the actual owned occurrence"
+                    )
+                self._scope._check_live(self._content)
+                return binding
             position, equal = 0, True
             with closing(
                 self._content._read_owned(
-                    binding.registration.backing,
+                    backing,
                     reference,
                     self._ledger,
                     self._scope,
@@ -886,16 +975,30 @@ class ReviewSession:
                 transaction.abort()
                 raise
         if isinstance(value, BaseModel):
-            updates = {
-                name: self._admit_values(getattr(value, name), path + (name,))
-                for name in type(value).model_fields
-            }
-            return value.model_copy(update=updates)
+            if self._batch_current:
+                updates = {}
+                for name in type(value).model_fields:
+                    child = getattr(value, name)
+                    admitted = self._admit_values(child, path + (name,))
+                    if admitted is not child:
+                        updates[name] = admitted
+                return value.model_copy(update=updates) if updates else value
+            return value.model_copy(
+                update={
+                    name: self._admit_values(getattr(value, name), path + (name,))
+                    for name in type(value).model_fields
+                }
+            )
         if type(value) is tuple:
-            return tuple(
+            admitted = tuple(
                 self._admit_values(child, path + (index,))
                 for index, child in enumerate(value)
             )
+            if self._batch_current and all(
+                left is right for left, right in zip(value, admitted, strict=True)
+            ):
+                return value
+            return admitted
         return value
 
     def _build_closure(self, bindings, physical, epoch):
@@ -919,6 +1022,7 @@ class ReviewSession:
             registry[record.reference.content_id] = record
         records = tuple(registry.values())
         view = self._content._registration_view(records, self._ledger, self._scope)
+        # Resolve every record against live backing before publishing this view.
         comparison = ContentComparison(
             self._content,
             tuple(record.reference for record in records),
@@ -1272,6 +1376,7 @@ class ReviewSession:
         from brz2obsidian.review_codec import _RetainedDecoder
 
         with self._operation():
+            self._retained_resume_proof = None
             self._initial_review_entry = None
             self._record = uuid4().hex
             registrations = self._content._prepare_retained(
@@ -1323,7 +1428,39 @@ class ReviewSession:
                         "plan": canonical,
                     },
                 )
-            return _load_result("loaded", saved, effects).loaded
+            loaded = _load_result("loaded", saved, effects).loaded
+            if self._batch_current:
+                self._retained_resume_proof = (loaded, canonical)
+            return loaded
+
+    def _verify_retained_backings(self, records=None):
+        """Recheck the registrations that support this retained review."""
+        self._check()
+        if records is None:
+            records = tuple(self._closure.view.records.values())
+        if self._scope is not None:
+            self._check_backings(records, self._ledger, self._scope)
+            return
+        # Each inspection has its own verification budget. The proof's ledger
+        # stays live and retains its original registrations and charges.
+        ledger = _Ledger(self._ledger.budget)
+        try:
+            with self._content._operation(ledger) as scope:
+                self._check_backings(records, ledger, scope)
+        finally:
+            ledger.retire()
+        self._check()
+
+    def _check_backings(self, records, ledger, scope):
+        for record in records:
+            self._content._check_prepared(record, scope)
+            with closing(
+                self._content._read_owned(
+                    record.backing, record.reference, ledger, scope
+                )
+            ) as chunks:
+                for _ in chunks:
+                    pass
 
     def load_review(self, raw):
         with self._operation():
@@ -1361,6 +1498,16 @@ class ReviewSession:
             raise OSError("Complete supported physical admission required")
         self._ledger.retain_metadata(256 + 64 * len(admission.inventory))
         inventory = {row.path: row for row in admission.inventory}
+        pending = {} if self._batch_current else None
+
+        def register(path, reference=None):
+            if reference is None:
+                reference = self._content._acquire_current(
+                    path, self._ledger, self._scope
+                )
+            self._physical[path] = self._content._prepare_registered(
+                reference, self._ledger, self._scope
+            )
 
         def current(path, existence, content):
             self._ledger.take("step", 1)
@@ -1383,16 +1530,12 @@ class ReviewSession:
                 content.identity.sha256,
             ):
                 raise OSError("Current claim differs from freshly admitted bytes")
-            if path not in self._physical:
+            if path not in self._physical and (pending is None or path not in pending):
                 self._ledger.retain_metadata(1024 + 4 * len(path))
-                reference = self._content._acquire_current(
-                    path,
-                    self._ledger,
-                    self._scope,
-                )
-                self._physical[path] = self._content._prepare_registered(
-                    reference, self._ledger, self._scope
-                )
+                if pending is None:
+                    register(path)
+                else:
+                    pending[path] = row
 
         for subject in facts.subjects:
             value = subject.current
@@ -1417,6 +1560,12 @@ class ReviewSession:
                 for target in targets:
                     if target.canonical_path is not None:
                         current(target.canonical_path, fact.existence, fact.content)
+        if pending:
+            references = self._content._acquire_small_current(
+                tuple(pending.values()), self._ledger, self._scope
+            )
+            for path in pending:
+                register(path, references[path] if references is not None else None)
 
     def resume_review(self, loaded, facts, *, preflight, admission):
         """Resume after an immediate same-reader public scoped ``inspect``.
@@ -1434,6 +1583,7 @@ class ReviewSession:
             self._content._discard_fresh_scope()
 
     def _resume_review(self, loaded, facts, *, preflight, admission):
+        proof, self._retained_resume_proof = self._retained_resume_proof, None
         with self._operation():
             self._check()
             self._selected = None
@@ -1450,9 +1600,13 @@ class ReviewSession:
                     purpose=purpose,
                     ledger=self._ledger,
                 )
-                loaded = self._ledger.construct(LoadedReview, loaded)
-                self._ledger.admit_metadata(loaded)
-                loaded = self._admit_values(loaded, ("loaded",))
+                canonical = None
+                if proof is not None and loaded is proof[0]:
+                    canonical = self._admit_values(proof[1])
+                else:
+                    loaded = self._ledger.construct(LoadedReview, loaded)
+                    self._ledger.admit_metadata(loaded)
+                    loaded = self._admit_values(loaded, ("loaded",))
                 self._initial_review_entry = None
                 self._record = uuid4().hex
                 facts = self._ledger.construct(ReconciliationInput, facts)
@@ -1462,7 +1616,8 @@ class ReviewSession:
                 self._physical.clear()
                 self._admit_current(physical, facts)
                 self._coadmit()
-                canonical = self._replay(loaded.saved.plan)
+                if canonical is None:
+                    canonical = self._replay(loaded.saved.plan)
                 if canonical is None:
                     return _resume_result("refused", "invalid_review", loaded)
                 effects = self._drive(SelectedEffectsWork(canonical))
@@ -1487,13 +1642,14 @@ class ReviewSession:
                 return _resume_result("refused", "invalid_review", loaded)
 
     def select_review_effects(self, plan):
+        admitted_for_apply = plan is not None and self._apply_proved_plan is plan
         with self._operation():
             self._check()
             self._selected = None
             try:
                 plan = self._admit_values(plan)
                 self._coadmit()
-                canonical = self._replay(plan)
+                canonical = plan if admitted_for_apply else self._replay(plan)
                 if canonical is None:
                     return _refused("invalid_plan")
                 effects = self._drive(SelectedEffectsWork(canonical))
@@ -1533,6 +1689,10 @@ class ReviewSession:
     def close(self):
         self._closed = True
         self._invalidate()
+        self._publication_export = None
+        self._closure = _ClosureState(
+            MappingProxyType({}), MappingProxyType({}), None, None, self._epoch
+        )
         self._staged_bindings = None
         self._physical.clear()
         self._content._discard_fresh_scope()

@@ -25,6 +25,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultUpdateDetailPage,
 )
 from brz2obsidian.content_values import content_sha, content_size
+from brz2obsidian.contracts import ReviewPlan
 from brz2obsidian.core import review_owned_targets, select_review_effects
 from brz2obsidian.core.reversals import (
     _owned_documents,
@@ -35,6 +36,7 @@ from brz2obsidian.core.reversals import (
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import _safe_relative
 from brz2obsidian.publication.vault_history import (
+    _ApplyReviewOwners,
     _control_objects,
     _Git,
     _inspect_history,
@@ -2503,7 +2505,36 @@ def _apply_reviewed_update(
             prepared_commit = prepared.commit
             if reused_undo_prepared or reused_format_prepared:
                 operation_generation = prepared.locator.generation
-            if cancel_requested():
+            cancelled = cancel_requested()
+            if not cancelled:
+                if type(_owners) is _ApplyReviewOwners:
+                    _owners._read_cancelled = False
+                tip = (
+                    inspect_history(
+                        root, subjects=subjects, active_operation=operation_id
+                    )
+                    if _owned_export is None
+                    else _inspect_history(
+                        root,
+                        subjects=subjects,
+                        active_operation=operation_id,
+                        _metadata_only=True,
+                        _owners=_owners,
+                    )
+                )
+                # An interrupted review read records its cause before admission
+                # translates the error to an unavailable tip.
+                cancelled = (
+                    type(_owners) is _ApplyReviewOwners and _owners._read_cancelled
+                )
+                if not cancelled and (
+                    tip.status != "intact"
+                    or tip.checkpoint is None
+                    or tip.checkpoint.manifest.boundary != "prepared"
+                ):
+                    raise OSError("Prepared checkpoint could not be rediscovered")
+                cancelled = cancelled or cancel_requested()
+            if cancelled:
                 return outcome(
                     "cancelled",
                     "cancelled_before_intent",
@@ -2518,23 +2549,6 @@ def _apply_reviewed_update(
                     recovery=False,
                     message="Cancellation retained preparation without publishing files.",
                 )
-            tip = (
-                inspect_history(root, subjects=subjects, active_operation=operation_id)
-                if _owned_export is None
-                else _inspect_history(
-                    root,
-                    subjects=subjects,
-                    active_operation=operation_id,
-                    _metadata_only=True,
-                    _owners=_owners,
-                )
-            )
-            if (
-                tip.status != "intact"
-                or tip.checkpoint is None
-                or tip.checkpoint.manifest.boundary != "prepared"
-            ):
-                raise OSError("Prepared checkpoint could not be rediscovered")
             manifest = tip.checkpoint.manifest
             operation_generation = manifest.generation
             intent = VaultOperationIntent(
@@ -2971,7 +2985,26 @@ def apply_reviewed_update(
 ):
     """Retain intent before exact selected publication and verify terminal history."""
     try:
-        with ExitStack() as owners:
+        reusable_local_review = (
+            _owned_export is not None
+            and type(review) is ReviewPlan
+            and review.facts.format_operation.kind == "source_update"
+        )
+        borrowed = (
+            getattr(_owned_export, "_apply_review_owners", None)
+            if reusable_local_review
+            else None
+        )
+        owners = (
+            _ApplyReviewOwners(
+                local_owner=borrowed,
+                retain_prepared=True,
+                memory_spool=type(borrowed) is _ApplyReviewOwners,
+            )
+            if reusable_local_review
+            else ExitStack()
+        )
+        with owners:
             return _apply_reviewed_update(
                 vault,
                 source,

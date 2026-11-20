@@ -1,6 +1,7 @@
 """Bounded, noninteractive read-process execution for local Git observations."""
 
 import ctypes
+import errno
 import os
 import signal
 import subprocess
@@ -166,6 +167,14 @@ def _cancel(thread):
                 kernel.CloseHandle(handle)
 
 
+class _GitTimeout(OSError):
+    """The owned Git process reached its observation deadline."""
+
+    def __init__(self, message, *, stdout=b""):
+        super().__init__(message)
+        self.stdout = stdout
+
+
 def read_git(argv, *, env, input=None, timeout=30):
     """Bound aggregate input/output and terminate owned work on every exit."""
     if input is not None and len(input) > OUTPUT_BUDGET:
@@ -174,6 +183,7 @@ def read_git(argv, *, env, input=None, timeout=30):
     process = None
     threads = []
     overflow = Event()
+    timed_out = False
     lock = Lock()
     used = len(input) if input is not None else 0
     failures = []
@@ -201,15 +211,32 @@ def read_git(argv, *, env, input=None, timeout=30):
         finally:
             stream.close()
 
+    def input_failure(error):
+        # Killing the timed-out child can interrupt the pipe write or close.
+        if (
+            timed_out
+            and isinstance(error, OSError)
+            and (
+                error.errno == errno.EPIPE
+                or os.name == "nt"
+                and error.errno == errno.EINVAL
+            )
+        ):
+            return
+        failure(error)
+
     def writer():
         try:
             if process.stdin.write(input) != len(input):
                 raise OSError("Incomplete Git observation input")
             process.stdin.flush()
-        except (BrokenPipeError, OSError, ValueError) as error:
-            failure(error)
+        except (OSError, ValueError) as error:
+            input_failure(error)
         finally:
-            process.stdin.close()
+            try:
+                process.stdin.close()
+            except (OSError, ValueError) as error:
+                input_failure(error)
 
     try:
         factory = _SuspendedPopen if job else subprocess.Popen
@@ -234,7 +261,7 @@ def read_git(argv, *, env, input=None, timeout=30):
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            raise OSError("Git observation exceeded its safe time budget") from None
+            timed_out = True
     finally:
         if job:
             job.close()
@@ -257,6 +284,12 @@ def read_git(argv, *, env, input=None, timeout=30):
                     stream.close()
     if overflow.is_set() or failures or any(thread.is_alive() for thread in threads):
         raise OSError("Git observation exceeds its safe resource budget")
+    if timed_out:
+        if outputs[1]:
+            raise OSError("Git reported an error before its observation timed out")
+        raise _GitTimeout(
+            "Git observation exceeded its safe time budget", stdout=bytes(outputs[0])
+        )
     return subprocess.CompletedProcess(
         argv, process.returncode, bytes(outputs[0]), bytes(outputs[1])
     )
