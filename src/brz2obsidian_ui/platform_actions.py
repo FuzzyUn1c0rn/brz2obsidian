@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+GMEM_MOVEABLE = 0x0002
+CF_UNICODETEXT = 13
+
 
 @dataclass(frozen=True)
 class ActionOutcome:
@@ -172,7 +175,7 @@ def copy_windows_text(text: str, owner_window: int) -> None:
     kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
     kernel32.GlobalFree.restype = wintypes.HGLOBAL
     data = (text + "\0").encode("utf-16-le")
-    handle = kernel32.GlobalAlloc(0x0002, len(data))
+    handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
     if not handle:
         raise ctypes.WinError(ctypes.get_last_error())
     opened = False
@@ -188,7 +191,9 @@ def copy_windows_text(text: str, owner_window: int) -> None:
         if not user32.OpenClipboard(owner_window):
             raise ctypes.WinError(ctypes.get_last_error())
         opened = True
-        if not user32.EmptyClipboard() or not user32.SetClipboardData(13, handle):
+        if not user32.EmptyClipboard() or not user32.SetClipboardData(
+            CF_UNICODETEXT, handle
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
         transferred = True
     finally:

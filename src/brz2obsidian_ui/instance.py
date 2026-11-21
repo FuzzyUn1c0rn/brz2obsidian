@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
 
+SW_RESTORE = 9
+FLASHW_ALL = 0x00000003
+
 
 @dataclass(frozen=True)
 class InstanceResult:
@@ -66,7 +69,7 @@ class _WindowsActivation:
         self.api.SetForegroundWindow.restype = wintypes.BOOL
 
     def restore(self, hwnd):
-        self.api.ShowWindowAsync(hwnd, 9)
+        self.api.ShowWindowAsync(hwnd, SW_RESTORE)
 
     def foreground(self, hwnd):
         return bool(self.api.SetForegroundWindow(hwnd))
@@ -83,7 +86,7 @@ class _WindowsActivation:
 
         self.api.FlashWindowEx.argtypes = [ctypes.POINTER(FlashInfo)]
         self.api.FlashWindowEx.restype = wintypes.BOOL
-        details = FlashInfo(ctypes.sizeof(FlashInfo), hwnd, 3, 3, 0)
+        details = FlashInfo(ctypes.sizeof(FlashInfo), hwnd, FLASHW_ALL, 3, 0)
         self.api.FlashWindowEx(ctypes.byref(details))
 
 

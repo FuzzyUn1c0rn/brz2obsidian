@@ -7,6 +7,29 @@ import stat
 from contextlib import closing, contextmanager
 from pathlib import Path
 
+FILE_LIST_DIRECTORY = 0x0001
+FILE_ADD_FILE = 0x0002
+FILE_ADD_SUBDIRECTORY = 0x0004
+FILE_DELETE_CHILD = 0x0040
+FILE_READ_ATTRIBUTES = 0x0080
+READ_CONTROL = 0x00020000
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+
+FILE_SHARE_READ = 0x00000001
+FILE_SHARE_WRITE = 0x00000002
+FILE_SHARE_DELETE = 0x00000004
+OPEN_EXISTING = 3
+FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+FILE_NAME_NORMALIZED = 0x0
+VOLUME_NAME_DOS = 0x0
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+SE_FILE_OBJECT = 1
+OWNER_SECURITY_INFORMATION = 0x00000001
+DUPLICATE_SAME_ACCESS = 0x00000002
+
 
 def _windows_bindings():
     """Initialize shared API prototypes before concurrent native observations."""
@@ -107,7 +130,7 @@ def available_memory():
 
 def _physical(info):
     return not stat.S_ISLNK(info.st_mode) and not (
-        getattr(info, "st_file_attributes", 0) & 0x400
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
     )
 
 
@@ -115,24 +138,32 @@ def _physical(info):
 def _handle(path, *, directory=False, write=False):
     """Open the named object itself, with maximal compatible sharing."""
     kernel, security = _WINDOWS_BINDINGS
-    rights = 0x80 | 0x20000 | (1 if directory else 0)
-    rights |= (0x2 | 0x4 | 0x40) if directory and write else 0
+    rights = (
+        FILE_READ_ATTRIBUTES | READ_CONTROL | (FILE_LIST_DIRECTORY if directory else 0)
+    )
+    rights |= (
+        (FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD)
+        if directory and write
+        else 0
+    )
     if not directory:
-        rights |= 0x80000000 | (0x40000000 if write else 0)
+        rights |= GENERIC_READ | (GENERIC_WRITE if write else 0)
     handle = kernel.CreateFileW(
         str(path),
         rights,
-        7,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         None,
-        3,
-        0x00200000 | (0x02000000 if directory else 0),
+        OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | (FILE_FLAG_BACKUP_SEMANTICS if directory else 0),
         None,
     )
-    if handle == ctypes.c_void_p(-1).value:
+    if handle == INVALID_HANDLE_VALUE:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
         output = ctypes.create_unicode_buffer(32768)
-        count = kernel.GetFinalPathNameByHandleW(handle, output, len(output), 0)
+        count = kernel.GetFinalPathNameByHandleW(
+            handle, output, len(output), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS
+        )
         if not count or count >= len(output):
             raise OSError("Resolved handle path unavailable")
         actual = output.value
@@ -151,8 +182,8 @@ def _handle(path, *, directory=False, write=False):
         owner = ctypes.c_void_p()
         code = security.GetSecurityInfo(
             handle,
-            1,
-            1,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
             ctypes.byref(owner),
             None,
             None,
@@ -308,7 +339,13 @@ def _observed_chunks(
             duplicate = wintypes.HANDLE()
             process = kernel.GetCurrentProcess()
             if not kernel.DuplicateHandle(
-                process, handle, process, ctypes.byref(duplicate), 0, False, 2
+                process,
+                handle,
+                process,
+                ctypes.byref(duplicate),
+                0,
+                False,
+                DUPLICATE_SAME_ACCESS,
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
             fd = msvcrt.open_osfhandle(duplicate.value, os.O_RDONLY | os.O_BINARY)

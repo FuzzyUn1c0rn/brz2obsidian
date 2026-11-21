@@ -7,7 +7,30 @@ import stat
 from ctypes import wintypes
 from pathlib import Path
 
-from brz2obsidian.publication.vault_native import verify_directory
+from brz2obsidian.publication.vault_native import (
+    INVALID_HANDLE_VALUE,
+    OWNER_SECURITY_INFORMATION,
+    SE_FILE_OBJECT,
+    verify_directory,
+)
+
+DRIVE_FIXED = 3
+FIND_STREAM_INFO_STANDARD = 0
+ERROR_HANDLE_EOF = 38
+
+GROUP_SECURITY_INFORMATION = 0x00000002
+DACL_SECURITY_INFORMATION = 0x00000004
+PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000
+SE_DACL_PROTECTED = 0x1000
+SE_DACL_AUTO_INHERITED = 0x0400
+SDDL_REVISION_1 = 1
+_RETAINED_SECURITY_INFORMATION = (
+    OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+)
+
+MOVEFILE_REPLACE_EXISTING = 0x00000001
+MOVEFILE_WRITE_THROUGH = 0x00000008
 
 
 def supported_durable_volume(path):
@@ -24,7 +47,7 @@ def supported_durable_volume(path):
     drive_type = kernel.GetDriveTypeW
     drive_type.argtypes = [wintypes.LPCWSTR]
     drive_type.restype = wintypes.UINT
-    if drive_type(volume_path.value) != 3:
+    if drive_type(volume_path.value) != DRIVE_FIXED:
         return False
     filesystem = ctypes.create_unicode_buffer(256)
     get_volume = kernel.GetVolumeInformationW
@@ -72,13 +95,13 @@ def _ordinary_streams(path):
     following.restype = wintypes.BOOL
     kernel.FindClose.argtypes = [wintypes.HANDLE]
     data = StreamData()
-    handle = first(str(path), 0, ctypes.byref(data), 0)
-    if handle == ctypes.c_void_p(-1).value:
+    handle = first(str(path), FIND_STREAM_INFO_STANDARD, ctypes.byref(data), 0)
+    if handle == INVALID_HANDLE_VALUE:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
         if data.name != "::$DATA" or following(handle, ctypes.byref(data)):
             raise OSError("Alternate file streams need separate qualification")
-        if ctypes.get_last_error() != 38:
+        if ctypes.get_last_error() != ERROR_HANDLE_EOF:
             raise ctypes.WinError(ctypes.get_last_error())
     finally:
         kernel.FindClose(handle)
@@ -117,8 +140,8 @@ def _windows_security(path, *, copy_to=None, _include_control=False):
     owner, group, dacl, sacl, descriptor = (ctypes.c_void_p() for _ in range(5))
     code = get(
         str(path),
-        1,
-        7,
+        SE_FILE_OBJECT,
+        _RETAINED_SECURITY_INFORMATION,
         ctypes.byref(owner),
         ctypes.byref(group),
         ctypes.byref(dacl),
@@ -129,7 +152,13 @@ def _windows_security(path, *, copy_to=None, _include_control=False):
         raise OSError(code, "File security observation unavailable")
     text = ctypes.c_void_p()
     try:
-        if not to_sddl(descriptor, 1, 7, ctypes.byref(text), None):
+        if not to_sddl(
+            descriptor,
+            SDDL_REVISION_1,
+            _RETAINED_SECURITY_INFORMATION,
+            ctypes.byref(text),
+            None,
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
         control, revision = wintypes.WORD(), wintypes.DWORD()
         if not get_control(descriptor, ctypes.byref(control), ctypes.byref(revision)):
@@ -139,16 +168,28 @@ def _windows_security(path, *, copy_to=None, _include_control=False):
         if copy_to is not None:
             if _windows_security(copy_to, _include_control=True) == expected:
                 return expected if _include_control else observed
-            protection = 0x80000000 if control.value & 0x1000 else 0x20000000
-            code = set_info(str(copy_to), 1, 4 | protection, None, None, dacl, None)
+            protection = (
+                PROTECTED_DACL_SECURITY_INFORMATION
+                if control.value & SE_DACL_PROTECTED
+                else UNPROTECTED_DACL_SECURITY_INFORMATION
+            )
+            code = set_info(
+                str(copy_to),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | protection,
+                None,
+                None,
+                dacl,
+                None,
+            )
             if code:
                 raise OSError(code, "File DACL could not be retained")
             current = _windows_security(copy_to, _include_control=True)
             if (
-                control.value & 0x1000
-                and not control.value & 0x0400
+                control.value & SE_DACL_PROTECTED
+                and not control.value & SE_DACL_AUTO_INHERITED
                 and "D:P(" in observed
-                and current[1] == control.value | 0x0400
+                and current[1] == control.value | SE_DACL_AUTO_INHERITED
                 and current[0] == observed.replace("D:P(", "D:PAI(", 1)
             ):
                 # Repair only the high-level setter's proven AI-only conversion.
@@ -156,7 +197,7 @@ def _windows_security(path, *, copy_to=None, _include_control=False):
                 exact = advapi.SetFileSecurityW
                 exact.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
                 exact.restype = wintypes.BOOL
-                if not exact(str(copy_to), 4, descriptor):
+                if not exact(str(copy_to), DACL_SECURITY_INFORMATION, descriptor):
                     raise ctypes.WinError(ctypes.get_last_error())
                 current = _windows_security(copy_to, _include_control=True)
             if current != expected:
@@ -204,7 +245,7 @@ def retained_metadata(path, *, copy_to=None):
     mode = stat.S_IMODE(info.st_mode)
     attributes = getattr(info, "st_file_attributes", 0)
     if os.name == "nt":
-        if attributes & ~(0x20 | 0x80):
+        if attributes & ~(stat.FILE_ATTRIBUTE_ARCHIVE | stat.FILE_ATTRIBUTE_NORMAL):
             raise OSError("Special file attributes need separate qualification")
         _ordinary_streams(path)
         security = _windows_security(path, copy_to=copy_to)
@@ -225,7 +266,16 @@ def retained_directory_metadata(path):
     verify_directory(path)
     info = Path(path).stat()
     attributes = getattr(info, "st_file_attributes", 0)
-    if os.name != "nt" or not attributes & 0x10 or attributes & ~(0x10 | 0x20 | 0x80):
+    if (
+        os.name != "nt"
+        or not attributes & stat.FILE_ATTRIBUTE_DIRECTORY
+        or attributes
+        & ~(
+            stat.FILE_ATTRIBUTE_DIRECTORY
+            | stat.FILE_ATTRIBUTE_ARCHIVE
+            | stat.FILE_ATTRIBUTE_NORMAL
+        )
+    ):
         raise OSError("Directory metadata needs separate qualification")
     return stat.S_IMODE(info.st_mode), attributes, _windows_security(path)
 
@@ -249,7 +299,11 @@ def move_file(source, destination, *, replace):
         move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
         move.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
         move.restype = wintypes.BOOL
-        if not move(str(source), str(destination), 8 | (1 if replace else 0)):
+        if not move(
+            str(source),
+            str(destination),
+            MOVEFILE_WRITE_THROUGH | (MOVEFILE_REPLACE_EXISTING if replace else 0),
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
     elif replace:
         os.replace(source, destination)
