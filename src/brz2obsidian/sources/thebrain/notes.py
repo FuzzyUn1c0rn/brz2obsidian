@@ -258,7 +258,12 @@ class _BlockSlice(str):
         return result
 
     def __radd__(self, padding):
-        if not isinstance(padding, str) or self.padding or padding.strip(" "):
+        if (
+            not isinstance(padding, str)
+            or self.padding
+            or len(padding) > 3
+            or padding.strip(" ")
+        ):
             _refuse_unmapped_block()
         self.padding = padding
         return padding + str(self)
@@ -295,7 +300,7 @@ def _refuse_unmapped_block():
 
 
 class _MappedBlock(StateBlock):
-    """Map the ordered source slices and partial-tab padding in getLines output."""
+    """Map getLines slices and tab padding within the parser's active line bounds."""
 
     def getLines(self, begin, end, indent, keepLastLF):
         source = self.src
@@ -312,14 +317,24 @@ class _MappedBlock(StateBlock):
             _refuse_unmapped_block()
         offsets = []
         cursor = previous_stop = 0
-        for fragment in fragments:
+        for line, fragment in enumerate(fragments, begin):
             start, stop, step = fragment.span.indices(len(source))
             padding = fragment.padding
-            if step != 1 or not previous_stop <= start <= stop:
+            line_start = self.bMarks[line]
+            line_stop = self.eMarks[line] + (line + 1 < end or keepLastLF)
+            if (
+                step != 1
+                or not max(line_start, previous_stop) <= start <= stop
+                or stop != min(line_stop, len(source))
+            ):
+                _refuse_unmapped_block()
+            content_start = line_start + max(0, self.tShift[line])
+            skipped = str.__getitem__(source, slice(content_start, start))
+            if skipped.strip(" \t"):
                 _refuse_unmapped_block()
             if padding:
                 if (
-                    not start
+                    start == line_start
                     or source[start - 1] != "\t"
                     or not value.startswith(padding, cursor)
                 ):

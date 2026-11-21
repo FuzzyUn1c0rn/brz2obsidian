@@ -52,6 +52,32 @@ def test_block_output_without_matching_source_evidence_is_refused(
 
 
 @pytest.mark.parametrize(
+    "wrong_line", (True, False), ids=("fenced-copy", "empty-slice")
+)
+def test_block_slices_cannot_reassign_or_drop_authored_text(monkeypatch, wrong_line):
+    phrase = "[local](brain://abc/title)"
+    text = f"{phrase}\n\n```\n{phrase}\n```\n"
+    original = StateBlock.getLines
+
+    def block_output(state, begin, end, indent, keepLastLF):
+        if (begin, end) != (0, 1):
+            return original(state, begin, end, indent, keepLastLF)
+        if wrong_line:
+            return original(state, 3, 4, indent, keepLastLF)
+        stop = state.eMarks[begin]
+        return state.src[stop:stop]
+
+    monkeypatch.setattr(StateBlock, "getLines", block_output)
+
+    with pytest.raises(MigrationRefused) as error:
+        trace_note_references(text)
+
+    issue = error.value.issues[0]
+    assert issue.code == "unsupported_feature"
+    assert issue.message == "Markdown block provenance cannot be established"
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "prefix\u2028[local](brain://abc/title)",
