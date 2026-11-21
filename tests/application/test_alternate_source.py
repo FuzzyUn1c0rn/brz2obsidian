@@ -544,6 +544,33 @@ def inward_import_root(tmp_path):
             1,
             "brz2obsidian.sources.thebrain",
         ),
+        (
+            "planner.py",
+            (
+                "def run():\n"
+                "    class Registry:\n"
+                "        global loader\n"
+                '        value = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    return Registry.value\n\n"
+                "import importlib as loader\n"
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run():\n"
+                "    global loader\n"
+                "    import importlib as loader\n"
+                "    class Registry:\n"
+                "        global loader\n"
+                '        value = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    return Registry.value\n"
+            ),
+            6,
+            "brz2obsidian.sources.thebrain",
+        ),
     ],
 )
 def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(

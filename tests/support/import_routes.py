@@ -15,7 +15,6 @@ class ImportScope:
     ):
         self.parent = parent
         self.kind = kind
-        self.module = parent.module if parent else self
         self.parent_order = parent_order
         self.parent_branches = parent_branches
         self.bindings = {}
@@ -44,15 +43,22 @@ class ImportScope:
             return next(iter(values)) if len(values) == 1 else None
         if self.parent is None:
             return name if name in {"__import__", "globals", "__package__"} else None
+        parent_order = self.parent_order if order is not None else None
         if name in self.globals:
-            return self.module.resolve(name, self.parent_order, self.parent_branches)
+            return self.parent.resolve_global(name, parent_order, self.parent_branches)
         if (
             self.kind in {"function", "comprehension"}
             and name in self.bindings
             and name not in self.nonlocals
         ):
             return None
-        return self.parent.resolve(name, self.parent_order, self.parent_branches)
+        return self.parent.resolve(name, parent_order, self.parent_branches)
+
+    def resolve_global(self, name, order, branches):
+        if self.parent is None or name in self.globals:
+            return self.resolve(name, order, branches)
+        parent_order = self.parent_order if order is not None else None
+        return self.parent.resolve_global(name, parent_order, self.parent_branches)
 
 
 class ImportBindings(ast.NodeVisitor):
