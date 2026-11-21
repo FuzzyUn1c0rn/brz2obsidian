@@ -115,10 +115,8 @@ def _digest(value):
     ).hexdigest()
 
 
-def _configured_hook_state(raw, boolean=None):
-    """Preserve ordered event resets and case-sensitive configured hook names."""
+def _configured_hook_rows(raw):
     values = raw.decode("utf-8").split("\0")
-    bindings, parallel, commands, disabled = {}, set(), {}, set()
     for i in range(0, len(values) - 2, 3):
         key, separator, value = values[i + 2].partition("\n")
         section, dot, rest = key.partition(".")
@@ -127,7 +125,22 @@ def _configured_hook_state(raw, boolean=None):
             continue
         if not separator:
             raise OSError("Configured hook keys require a value")
-        variable = variable.lower()
+        yield name, variable.lower(), value
+
+
+def _bind_hook_event(bindings, name, value):
+    if value:
+        if name in HOOKS:
+            raise OSError("Known hook event cannot be a configured friendly name")
+        bindings.setdefault(name, set()).add(value)
+    else:
+        bindings.pop(name, None)
+
+
+def _configured_hook_state(raw, boolean=None):
+    """Preserve ordered event resets and case-sensitive configured hook names."""
+    bindings, parallel, commands, disabled = {}, set(), {}, set()
+    for name, variable, value in _configured_hook_rows(raw):
         if variable == "command":
             commands[name] = value
         elif variable == "parallel":
@@ -135,14 +148,7 @@ def _configured_hook_state(raw, boolean=None):
             if enabled is not None:
                 (parallel.add if enabled else parallel.discard)(name)
         elif variable == "event":
-            if value:
-                if name in HOOKS:
-                    raise OSError(
-                        "Known hook event cannot be a configured friendly name"
-                    )
-                bindings.setdefault(name, set()).add(value)
-            else:
-                bindings.pop(name, None)
+            _bind_hook_event(bindings, name, value)
         elif variable == "enabled":
             enabled = boolean(value) if boolean else value.lower() not in FALSE
             if enabled is False:
@@ -592,6 +598,148 @@ class _Inspection:
     def text(self, *args, **kwargs):
         return self.git(*args, **kwargs).decode("utf-8").rstrip("\r\n")
 
+    def _authored_layout(self):
+        root = self.root
+        for directory, names, files in _walk(root):
+            base = Path(directory)
+            verify_directory(base)
+            if base == root:
+                names[:] = [n for n in names if n.casefold() != ".git"]
+            if base != root and (
+                any(name.casefold() == ".git" for name in (*names, *files))
+                or _bare(base)
+            ):
+                self.finding(
+                    "nested_repository",
+                    "layout",
+                    "Move nested repositories/submodules outside this vault.",
+                    (base.relative_to(root).as_posix(),),
+                )
+                return False
+            for name in (*names, *files):
+                if base == root and name.casefold() == ".git":
+                    continue
+                if _unsafe(base / name):
+                    self.finding(
+                        "reparse_path",
+                        "layout",
+                        "Authored inventory cannot follow reparse points.",
+                        ((base / name).relative_to(root).as_posix(),),
+                    )
+                    return False
+            verify_directory(base)
+            names[:] = [n for n in names if not self.excluded_directory(base / n)]
+        return True
+
+    def _layout_index(self, gitdir):
+        if (gitdir / "index").exists():
+            info, _, raw, _ = observe_file(
+                gitdir, gitdir / "index", prefix_limit=OUTPUT_BUDGET + 1
+            )
+            if info.st_size > OUTPUT_BUDGET or len(raw) != info.st_size:
+                raise OSError("Git index exceeds its safe observation budget")
+            extensions = index_extensions(raw)
+            if extensions is None:
+                self.finding(
+                    "unsupported_format",
+                    "git",
+                    "This index object format needs compatibility qualification before preparation.",
+                )
+                return False
+            if any(name in (b"link", b"sdir") for name in extensions):
+                self.finding(
+                    "index_layout",
+                    "layout",
+                    "Split and sparse index storage need compatibility qualification before preparation.",
+                )
+                return False
+        return True
+
+    def _repository_layout(self, gitdir):
+        root = self.root
+        if _unsafe(gitdir) or not gitdir.is_dir():
+            self.finding(
+                "redirected_layout",
+                "layout",
+                "Linked, redirected and submodule Git stores are initially unsupported.",
+            )
+            return False
+        if not (gitdir / "HEAD").is_file() or not (gitdir / "objects").is_dir():
+            self.finding(
+                "object_integrity",
+                "git",
+                "Required local Git metadata/object storage is missing; restore matching complete history.",
+            )
+            return False
+        if any(
+            (gitdir / p).exists()
+            for p in ("commondir", "gitdir", "worktrees", "modules")
+        ):
+            self.finding(
+                "shared_layout",
+                "layout",
+                "Use a self-contained repository without linked worktrees or submodules.",
+            )
+            return False
+        if not self._layout_index(gitdir):
+            return False
+        for directory, names, files in _walk(gitdir):
+            verify_directory(Path(directory))
+            for name in (*names, *files):
+                item = Path(directory) / name
+                if _unsafe(item) or item.is_file() and item.lstat().st_nlink != 1:
+                    self.finding(
+                        "external_store",
+                        "layout",
+                        "Git metadata must not use reparse or external paths.",
+                    )
+                    return False
+        if (gitdir / "objects" / "info" / "alternates").exists() or (
+            gitdir / "objects" / "info" / "http-alternates"
+        ).exists():
+            self.finding(
+                "external_store",
+                "layout",
+                "Alternate object stores are initially unsupported.",
+            )
+            return False
+        if _exists(gitdir / "info" / "grafts"):
+            self.finding(
+                "incomplete_store",
+                "git",
+                "Grafted history cannot establish complete raw ancestry; use matching complete local history.",
+            )
+            return False
+        self.repo = self.repo.model_copy(
+            update={
+                "kind": "root",
+                "root": str(root),
+                "git_directory": str(gitdir),
+                "common_directory": str(gitdir),
+                "object_directory": str(gitdir / "objects"),
+            }
+        )
+        self.storage_state.append(verify_directory(gitdir, writable=True))
+        return True
+
+    def _layout_subjects(self):
+        for subject in self.subjects:
+            if not _safe_relative(subject.path):
+                self.finding(
+                    "unsafe_subject",
+                    "inventory",
+                    "Review subjects must name safe vault-relative paths.",
+                )
+                return False
+        if len({(s.path, s.subject_id) for s in self.subjects}) != len(self.subjects):
+            self.finding(
+                "duplicate_subject",
+                "inventory",
+                "Review subjects must identify unique path-and-subject pairs.",
+            )
+            return False
+        return True
+
     def layout(self):
         root = self.root
         if not root.is_dir():
@@ -652,137 +800,15 @@ class _Inspection:
                 "A redirected attribute source requires a current working-tree policy observation.",
             )
             return False
-        for subject in self.subjects:
-            if not _safe_relative(subject.path):
-                self.finding(
-                    "unsafe_subject",
-                    "inventory",
-                    "Review subjects must name safe vault-relative paths.",
-                )
-                return False
-        if len({(s.path, s.subject_id) for s in self.subjects}) != len(self.subjects):
-            self.finding(
-                "duplicate_subject",
-                "inventory",
-                "Review subjects must identify unique path-and-subject pairs.",
-            )
+        if not self._layout_subjects():
             return False
         gitdir = root / ".git"
         if os.path.lexists(gitdir):
-            if _unsafe(gitdir) or not gitdir.is_dir():
-                self.finding(
-                    "redirected_layout",
-                    "layout",
-                    "Linked, redirected and submodule Git stores are initially unsupported.",
-                )
+            if not self._repository_layout(gitdir):
                 return False
-            if not (gitdir / "HEAD").is_file() or not (gitdir / "objects").is_dir():
-                self.finding(
-                    "object_integrity",
-                    "git",
-                    "Required local Git metadata/object storage is missing; restore matching complete history.",
-                )
-                return False
-            if any(
-                (gitdir / p).exists()
-                for p in ("commondir", "gitdir", "worktrees", "modules")
-            ):
-                self.finding(
-                    "shared_layout",
-                    "layout",
-                    "Use a self-contained repository without linked worktrees or submodules.",
-                )
-                return False
-            if (gitdir / "index").exists():
-                info, _, raw, _ = observe_file(
-                    gitdir, gitdir / "index", prefix_limit=OUTPUT_BUDGET + 1
-                )
-                if info.st_size > OUTPUT_BUDGET or len(raw) != info.st_size:
-                    raise OSError("Git index exceeds its safe observation budget")
-                extensions = index_extensions(raw)
-                if extensions is None:
-                    self.finding(
-                        "unsupported_format",
-                        "git",
-                        "This index object format needs compatibility qualification before preparation.",
-                    )
-                    return False
-                if any(name in (b"link", b"sdir") for name in extensions):
-                    self.finding(
-                        "index_layout",
-                        "layout",
-                        "Split and sparse index storage need compatibility qualification before preparation.",
-                    )
-                    return False
-            for directory, names, files in _walk(gitdir):
-                verify_directory(Path(directory))
-                for name in (*names, *files):
-                    item = Path(directory) / name
-                    if _unsafe(item) or item.is_file() and item.lstat().st_nlink != 1:
-                        self.finding(
-                            "external_store",
-                            "layout",
-                            "Git metadata must not use reparse or external paths.",
-                        )
-                        return False
-            if (gitdir / "objects" / "info" / "alternates").exists() or (
-                gitdir / "objects" / "info" / "http-alternates"
-            ).exists():
-                self.finding(
-                    "external_store",
-                    "layout",
-                    "Alternate object stores are initially unsupported.",
-                )
-                return False
-            if _exists(gitdir / "info" / "grafts"):
-                self.finding(
-                    "incomplete_store",
-                    "git",
-                    "Grafted history cannot establish complete raw ancestry; use matching complete local history.",
-                )
-                return False
-            self.repo = self.repo.model_copy(
-                update={
-                    "kind": "root",
-                    "root": str(root),
-                    "git_directory": str(gitdir),
-                    "common_directory": str(gitdir),
-                    "object_directory": str(gitdir / "objects"),
-                }
-            )
-            self.storage_state.append(verify_directory(gitdir, writable=True))
         else:
             self.repo = self.repo.model_copy(update={"kind": "none"})
-        for directory, names, files in _walk(root):
-            base = Path(directory)
-            verify_directory(base)
-            if base == root:
-                names[:] = [n for n in names if n.casefold() != ".git"]
-            if base != root and (
-                any(name.casefold() == ".git" for name in (*names, *files))
-                or _bare(base)
-            ):
-                self.finding(
-                    "nested_repository",
-                    "layout",
-                    "Move nested repositories/submodules outside this vault.",
-                    (base.relative_to(root).as_posix(),),
-                )
-                return False
-            for name in (*names, *files):
-                if base == root and name.casefold() == ".git":
-                    continue
-                if _unsafe(base / name):
-                    self.finding(
-                        "reparse_path",
-                        "layout",
-                        "Authored inventory cannot follow reparse points.",
-                        ((base / name).relative_to(root).as_posix(),),
-                    )
-                    return False
-            verify_directory(base)
-            names[:] = [n for n in names if not self.excluded_directory(base / n)]
-        return True
+        return self._authored_layout()
 
     def excluded_directory(self, path):
         relative = path.relative_to(self.root).as_posix()
@@ -940,7 +966,7 @@ class _Inspection:
             return None
         raise OSError("Git Boolean policy observation unavailable")
 
-    def configuration(self):
+    def _read_configuration(self):
         raw = self.effective_config()
         self.policy.append(raw.hex())
         active_hooks, _, _ = _configured_hook_state(raw, self.hook_boolean)
@@ -960,6 +986,46 @@ class _Inspection:
                 subsection + "." + variable.lower() if separator else rest.lower()
             )
             self.config[normalized] = value
+
+    def _inspect_hook_directory(self):
+        c = self.config
+        if self.repo.kind == "root" or "core.hookspath" in c:
+            location = (
+                self.text("config", "--path", "--get", "core.hooksPath")
+                if "core.hookspath" in c
+                else None
+            )
+            hooks = (
+                Path(location)
+                if location is not None
+                else Path(self.repo.git_directory) / "hooks"
+            )
+            if not hooks.is_absolute():
+                hooks = self.root / hooks
+            if hooks.exists():
+                if _unsafe(hooks) or not hooks.is_dir():
+                    self.finding(
+                        "hooks_unknown",
+                        "execution",
+                        "The effective hook location cannot be safely inspected.",
+                    )
+                else:
+                    for hook in hooks.iterdir():
+                        name = hook.name.casefold() if os.name == "nt" else hook.name
+                        if (
+                            name.removesuffix(".exe") in HOOKS
+                            and hook.is_file()
+                            and (os.name == "nt" or os.access(hook, os.X_OK))
+                        ):
+                            self.finding(
+                                "active_hook",
+                                "execution",
+                                "Active Git hooks require a supported repository policy.",
+                            )
+                            break
+
+    def configuration(self):
+        self._read_configuration()
         c = self.config
         if c.get("attr.tree"):
             self.finding(
@@ -1021,40 +1087,7 @@ class _Inspection:
                     "layout",
                     "Shallow/promisor history must be made complete outside the converter.",
                 )
-        if self.repo.kind == "root" or "core.hookspath" in c:
-            location = (
-                self.text("config", "--path", "--get", "core.hooksPath")
-                if "core.hookspath" in c
-                else None
-            )
-            hooks = (
-                Path(location)
-                if location is not None
-                else Path(self.repo.git_directory) / "hooks"
-            )
-            if not hooks.is_absolute():
-                hooks = self.root / hooks
-            if hooks.exists():
-                if _unsafe(hooks) or not hooks.is_dir():
-                    self.finding(
-                        "hooks_unknown",
-                        "execution",
-                        "The effective hook location cannot be safely inspected.",
-                    )
-                else:
-                    for hook in hooks.iterdir():
-                        name = hook.name.casefold() if os.name == "nt" else hook.name
-                        if (
-                            name.removesuffix(".exe") in HOOKS
-                            and hook.is_file()
-                            and (os.name == "nt" or os.access(hook, os.X_OK))
-                        ):
-                            self.finding(
-                                "active_hook",
-                                "execution",
-                                "Active Git hooks require a supported repository policy.",
-                            )
-                            break
+        self._inspect_hook_directory()
         return not self.findings
 
     def index_state(self):
@@ -1102,10 +1135,7 @@ class _Inspection:
         }
         return True
 
-    def repository(self):
-        if self.repo.kind == "none":
-            return True
-        gitdir = Path(self.repo.git_directory)
+    def _repository_identity(self, gitdir):
         locations = self.locations()
         if locations is None:
             return False
@@ -1135,6 +1165,9 @@ class _Inspection:
         self.repo = self.repo.model_copy(
             update={"object_format": object_format, "ref_format": ref_format}
         )
+        return True
+
+    def _inspect_git_operation(self, gitdir):
         git_operation, foreign_lock = _existing_git_operation_blockers(gitdir)
         if git_operation:
             self.finding(
@@ -1150,6 +1183,8 @@ class _Inspection:
                 "An existing Git lock requires its owner's completion or recovery.",
             )
             self.operation = "active"
+
+    def _discover_terminal_observation(self, gitdir):
         terminal_status = None
         terminal_observation_missing = False
         if (
@@ -1184,154 +1219,156 @@ class _Inspection:
                 ):
                     self.recovery_observation = observation
                     self.recovery_status = terminal_status
-        if self.checkpoint_observation is not None:
-            _accept_idle_checkpoint(self)
-        elif self.recovery_observation is not None:
-            from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
-            from brz2obsidian.publication.vault_apply import (
-                _OperationObservation,
-                owns_operation,
-            )
-            from brz2obsidian.publication.vault_recovery import _lease_free
+        return terminal_status, terminal_observation_missing
 
-            retained = self.recovery_observation
-            if not isinstance(retained, _OperationObservation):
-                raise OSError("Recovery observation has no validated authority")
-            operation = retained.graph.intent
-            ref = (
-                "refs/brz2obsidian/imports/"
-                + operation.association_id
-                + "/operations/"
-                + operation.operation_id
-            )
-            current = self.git("rev-parse", "--verify", ref).decode().strip()
-            locator = retained.checkpoint.locator
-            if retained.checkpoint.status != "valid" or locator is None:
-                raise OSError("Recovery checkpoint association is unavailable")
-            checkpoint_tip = (
-                self.git("rev-parse", "--verify", locator.association.ref)
-                .decode()
-                .strip()
-            )
-            _, _, locator_raw, _ = observe_file(
-                self.root,
-                self.root / ".brz2obsidian" / "locator.json",
-                prefix_limit=65537,
-            )
-            if len(locator_raw) > 65536:
-                raise OSError("Current locator exceeds its bounded control size")
-            current_locator = CheckpointLocator.model_validate_json(locator_raw)
-            operation_refs = {}
-            for line in self.git(
-                "for-each-ref",
-                "--format=%(refname) %(objectname)",
-                "refs/brz2obsidian/imports",
-            ).splitlines():
-                name, oid = line.split(b" ")
-                parts = name.split(b"/")
-                if len(parts) == 6 and parts[4] == b"operations":
-                    operation_refs[name.decode("ascii")] = oid.decode("ascii")
-            expected_refs = {
-                "refs/brz2obsidian/imports/"
-                + graph.intent.association_id
-                + "/operations/"
-                + graph.intent.operation_id: graph.commit
-                for graph in (retained.graphs or (retained.graph,))
-            }
-            held = (
-                owns_operation(self.root, self.active_operation)
+    def _read_converter_operation_refs(self):
+        operation_refs = {}
+        for line in self.git(
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/brz2obsidian/imports",
+        ).splitlines():
+            name, oid = line.split(b" ")
+            parts = name.split(b"/")
+            if len(parts) == 6 and parts[4] == b"operations":
+                operation_refs[name.decode("ascii")] = oid.decode("ascii")
+        return operation_refs
+
+    def _accept_recovery_observation(self):
+        from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
+        from brz2obsidian.publication.vault_apply import (
+            _OperationObservation,
+            owns_operation,
+        )
+        from brz2obsidian.publication.vault_recovery import _lease_free
+
+        retained = self.recovery_observation
+        if not isinstance(retained, _OperationObservation):
+            raise OSError("Recovery observation has no validated authority")
+        operation = retained.graph.intent
+        ref = (
+            "refs/brz2obsidian/imports/"
+            + operation.association_id
+            + "/operations/"
+            + operation.operation_id
+        )
+        current = self.git("rev-parse", "--verify", ref).decode().strip()
+        locator = retained.checkpoint.locator
+        if retained.checkpoint.status != "valid" or locator is None:
+            raise OSError("Recovery checkpoint association is unavailable")
+        checkpoint_tip = (
+            self.git("rev-parse", "--verify", locator.association.ref).decode().strip()
+        )
+        _, _, locator_raw, _ = observe_file(
+            self.root,
+            self.root / ".brz2obsidian" / "locator.json",
+            prefix_limit=65537,
+        )
+        if len(locator_raw) > 65536:
+            raise OSError("Current locator exceeds its bounded control size")
+        current_locator = CheckpointLocator.model_validate_json(locator_raw)
+        operation_refs = self._read_converter_operation_refs()
+        expected_refs = {
+            "refs/brz2obsidian/imports/"
+            + graph.intent.association_id
+            + "/operations/"
+            + graph.intent.operation_id: graph.commit
+            for graph in (retained.graphs or (retained.graph,))
+        }
+        held = (
+            owns_operation(self.root, self.active_operation)
+            if self.active_operation is not None
+            else False
+        )
+        if (
+            current != retained.graph.commit
+            or checkpoint_tip != locator.commit
+            or current_locator != locator
+            or operation_refs != expected_refs
+            or (
+                not held
                 if self.active_operation is not None
-                else False
+                else not _lease_free(self.root, operation.operation_id)
             )
-            if (
-                current != retained.graph.commit
-                or checkpoint_tip != locator.commit
-                or current_locator != locator
-                or operation_refs != expected_refs
-                or (
-                    not held
-                    if self.active_operation is not None
-                    else not _lease_free(self.root, operation.operation_id)
-                )
-                or locator.association.association_id != operation.association_id
-                or locator.association.vault_anchor != verify_directory(self.root)
-                or locator.association.git_anchor
-                != verify_directory(self.root / ".git")
-            ):
-                raise OSError("Recovery authority or converter lease changed")
+            or locator.association.association_id != operation.association_id
+            or locator.association.vault_anchor != verify_directory(self.root)
+            or locator.association.git_anchor != verify_directory(self.root / ".git")
+        ):
+            raise OSError("Recovery authority or converter lease changed")
+        self.validated_active_operation = True
+        self.history = retained.checkpoint
+        self.checkpoint_roles = retained.checkpoint_roles
+        self.operation = "idle"
+
+    def _inspect_held_converter_operation(self):
+        owned = False
+        if self.active_operation is not None:
+            try:
+                from brz2obsidian.publication.vault_apply import owns_operation
+
+                owned = owns_operation(self.root, self.active_operation)
+            except OSError, ValueError, TypeError:
+                pass
+        if owned:
             self.validated_active_operation = True
-            self.history = retained.checkpoint
-            self.checkpoint_roles = retained.checkpoint_roles
-            self.operation = "idle"
-        elif (gitdir / "brz2obsidian").exists():
-            owned = False
-            if self.active_operation is not None:
-                try:
-                    from brz2obsidian.publication.vault_apply import owns_operation
-
-                    owned = owns_operation(self.root, self.active_operation)
-                except OSError, ValueError, TypeError:
-                    pass
-            if owned:
-                self.validated_active_operation = True
-                from brz2obsidian.publication.vault_history import _Git, _read
-
-                self.history = _read(
-                    self.root,
-                    _Git(self.root, self.executable),
-                    linked_intents=self.linked_intents,
-                    checkpoint_roles=self.checkpoint_roles,
-                    _metadata_only=self._metadata_only,
-                    _owners=self._owners,
-                )
-                if self.history.status != "valid":
-                    raise OSError("Current converter history unavailable")
-                self.operation = "idle"
-            else:
-                self.finding(
-                    "converter_operation",
-                    "operation",
-                    "Converter operation/history metadata requires validated recovery discovery first.",
-                )
-                self.operation = "recovery_required"
-        elif (self.root / ".brz2obsidian").exists():
             from brz2obsidian.publication.vault_history import _Git, _read
 
-            try:
-                self.history = _read(
-                    self.root,
-                    _Git(self.root, self.executable),
-                    linked_intents=self.linked_intents,
-                    checkpoint_roles=self.checkpoint_roles,
-                    _metadata_only=self._metadata_only,
-                    _owners=self._owners,
-                )
-                if self.history.status != "valid":
-                    raise OSError("Current converter history unavailable")
-                _, _, raw, _ = observe_file(
-                    self.root,
-                    self.root / ".brz2obsidian/locator.json",
-                    prefix_limit=OUTPUT_BUDGET + 1,
-                )
-                from brz2obsidian.application.checkpoint_contracts import (
-                    CheckpointLocator,
-                )
+            self.history = _read(
+                self.root,
+                _Git(self.root, self.executable),
+                linked_intents=self.linked_intents,
+                checkpoint_roles=self.checkpoint_roles,
+                _metadata_only=self._metadata_only,
+                _owners=self._owners,
+            )
+            if self.history.status != "valid":
+                raise OSError("Current converter history unavailable")
+            self.operation = "idle"
+        else:
+            self.finding(
+                "converter_operation",
+                "operation",
+                "Converter operation/history metadata requires validated recovery discovery first.",
+            )
+            self.operation = "recovery_required"
 
-                if CheckpointLocator.model_validate_json(raw) != self.history.locator:
-                    raise OSError("Current locator changed during history discovery")
-                self.operation = "idle"
-            except OSError, ValueError, TypeError:
-                self.finding(
-                    "converter_operation",
-                    "operation",
-                    "Current converter history requires recovery discovery before dependent work.",
-                )
-                self.operation = "recovery_required"
-        if not self.index_state():
-            return False
-        refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
-        self.current_refs = refs
-        self.storage_state.append(refs.hex())
+    def _inspect_local_converter_history(self):
+        from brz2obsidian.publication.vault_history import _Git, _read
+
+        try:
+            self.history = _read(
+                self.root,
+                _Git(self.root, self.executable),
+                linked_intents=self.linked_intents,
+                checkpoint_roles=self.checkpoint_roles,
+                _metadata_only=self._metadata_only,
+                _owners=self._owners,
+            )
+            if self.history.status != "valid":
+                raise OSError("Current converter history unavailable")
+            _, _, raw, _ = observe_file(
+                self.root,
+                self.root / ".brz2obsidian/locator.json",
+                prefix_limit=OUTPUT_BUDGET + 1,
+            )
+            from brz2obsidian.application.checkpoint_contracts import (
+                CheckpointLocator,
+            )
+
+            if CheckpointLocator.model_validate_json(raw) != self.history.locator:
+                raise OSError("Current locator changed during history discovery")
+            self.operation = "idle"
+        except OSError, ValueError, TypeError:
+            self.finding(
+                "converter_operation",
+                "operation",
+                "Current converter history requires recovery discovery before dependent work.",
+            )
+            self.operation = "recovery_required"
+
+    def _inspect_retained_operations(
+        self, refs, terminal_status, terminal_observation_missing
+    ):
         if not self.validated_active_operation:
             operation_refs = [
                 line
@@ -1362,6 +1399,8 @@ class _Inspection:
                         "Retained operation history needs validated recovery before another update.",
                     )
                     self.operation = "recovery_required"
+
+    def _read_head(self, gitdir, refs):
         with (gitdir / "HEAD").open("rb") as stream:
             head_raw = stream.read(65537)
         if len(head_raw) > 65536:
@@ -1377,6 +1416,9 @@ class _Inspection:
             head = head_raw.strip().decode("ascii").lower()
             if len(head) != 40 or any(c not in "0123456789abcdef" for c in head):
                 raise OSError("Invalid detached HEAD")
+        return head
+
+    def _check_repository_objects(self):
         result = read_git(
             [
                 self.executable,
@@ -1400,89 +1442,109 @@ class _Inspection:
                 "Required local objects/references are missing or corrupt; restore matching complete history.",
             )
             return False
+        return True
+
+    def repository(self):
+        if self.repo.kind == "none":
+            return True
+        gitdir = Path(self.repo.git_directory)
+        if not self._repository_identity(gitdir):
+            return False
+        self._inspect_git_operation(gitdir)
+        terminal_status, terminal_observation_missing = (
+            self._discover_terminal_observation(gitdir)
+        )
+        if self.checkpoint_observation is not None:
+            _accept_idle_checkpoint(self)
+        elif self.recovery_observation is not None:
+            self._accept_recovery_observation()
+        elif (gitdir / "brz2obsidian").exists():
+            self._inspect_held_converter_operation()
+        elif (self.root / ".brz2obsidian").exists():
+            self._inspect_local_converter_history()
+        if not self.index_state():
+            return False
+        refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
+        self.current_refs = refs
+        self.storage_state.append(refs.hex())
+        self._inspect_retained_operations(
+            refs, terminal_status, terminal_observation_missing
+        )
+        head = self._read_head(gitdir, refs)
+        if not self._check_repository_objects():
+            return False
         self.repo = self.repo.model_copy(update={"head": head})
         return self.qualify_options()
 
-    def authored(self):
-        tracked = self.tracked_paths
-        known = set()
-        for directory, names, files in _walk(self.root):
-            verify_directory(Path(directory))
-            names[:] = sorted(n for n in names if n.casefold() != ".git")
-            names[:] = [
-                n for n in names if not self.excluded_directory(Path(directory) / n)
-            ]
-            for name in sorted(files):
-                path = Path(directory) / name
-                relative = path.relative_to(self.root).as_posix()
-                collision = relative.casefold()
-                if not _safe_relative(relative) or collision in known:
-                    self.finding(
-                        "path_collision",
-                        "inventory",
-                        "Resolve unsafe or case-colliding authored paths.",
-                    )
-                    return
-                known.add(collision)
-                before = path.lstat()
-                if (
-                    _unsafe(path)
-                    or not stat.S_ISREG(before.st_mode)
-                    or before.st_nlink != 1
-                ):
-                    self.finding(
-                        "unsafe_file",
-                        "inventory",
-                        "Authored content must use independent ordinary files.",
-                        (relative,),
-                    )
-                    return
-                selected = relative in {s.path for s in self.subjects}
-                if selected and bool(getattr(before, "st_file_attributes", 0) & 1):
-                    self.finding(
-                        "write_access",
-                        "inventory",
-                        "The selected authored path is read-only; make it writable before preparation.",
-                        (relative,),
-                    )
-                    return
-                try:
-                    after, content, prefix, identity = observe_file(
-                        self.root, path, writable=selected
-                    )
-                    if selected:
-                        verify_directory(path.parent, writable=True)
-                except PermissionError:
-                    self.finding(
-                        "write_access" if selected else "read_access",
-                        "inventory",
-                        "Required access to an authored path is unavailable.",
-                        (relative,),
-                    )
-                    return
-                self.prefixes[relative] = prefix
-                self.file_observations.add(relative)
-                exclusion = (
-                    "cache"
-                    if any(relative.startswith(p + "/") for p in CACHE_PATHS)
-                    else "temporary"
-                    if any(relative.startswith(p + "/") for p in TEMP_PATHS)
-                    else None
-                )
-                self.inventory.append(
-                    VaultFile(
-                        path=relative,
-                        mode="100755"
-                        if os.name != "nt" and before.st_mode & stat.S_IXUSR
-                        else "100644",
-                        size=after.st_size,
-                        sha256=content,
-                        identity=identity,
-                        tracked=relative in tracked,
-                        excluded=exclusion is not None,
-                        exclusion=exclusion,
-                    )
-                )
+    def _observe_authored_file(self, path, known, tracked):
+        relative = path.relative_to(self.root).as_posix()
+        collision = relative.casefold()
+        if not _safe_relative(relative) or collision in known:
+            self.finding(
+                "path_collision",
+                "inventory",
+                "Resolve unsafe or case-colliding authored paths.",
+            )
+            return False
+        known.add(collision)
+        before = path.lstat()
+        if _unsafe(path) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            self.finding(
+                "unsafe_file",
+                "inventory",
+                "Authored content must use independent ordinary files.",
+                (relative,),
+            )
+            return False
+        selected = relative in {s.path for s in self.subjects}
+        if selected and bool(getattr(before, "st_file_attributes", 0) & 1):
+            self.finding(
+                "write_access",
+                "inventory",
+                "The selected authored path is read-only; make it writable before preparation.",
+                (relative,),
+            )
+            return False
+        try:
+            after, content, prefix, identity = observe_file(
+                self.root, path, writable=selected
+            )
+            if selected:
+                verify_directory(path.parent, writable=True)
+        except PermissionError:
+            self.finding(
+                "write_access" if selected else "read_access",
+                "inventory",
+                "Required access to an authored path is unavailable.",
+                (relative,),
+            )
+            return False
+        self.prefixes[relative] = prefix
+        self.file_observations.add(relative)
+        exclusion = (
+            "cache"
+            if any(relative.startswith(p + "/") for p in CACHE_PATHS)
+            else "temporary"
+            if any(relative.startswith(p + "/") for p in TEMP_PATHS)
+            else None
+        )
+        self.inventory.append(
+            VaultFile(
+                path=relative,
+                mode="100755"
+                if os.name != "nt" and before.st_mode & stat.S_IXUSR
+                else "100644",
+                size=after.st_size,
+                sha256=content,
+                identity=identity,
+                tracked=relative in tracked,
+                excluded=exclusion is not None,
+                exclusion=exclusion,
+            )
+        )
+        return True
+
+    def _observe_ignored_paths(self):
         self.inventory.sort(key=lambda f: f.path)
         ignore_paths = sorted(
             {f.path for f in self.inventory}
@@ -1515,7 +1577,8 @@ class _Inspection:
             else f
             for f in self.inventory
         ]
-        self.complete = True
+
+    def _check_authored_subjects(self):
         for subject in self.subjects:
             path = self.root / subject.path
             if path.exists():
@@ -1526,7 +1589,7 @@ class _Inspection:
                         "An existing selected path must match its observed authored-file identity and spelling.",
                         (subject.path,),
                     )
-                    return
+                    return False
                 continue
             parent = path.parent
             while not parent.exists():
@@ -1540,7 +1603,26 @@ class _Inspection:
                     "The selected new path requires write access to its existing parent directory.",
                     (subject.path,),
                 )
-                return
+                return False
+        return True
+
+    def authored(self):
+        tracked = self.tracked_paths
+        known = set()
+        for directory, names, files in _walk(self.root):
+            verify_directory(Path(directory))
+            names[:] = sorted(n for n in names if n.casefold() != ".git")
+            names[:] = [
+                n for n in names if not self.excluded_directory(Path(directory) / n)
+            ]
+            for name in sorted(files):
+                path = Path(directory) / name
+                if not self._observe_authored_file(path, known, tracked):
+                    return
+        self._observe_ignored_paths()
+        self.complete = True
+        if not self._check_authored_subjects():
+            return
         if (
             shutil.disk_usage(self.root).free
             < 2 * sum(f.size for f in self.inventory if not f.excluded) + 1024 * 1024
@@ -1551,12 +1633,7 @@ class _Inspection:
                 "Free enough local space for authored checkpoints before preparation.",
             )
 
-    def attributes(self):
-        paths = sorted(
-            {f.path for f in self.inventory if not f.excluded}
-            | {s.path for s in self.subjects}
-        )
-        self.attribute_query_paths = tuple(paths)
+    def _observe_attribute_rows(self, paths):
         attribute_input = "".join(p + "\0" for p in paths).encode("utf-8")
         raw = self.git(
             "check-attr",
@@ -1587,6 +1664,9 @@ class _Inspection:
             self.attribute_rows[path, attribute] = value
             if attribute in relevant:
                 observed[path, attribute] = value
+        return observed
+
+    def _resolve_attribute_markers(self, paths, observed):
         # --all omits true unspecified markers, so a returned 'unspecified' is
         # already a string. Only the boolean-looking spellings need typed query.
         ambiguous = {
@@ -1598,7 +1678,7 @@ class _Inspection:
         if ambiguous:
             directory = self.temporary_base()
             if directory is None:
-                return
+                return None
             attribute_reader = self.resources.enter_context(
                 assigned_markers(
                     self.executable,
@@ -1612,93 +1692,82 @@ class _Inspection:
             )
             assigned = attribute_reader()
             self.capabilities += ("typed-attribute-pathspec",)
-        attrs = {
-            key: value
-            if value not in ("set", "unset") or key in assigned
-            else value == "set"
-            for key, value in observed.items()
-        }
-        self.typed_attributes = dict(attrs)
-        self.policy.append(
-            [
-                (path, attribute, value)
-                for (path, attribute), value in sorted(attrs.items())
-            ]
-        )
-        builtin = False
-        merge_names = {
-            key[len("merge.") : key.rfind(".")]
-            for key in self.config
-            if key.startswith("merge.") and key.count(".") >= 2
-        }
-        for path in paths:
+        return assigned
 
-            def value(attribute, current_path=path):
-                return attrs.get((current_path, attribute))
-
-            def newline_action(setting):
-                if setting is True:
-                    return "text"
-                if setting is False:
-                    return "binary"
-                return setting if setting in ("input", "auto") else None
-
-            action = newline_action(value("text"))
-            if action is None:
-                action = newline_action(value("crlf"))
-            if action != "binary" and value("eol") in ("lf", "crlf"):
-                action = "text"
-            if (
-                action is None
-                and self.config.get("core.autocrlf", "false").lower() not in FALSE
-            ):
-                action = "text"
-            encoding = value("working-tree-encoding")
-            if isinstance(encoding, bool):
-                self.finding(
-                    "encoding_policy",
-                    "storage",
-                    "A boolean encoding attribute is not a usable Git storage policy.",
-                    (path,),
-                )
-            builtin |= (
-                action not in (None, "binary")
-                or value("ident") is True
-                or (
-                    isinstance(encoding, str)
-                    and bool(encoding)
-                    and encoding.replace("-", "").casefold() != "utf8"
-                )
+    def _inspect_path_drivers(self, path, value, merge_names):
+        driver = value("filter")
+        if isinstance(driver, str):
+            self.finding(
+                "lfs" if driver == "lfs" else "custom_filter",
+                "storage",
+                "Applicable custom/LFS storage is unsupported; preserve repository policy.",
+                (path,),
             )
-            driver = value("filter")
-            if isinstance(driver, str):
-                self.finding(
-                    "lfs" if driver == "lfs" else "custom_filter",
-                    "storage",
-                    "Applicable custom/LFS storage is unsupported; preserve repository policy.",
-                    (path,),
-                )
-            driver = value("merge")
-            if driver is None:
-                driver = self.config.get("merge.default")
-            if isinstance(driver, str) and driver in merge_names:
-                self.finding(
-                    "custom_driver",
-                    "execution",
-                    "An applicable custom merge driver is unsupported.",
-                    (path,),
-                )
-            driver = value("diff")
-            if isinstance(driver, str) and any(
-                key in self.config
-                for key in (f"diff.{driver}.command", f"diff.{driver}.textconv")
-            ):
-                self.finding(
-                    "custom_driver",
-                    "execution",
-                    "An applicable custom diff/textconv driver is unsupported.",
-                    (path,),
-                )
+        driver = value("merge")
+        if driver is None:
+            driver = self.config.get("merge.default")
+        if isinstance(driver, str) and driver in merge_names:
+            self.finding(
+                "custom_driver",
+                "execution",
+                "An applicable custom merge driver is unsupported.",
+                (path,),
+            )
+        driver = value("diff")
+        if isinstance(driver, str) and any(
+            key in self.config
+            for key in (f"diff.{driver}.command", f"diff.{driver}.textconv")
+        ):
+            self.finding(
+                "custom_driver",
+                "execution",
+                "An applicable custom diff/textconv driver is unsupported.",
+                (path,),
+            )
+
+    def _inspect_path_attributes(self, path, attrs, merge_names):
+
+        def value(attribute, current_path=path):
+            return attrs.get((current_path, attribute))
+
+        def newline_action(setting):
+            if setting is True:
+                return "text"
+            if setting is False:
+                return "binary"
+            return setting if setting in ("input", "auto") else None
+
+        action = newline_action(value("text"))
+        if action is None:
+            action = newline_action(value("crlf"))
+        if action != "binary" and value("eol") in ("lf", "crlf"):
+            action = "text"
+        if (
+            action is None
+            and self.config.get("core.autocrlf", "false").lower() not in FALSE
+        ):
+            action = "text"
+        encoding = value("working-tree-encoding")
+        if isinstance(encoding, bool):
+            self.finding(
+                "encoding_policy",
+                "storage",
+                "A boolean encoding attribute is not a usable Git storage policy.",
+                (path,),
+            )
+        builtin = (
+            action not in (None, "binary")
+            or value("ident") is True
+            or (
+                isinstance(encoding, str)
+                and bool(encoding)
+                and encoding.replace("-", "").casefold() != "utf8"
+            )
+        )
+        self._inspect_path_drivers(path, value, merge_names)
+        return builtin
+
+    def _inspect_global_storage(self):
         if self.config.get("diff.external") or os.environ.get("GIT_EXTERNAL_DIFF"):
             self.finding(
                 "custom_driver",
@@ -1720,6 +1789,8 @@ class _Inspection:
                     "LFS pointer content requires supported managed storage.",
                     (item.path,),
                 )
+
+    def _record_attribute_policy(self, builtin):
         self.policy.append([(f.path, f.exclusion, f.tracked) for f in self.inventory])
         self.policy.append([(s.path, s.subject_id) for s in self.subjects])
         fingerprint = _digest(
@@ -1760,6 +1831,40 @@ class _Inspection:
         if included:
             self.consents.append(consent("tracking", "ordinary", included))
 
+    def attributes(self):
+        paths = sorted(
+            {f.path for f in self.inventory if not f.excluded}
+            | {s.path for s in self.subjects}
+        )
+        self.attribute_query_paths = tuple(paths)
+        observed = self._observe_attribute_rows(paths)
+        assigned = self._resolve_attribute_markers(paths, observed)
+        if assigned is None:
+            return
+        attrs = {
+            key: value
+            if value not in ("set", "unset") or key in assigned
+            else value == "set"
+            for key, value in observed.items()
+        }
+        self.typed_attributes = dict(attrs)
+        self.policy.append(
+            [
+                (path, attribute, value)
+                for (path, attribute), value in sorted(attrs.items())
+            ]
+        )
+        builtin = False
+        merge_names = {
+            key[len("merge.") : key.rfind(".")]
+            for key in self.config
+            if key.startswith("merge.") and key.count(".") >= 2
+        }
+        for path in paths:
+            builtin |= self._inspect_path_attributes(path, attrs, merge_names)
+        self._inspect_global_storage()
+        self._record_attribute_policy(builtin)
+
     def temporary_base(self):
         resolved_root = self.root.resolve(strict=True)
         for path in _scratch_candidates():
@@ -1792,6 +1897,94 @@ class _Inspection:
             and (directory / "locator.json").is_file()
         )
 
+    def _inspect_git_capabilities(self):
+        try:
+            self.version = self.text("--version")
+            # The Windows cmd/git.exe is only a launcher. Bind cached option
+            # proof to its actual version and the underlying qualified binary.
+            launcher = Path(self.executable)
+            underlying = launcher.parent.parent / "mingw64" / "bin" / "git.exe"
+            if (
+                not self.explicit_executable
+                and launcher.parent.name.casefold() == "cmd"
+                and underlying.is_file()
+            ):
+                self.option_key = (
+                    self.version,
+                    _file_digest(launcher),
+                    _file_digest(underlying),
+                    self.env.get("GIT_EXEC_PATH"),
+                    self.env.get("PATH"),
+                )
+                self.storage_state.append(_digest(self.option_key))
+            commands = _COMMAND_NAMES.get(self.option_key) if self.option_key else None
+            if commands is None:
+                commands = set(self.text("--list-cmds=builtins").splitlines())
+            if not CAPABILITIES <= commands:
+                self.finding(
+                    "git_capability",
+                    "git",
+                    "Install a Git version providing the required local storage commands.",
+                )
+                return False
+            self.capabilities = tuple(sorted(CAPABILITIES))
+            if self.option_key:
+                _COMMAND_NAMES[self.option_key] = commands
+        except OSError, subprocess.SubprocessError:
+            self.finding(
+                "git_unavailable",
+                "git",
+                "Install a usable Git executable and restart the converter before preparation.",
+            )
+            return False
+        return True
+
+    def _open_empty_policy_view(self):
+        # Git's policy interpreters require an empty repository view.
+        # No vault files, objects or index are written into this view.
+        temp_base = self.temporary_base()
+        if temp_base is None:
+            return False
+        view = self.resources.enter_context(
+            tempfile.TemporaryDirectory(prefix="brz2obsidian-policy-", dir=temp_base)
+        )
+        path = Path(view)
+        (path / "objects").mkdir()
+        (path / "refs").mkdir()
+        (path / "HEAD").write_bytes(b"ref: refs/heads/inspection\n")
+        empty_config = path / "empty-config"
+        empty_config.write_bytes(b"")
+        self.policy_view = view
+        self.view_env = {
+            k: v for k, v in self.env.items() if not k.startswith("GIT_CONFIG_")
+        }
+        self.view_env.update(
+            {
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": str(empty_config),
+                "GIT_CONFIG_SYSTEM": str(empty_config),
+            }
+        )
+        self.view_config = tuple(
+            (k, v)
+            for k, v in self.config.items()
+            if k
+            in (
+                "core.attributesfile",
+                "core.excludesfile",
+                "core.ignorecase",
+                "core.symlinks",
+                "core.autocrlf",
+                "core.eol",
+            )
+        )
+        return True
+
+    def _observe_authored_policy(self):
+        self.authored()
+        if self.complete:
+            self.attributes()
+
     def run(self):
         try:
             self.subjects = tuple(
@@ -1821,96 +2014,17 @@ class _Inspection:
                 "Install Git and restart the converter before preparation.",
             )
             return self.finish()
-        try:
-            self.version = self.text("--version")
-            # The Windows cmd/git.exe is only a launcher. Bind cached option
-            # proof to its actual version and the underlying qualified binary.
-            launcher = Path(self.executable)
-            underlying = launcher.parent.parent / "mingw64" / "bin" / "git.exe"
-            if (
-                not self.explicit_executable
-                and launcher.parent.name.casefold() == "cmd"
-                and underlying.is_file()
-            ):
-                self.option_key = (
-                    self.version,
-                    _file_digest(launcher),
-                    _file_digest(underlying),
-                    self.env.get("GIT_EXEC_PATH"),
-                    self.env.get("PATH"),
-                )
-                self.storage_state.append(_digest(self.option_key))
-            commands = _COMMAND_NAMES.get(self.option_key) if self.option_key else None
-            if commands is None:
-                commands = set(self.text("--list-cmds=builtins").splitlines())
-            if not CAPABILITIES <= commands:
-                self.finding(
-                    "git_capability",
-                    "git",
-                    "Install a Git version providing the required local storage commands.",
-                )
-                return self.finish()
-            self.capabilities = tuple(sorted(CAPABILITIES))
-            if self.option_key:
-                _COMMAND_NAMES[self.option_key] = commands
-        except OSError, subprocess.SubprocessError:
-            self.finding(
-                "git_unavailable",
-                "git",
-                "Install a usable Git executable and restart the converter before preparation.",
-            )
+        if not self._inspect_git_capabilities():
             return self.finish()
         if self.configuration() and self.repository():
             if self.repo.kind == "none":
-                # Git's policy interpreters require an empty repository view.
-                # No vault files, objects or index are written into this view.
-                temp_base = self.temporary_base()
-                if temp_base is None:
+                if not self._open_empty_policy_view():
                     return self.finish()
-                view = self.resources.enter_context(
-                    tempfile.TemporaryDirectory(
-                        prefix="brz2obsidian-policy-", dir=temp_base
-                    )
-                )
-                path = Path(view)
-                (path / "objects").mkdir()
-                (path / "refs").mkdir()
-                (path / "HEAD").write_bytes(b"ref: refs/heads/inspection\n")
-                empty_config = path / "empty-config"
-                empty_config.write_bytes(b"")
-                self.policy_view = view
-                self.view_env = {
-                    k: v for k, v in self.env.items() if not k.startswith("GIT_CONFIG_")
-                }
-                self.view_env.update(
-                    {
-                        "GIT_CONFIG_NOSYSTEM": "1",
-                        "GIT_CONFIG_GLOBAL": str(empty_config),
-                        "GIT_CONFIG_SYSTEM": str(empty_config),
-                    }
-                )
-                self.view_config = tuple(
-                    (k, v)
-                    for k, v in self.config.items()
-                    if k
-                    in (
-                        "core.attributesfile",
-                        "core.excludesfile",
-                        "core.ignorecase",
-                        "core.symlinks",
-                        "core.autocrlf",
-                        "core.eol",
-                    )
-                )
                 if self.qualify_options():
                     self.git("ls-files", "--stage", "-z")
-                    self.authored()
-                    if self.complete:
-                        self.attributes()
+                    self._observe_authored_policy()
             else:
-                self.authored()
-                if self.complete:
-                    self.attributes()
+                self._observe_authored_policy()
         return self.finish()
 
     def _state_fingerprint(self, locator):
@@ -2172,6 +2286,32 @@ class _Inspection:
             return False
         return self._current_role_policy_matches(current, admission, observations)
 
+    def _format_retry_parent(self, role, parent, actual, physical_parent, context):
+        for candidate in (physical_parent, context):
+            if role.review_parent_fingerprint == self._state_fingerprint(candidate):
+                return candidate, parent
+        return actual, None
+
+    def _select_review_parent(self, role, parent, actual, physical_parent, context):
+        if parent.boundary == "result":
+            if role.review_parent_fingerprint == self._state_fingerprint(
+                physical_parent
+            ):
+                return physical_parent
+        elif (
+            role.review_parent_fingerprint
+            == self._review_state(
+                context,
+                checkpoint_state=parent.review_kind == "format_transition"
+                and parent.review_parent_fingerprint
+                == self._state_fingerprint(context),
+            )[0]
+        ):
+            return context
+        elif role.review_parent_fingerprint == self._state_fingerprint(physical_parent):
+            return physical_parent
+        return actual
+
     def _review_locator(self, locator, roles, admission, observations):
         """Carry only the review authority proved by each validated checkpoint."""
         if (
@@ -2209,13 +2349,9 @@ class _Inspection:
                     role.policy_context, admission, observations
                 )
             ):
-                for candidate in (physical_parent, context):
-                    if role.review_parent_fingerprint == self._state_fingerprint(
-                        candidate
-                    ):
-                        selected = candidate
-                        next_prepared_baseline = parent
-                        break
+                selected, next_prepared_baseline = self._format_retry_parent(
+                    role, parent, actual, physical_parent, context
+                )
             elif prepared_baseline is not None and self._format_save_follows(
                 role, parent, prepared_baseline, admission, observations
             ):
@@ -2242,25 +2378,9 @@ class _Inspection:
                 )
                 and not self._has_operation_lineage(role)
             ):
-                if parent.boundary == "result":
-                    if role.review_parent_fingerprint == self._state_fingerprint(
-                        physical_parent
-                    ):
-                        selected = physical_parent
-                elif (
-                    role.review_parent_fingerprint
-                    == self._review_state(
-                        context,
-                        checkpoint_state=parent.review_kind == "format_transition"
-                        and parent.review_parent_fingerprint
-                        == self._state_fingerprint(context),
-                    )[0]
-                ):
-                    selected = context
-                elif role.review_parent_fingerprint == self._state_fingerprint(
-                    physical_parent
-                ):
-                    selected = physical_parent
+                selected = self._select_review_parent(
+                    role, parent, actual, physical_parent, context
+                )
             parent, physical_parent, context = role, actual, selected
             prepared_baseline = next_prepared_baseline
         return context

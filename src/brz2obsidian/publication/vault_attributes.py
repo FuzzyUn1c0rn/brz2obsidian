@@ -15,6 +15,42 @@ class AttributeCapabilityUnavailable(OSError):
     """Installed Git did not establish the required typed query capability."""
 
 
+def _compressed_prefix_end(raw, offset, limit):
+    while offset < limit:
+        byte = raw[offset]
+        offset += 1
+        if not byte & 0x80:
+            break
+    else:
+        raise OSError("Malformed compressed Git index path")
+    return offset
+
+
+def _index_entry_end(raw, offset, limit, version):
+    start = offset
+    if offset + 62 > limit:
+        raise OSError("Malformed Git index entry")
+    flags = int.from_bytes(raw[offset + 60 : offset + 62], "big")
+    offset += 62
+    if flags & 0x4000:
+        if version == 2 or offset + 2 > limit:
+            raise OSError("Malformed extended Git index entry")
+        offset += 2
+    if version == 4:
+        offset = _compressed_prefix_end(raw, offset, limit)
+    end = raw.find(b"\0", offset, limit)
+    if end < 0:
+        raise OSError("Malformed Git index path")
+    if version != 4 and flags & 0xFFF != 0xFFF and end - offset != flags & 0xFFF:
+        raise OSError("Malformed Git index path length")
+    offset = end + 1
+    if version != 4:
+        offset += -(offset - start) % 8
+    if offset > limit:
+        raise OSError("Malformed Git index padding")
+    return offset
+
+
 def index_extensions(raw):
     """Locate actual extensions without letting Git freshen a split index."""
     if len(raw) < 32 or raw[:4] != b"DIRC":
@@ -31,33 +67,7 @@ def index_extensions(raw):
     count = int.from_bytes(raw[8:12], "big")
     offset = 12
     for _ in range(count):
-        start = offset
-        if offset + 62 > limit:
-            raise OSError("Malformed Git index entry")
-        flags = int.from_bytes(raw[offset + 60 : offset + 62], "big")
-        offset += 62
-        if flags & 0x4000:
-            if version == 2 or offset + 2 > limit:
-                raise OSError("Malformed extended Git index entry")
-            offset += 2
-        if version == 4:
-            while offset < limit:
-                byte = raw[offset]
-                offset += 1
-                if not byte & 0x80:
-                    break
-            else:
-                raise OSError("Malformed compressed Git index path")
-        end = raw.find(b"\0", offset, limit)
-        if end < 0:
-            raise OSError("Malformed Git index path")
-        if version != 4 and flags & 0xFFF != 0xFFF and end - offset != flags & 0xFFF:
-            raise OSError("Malformed Git index path length")
-        offset = end + 1
-        if version != 4:
-            offset += -(offset - start) % 8
-        if offset > limit:
-            raise OSError("Malformed Git index padding")
+        offset = _index_entry_end(raw, offset, limit, version)
     extensions = []
     while offset < limit:
         if offset + 8 > limit:
@@ -69,6 +79,47 @@ def index_extensions(raw):
             raise OSError("Malformed Git index extension extent")
         extensions.append(name)
     return tuple(extensions)
+
+
+def _prove_typed_attributes(worktree, attributes, build, owned_read):
+    proof_paths = set()
+    proof_rules = []
+    for attribute in sorted(attributes):
+        for value in (*MARKERS, "true", "false", "reset"):
+            path = "brz2obsidian-proof-" + attribute + "-" + value
+            proof_paths.add(path)
+            setting = (
+                attribute + "=" + value
+                if value in MARKERS
+                else {
+                    "true": attribute,
+                    "false": "-" + attribute,
+                    "reset": "!" + attribute,
+                }[value]
+            )
+            proof_rules.append(path + " " + setting + "\n")
+    (worktree / ".gitattributes").write_text("".join(proof_rules), encoding="utf-8")
+    build(
+        {
+            path.encode(): b"100644 " + EMPTY_BLOB + b" 0\t" + path.encode()
+            for path in proof_paths
+        }
+    )
+    proof_specs = [
+        f":(top,glob,attr:{attribute}={value})**"
+        for attribute in sorted(attributes)
+        for value in MARKERS
+    ]
+    proof = owned_read("ls-files", "--cached", "-z", "--", *proof_specs)
+    expected = {
+        "brz2obsidian-proof-" + attribute + "-" + value
+        for attribute in attributes
+        for value in MARKERS
+    }
+    if set(proof.decode("utf-8").split("\0")) - {""} != expected:
+        raise AttributeCapabilityUnavailable(
+            "Git cannot establish lossless typed attribute matching"
+        )
 
 
 @contextmanager
@@ -145,44 +196,7 @@ def assigned_markers(
                 "update-index", "--info-only", "-z", "--index-info", input=records
             )
 
-        proof_paths = set()
-        proof_rules = []
-        for attribute in sorted(attributes):
-            for value in (*MARKERS, "true", "false", "reset"):
-                path = "brz2obsidian-proof-" + attribute + "-" + value
-                proof_paths.add(path)
-                setting = (
-                    attribute + "=" + value
-                    if value in MARKERS
-                    else {
-                        "true": attribute,
-                        "false": "-" + attribute,
-                        "reset": "!" + attribute,
-                    }[value]
-                )
-                proof_rules.append(path + " " + setting + "\n")
-        (worktree / ".gitattributes").write_text("".join(proof_rules), encoding="utf-8")
-        build(
-            {
-                path.encode(): b"100644 " + EMPTY_BLOB + b" 0\t" + path.encode()
-                for path in proof_paths
-            }
-        )
-        proof_specs = [
-            f":(top,glob,attr:{attribute}={value})**"
-            for attribute in sorted(attributes)
-            for value in MARKERS
-        ]
-        proof = owned_read("ls-files", "--cached", "-z", "--", *proof_specs)
-        expected = {
-            "brz2obsidian-proof-" + attribute + "-" + value
-            for attribute in attributes
-            for value in MARKERS
-        }
-        if set(proof.decode("utf-8").split("\0")) - {""} != expected:
-            raise AttributeCapabilityUnavailable(
-                "Git cannot establish lossless typed attribute matching"
-            )
+        _prove_typed_attributes(worktree, attributes, build, owned_read)
         # Reconstruct a separate ordinary domain only after isolated proof. This
         # never asks the empty proof store to load real indexed attribute blobs.
         index.unlink()
