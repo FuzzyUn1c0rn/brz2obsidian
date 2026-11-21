@@ -219,7 +219,7 @@ class Acquisition:
         self.seed(value["thoughtIdB"])
         return key
 
-    def candidates(self, hit):
+    def _candidate_envelope(self, hit):
         if (
             not isinstance(hit, dict)
             or hit.get("brainId") not in (self.brain_id, ZERO_UUID)
@@ -243,6 +243,9 @@ class Acquisition:
                 "search",
                 "A wildcard candidate envelope is not qualified",
             )
+        return shape
+
+    def _seed_candidate_owners(self, hit):
         found = False
         node = hit.get("sourceThought")
         if node is not None:
@@ -261,6 +264,11 @@ class Acquisition:
                 self.seed(link.get("thoughtIdA"))
                 self.seed(link.get("thoughtIdB"))
             found = True
+        return found
+
+    def candidates(self, hit):
+        shape = self._candidate_envelope(hit)
+        found = self._seed_candidate_owners(hit)
         if hit.get("attachmentId") is not None:
             if hit["attachmentId"] == ZERO_UUID:
                 if shape not in {"thought", "link"}:
@@ -278,7 +286,7 @@ class Acquisition:
                 "A wildcard hit has no resolvable authoritative owner",
             )
 
-    def acquire(self):
+    def _read_brain(self):
         b = self.brain_id
         brain = collection(self.get("brain", "/brains/" + b, b), b)
         accessible = array(self.get("brain", "/brains"))
@@ -289,7 +297,29 @@ class Acquisition:
         ]
         if not matches or any(collection(value, b) != brain for value in matches):
             refuse("The requested Brain does not agree with accessible Brain inventory")
-        start = self.statistics()
+        return brain
+
+    def _definition_entries(self, status, raw, start):
+        b = self.brain_id
+        if status == 400:
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeError:
+                refuse("The failed tag inventory is not qualified UTF-8")
+            if (
+                text.strip() != "Could not retrieve list of Tags for brain " + b
+                or start["tags"] != 0
+            ):
+                refuse(
+                    "The failed tag inventory does not meet the reviewed zero-tag rule"
+                )
+            entries = []
+        else:
+            entries = array(self.client.decode_json(raw))
+        return entries
+
+    def _read_definition_inventories(self, start):
+        b = self.brain_id
         definitions = {}
         for role, operation in ((2, "types"), (4, "tags")):
             status, raw = self.client.request(
@@ -297,21 +327,7 @@ class Acquisition:
                 "/thoughts/" + b + "/" + operation,
                 allow_tag_error=operation == "tags",
             )
-            if status == 400:
-                try:
-                    text = raw.decode("utf-8")
-                except UnicodeError:
-                    refuse("The failed tag inventory is not qualified UTF-8")
-                if (
-                    text.strip() != "Could not retrieve list of Tags for brain " + b
-                    or start["tags"] != 0
-                ):
-                    refuse(
-                        "The failed tag inventory does not meet the reviewed zero-tag rule"
-                    )
-                entries = []
-            else:
-                entries = array(self.client.decode_json(raw))
+            entries = self._definition_entries(status, raw, start)
             keys = set()
             for value in entries:
                 key = self.observe(value)
@@ -324,10 +340,10 @@ class Acquisition:
             definitions[role] = keys
             if operation == "tags":
                 tag400 = status == 400
-        self.seed(brain["homeThoughtId"])
-        if self.config.include_pins:
-            for value in array(self.get("thought", "/thoughts/" + b + "/pins")):
-                self.observe(value)
+        return definitions, tag400
+
+    def _wildcard_search(self):
+        b = self.brain_id
         limit = min(
             self.config.search_initial_results,
             self.config.search_max_results or 2147483647,
@@ -364,6 +380,9 @@ class Acquisition:
                     "incomplete_source",
                 )
             limit = min(limit * 2, ceiling)
+
+    def _resolve_observations(self, definitions, tag400):
+        b = self.brain_id
         resolved_links = set()
         while self.ids - self.thoughts.keys() or self.link_ids - resolved_links:
             if self.link_ids - resolved_links:
@@ -390,58 +409,86 @@ class Acquisition:
                     "An included definition is absent from its authoritative inventory",
                     subject=("item", _included_name(value)),
                 )
+            self._observe_graph(key, value)
+
+    def _incident_links(self, key, links):
+        incident_links = set()
+        for link in links:
+            if not isinstance(link, dict) or (
+                link.get("thoughtIdA") == link.get("thoughtIdB")
+                and not (
+                    self.profile_version in {"4", "5"} and link.get("meaning") == 3
+                )
+            ):
+                if isinstance(link, dict) and self.profile_version in {
+                    "4",
+                    "5",
+                }:
+                    unsupported_shape(
+                        self.profile_version,
+                        "relationship",
+                        "An unqualified self relationship",
+                    )
+                refuse("A graph carries a malformed relationship candidate")
+            incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
+            # Discovery is Brain-wide; only complete authoritative endpoint
+            # graphs can qualify a candidate's relationship meaning.
+            observed = self.observe_link(link)
+            if incident:
+                incident_links.add(observed)
+        return incident_links
+
+    def _observe_graph(self, key, value):
+        b = self.brain_id
+        try:
+            graph = self.get(
+                "graph",
+                "/thoughts/" + b + "/" + key + "/graph?includeSiblings=true",
+                key,
+            )
+            if not isinstance(graph, dict) or graph.keys() != GRAPH_FIELDS:
+                refuse("A thought graph has an unsupported declaration")
+            if self.observe(graph["activeThought"]) != key:
+                refuse("An acquired graph has a foreign active owner")
+            projected = {}
+            for name, target in NEIGHBORS.items():
+                values = array(graph[name])
+                neighbors = [self.observe(node) for node in values]
+                projected[target] = sorted(set(neighbors))
+            projected["type_ids"] = (
+                [self.observe(graph["type"])] if graph["type"] is not None else []
+            )
+            links = array(graph["links"])
+            incident_links = self._incident_links(key, links)
+            projected["link_ids"] = sorted(incident_links)
+            attachments = graph["attachments"]
+            if attachments is not None and not isinstance(attachments, list):
+                refuse("A graph attachment declaration is malformed")
+            projected["attachment_ids"] = []
+            self.graphs[key] = projected, attachments
+        except (MigrationFailed, MigrationRefused) as error:
+            raise with_subject(error, "item", _included_name(value)) from None
+
+    def _verify_link_resources(self, relationships, active_links):
+        b = self.brain_id
+        for relationship in relationships:
             try:
-                graph = self.get(
-                    "graph",
-                    "/thoughts/" + b + "/" + key + "/graph?includeSiblings=true",
-                    key,
-                )
-                if not isinstance(graph, dict) or graph.keys() != GRAPH_FIELDS:
-                    refuse("A thought graph has an unsupported declaration")
-                if self.observe(graph["activeThought"]) != key:
-                    refuse("An acquired graph has a foreign active owner")
-                projected = {}
-                for name, target in NEIGHBORS.items():
-                    values = array(graph[name])
-                    neighbors = [self.observe(node) for node in values]
-                    projected[target] = sorted(set(neighbors))
-                projected["type_ids"] = (
-                    [self.observe(graph["type"])] if graph["type"] is not None else []
-                )
-                links = array(graph["links"])
-                incident_links = set()
-                for link in links:
-                    if not isinstance(link, dict) or (
-                        link.get("thoughtIdA") == link.get("thoughtIdB")
-                        and not (
-                            self.profile_version in {"4", "5"}
-                            and link.get("meaning") == 3
-                        )
-                    ):
-                        if isinstance(link, dict) and self.profile_version in {
-                            "4",
-                            "5",
-                        }:
-                            unsupported_shape(
-                                self.profile_version,
-                                "relationship",
-                                "An unqualified self relationship",
-                            )
-                        refuse("A graph carries a malformed relationship candidate")
-                    incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
-                    # Discovery is Brain-wide; only complete authoritative endpoint
-                    # graphs can qualify a candidate's relationship meaning.
-                    observed = self.observe_link(link)
-                    if incident:
-                        incident_links.add(observed)
-                projected["link_ids"] = sorted(incident_links)
-                attachments = graph["attachments"]
-                if attachments is not None and not isinstance(attachments, list):
-                    refuse("A graph attachment declaration is malformed")
-                projected["attachment_ids"] = []
-                self.graphs[key] = projected, attachments
+                if array(
+                    self.get(
+                        "attachments",
+                        "/links/" + b + "/" + relationship.key + "/attachments",
+                        relationship.key,
+                    )
+                ):
+                    refuse("Link-owned content is outside reviewed coverage")
             except (MigrationFailed, MigrationRefused) as error:
-                raise with_subject(error, "item", _included_name(value)) from None
+                value = active_links[relationship.key]
+                error = with_subject(error, "relationship", value.get("name"))
+                raise with_subject(
+                    error, "relationship", endpoint_description(value, self.thoughts)
+                ) from None
+
+    def _scoped_graph(self):
         excluded = {
             key
             for key, value in self.thoughts.items()
@@ -467,30 +514,11 @@ class Acquisition:
             graph["link_ids"] = [
                 key for key in graph["link_ids"] if key in active_links
             ]
-        for relationship in relationships:
-            try:
-                if array(
-                    self.get(
-                        "attachments",
-                        "/links/" + b + "/" + relationship.key + "/attachments",
-                        relationship.key,
-                    )
-                ):
-                    refuse("Link-owned content is outside reviewed coverage")
-            except (MigrationFailed, MigrationRefused) as error:
-                value = active_links[relationship.key]
-                error = with_subject(error, "relationship", value.get("name"))
-                raise with_subject(
-                    error, "relationship", endpoint_description(value, self.thoughts)
-                ) from None
-        records, decisions, items = [], [], []
+        self._verify_link_resources(relationships, active_links)
+        return excluded, active_links, relationships, assignments
 
-        def record(domain, key, owner, value):
-            records.append(
-                {"key": key, "domain": domain, "owner_id": owner, "value": value}
-            )
-
-        record("brain", "brain:" + b, b, brain)
+    def _record_links(self, active_links, excluded, record, decisions):
+        b = self.brain_id
         for key, value in sorted(self.links.items()):
             if key in active_links:
                 record("link", "link:" + key, b, value)
@@ -516,6 +544,115 @@ class Acquisition:
                         + ["exclusion:" + node for node in sorted(removed)],
                     }
                 )
+
+    def _record_exclusion(self, key, value, system, record, decisions):
+        b = self.brain_id
+        minimal = {
+            name: value[name]
+            for name in ("id", "brainId", "kind", "acType", "forgottenDateTime")
+        }
+        record("exclusion", "exclusion:" + key, b, minimal)
+        decisions.append(
+            {
+                "key": "scope:excluded:" + key,
+                "rule_id": "local-api.system.v1"
+                if system
+                else "local-api.forgotten.v1",
+                "outcome": "excluded_system" if system else "excluded_forgotten",
+                "subjects": ["thought:" + key],
+                "evidence": ["exclusion:" + key],
+            }
+        )
+
+    def _capture_owner(self, key, value, attachments, excluded, record, decisions):
+        b = self.brain_id
+        try:
+            owned = array(
+                self.get(
+                    "attachments",
+                    "/thoughts/" + b + "/" + key + "/attachments",
+                    key,
+                )
+            )
+            owner_assets, owner_documents, owner_payloads = capture_owner(
+                self.client,
+                self.config,
+                b,
+                key,
+                owned,
+                attachments,
+                record,
+                self.profile_version,
+                {k: self.thoughts[k] for k in excluded},
+                decisions,
+                self.capture_directory,
+            )
+        except (MigrationFailed, MigrationRefused) as error:
+            raise with_subject(error, "item", _included_name(value)) from None
+        return owner_assets, owner_documents, owner_payloads
+
+    def _inspect_note_absence(self, key, value, owner_documents):
+        b = self.brain_id
+        try:
+            note = (
+                self.get("note", "/notes/" + b + "/" + key, key)
+                if not owner_documents
+                else None
+            )
+            expected = {
+                "brainId": b,
+                "sourceId": key,
+                "sourceType": 2,
+                "modificationDateTime": "0001-01-01T00:00:00",
+                "markdown": "",
+                "html": None,
+                "text": None,
+            }
+            if not owner_documents and (
+                note != expected
+                or not isinstance(note, dict)
+                or type(note.get("sourceType")) is not int
+            ):
+                refuse(
+                    "Authored note absence is not established by the qualified empty state"
+                )
+        except (MigrationFailed, MigrationRefused) as error:
+            raise with_subject(error, "item", _included_name(value)) from None
+        return expected
+
+    def _included_item(self, key, value, owner_assets, owner_documents):
+        return Item(
+            key=key,
+            original_identity=key,
+            naming_seed=key.replace("-", ""),
+            document_ids=tuple(d.key for d in owner_documents),
+            resource_ids=tuple(
+                a.asset_id for a in owner_assets if a.role != "note_original"
+            ),
+            role={1: "ordinary", 2: "definition", 4: "tag"}[value["kind"]],
+            title=value["name"],
+            label=value.get("label"),
+            declared_appearance=DeclaredAppearance(
+                foreground_color=value["foregroundColor"],
+                background_color=value["backgroundColor"],
+                icon_asset_id=next(
+                    (a.asset_id for a in owner_assets if a.role == "icon"), None
+                ),
+            )
+            if value["foregroundColor"] is not None
+            or value["backgroundColor"] is not None
+            or any(a.role == "icon" for a in owner_assets)
+            else None,
+            calendar_dates=CalendarDates(
+                created=source_date(value["creationDateTime"]),
+                updated=source_date(value["modificationDateTime"]),
+            ),
+            evidence=("thought:" + key,),
+        )
+
+    def _capture_thought_inventory(self, excluded, record, decisions):
+        b = self.brain_id
+        items = []
         assets, documents, payloads = [], [], {}
         included = {1: [], 2: [], 4: []}
         observed_forgotten = 0
@@ -524,50 +661,13 @@ class Acquisition:
                 system = value["kind"] == 5
                 if not system and value["kind"] == 1:
                     observed_forgotten += 1
-                minimal = {
-                    name: value[name]
-                    for name in ("id", "brainId", "kind", "acType", "forgottenDateTime")
-                }
-                record("exclusion", "exclusion:" + key, b, minimal)
-                decisions.append(
-                    {
-                        "key": "scope:excluded:" + key,
-                        "rule_id": "local-api.system.v1"
-                        if system
-                        else "local-api.forgotten.v1",
-                        "outcome": "excluded_system"
-                        if system
-                        else "excluded_forgotten",
-                        "subjects": ["thought:" + key],
-                        "evidence": ["exclusion:" + key],
-                    }
-                )
+                self._record_exclusion(key, value, system, record, decisions)
                 continue
             included[value["kind"]].append(key)
             graph, attachments = self.graphs[key]
-            try:
-                owned = array(
-                    self.get(
-                        "attachments",
-                        "/thoughts/" + b + "/" + key + "/attachments",
-                        key,
-                    )
-                )
-                owner_assets, owner_documents, owner_payloads = capture_owner(
-                    self.client,
-                    self.config,
-                    b,
-                    key,
-                    owned,
-                    attachments,
-                    record,
-                    self.profile_version,
-                    {k: self.thoughts[k] for k in excluded},
-                    decisions,
-                    self.capture_directory,
-                )
-            except (MigrationFailed, MigrationRefused) as error:
-                raise with_subject(error, "item", _included_name(value)) from None
+            owner_assets, owner_documents, owner_payloads = self._capture_owner(
+                key, value, attachments, excluded, record, decisions
+            )
             assets.extend(owner_assets)
             documents.extend(owner_documents)
             payloads.update(owner_payloads)
@@ -575,31 +675,7 @@ class Acquisition:
                 [a.asset_id for a in owner_assets]
                 + [d.key for d in owner_documents if d.original_copy_omitted]
             )
-            try:
-                note = (
-                    self.get("note", "/notes/" + b + "/" + key, key)
-                    if not owner_documents
-                    else None
-                )
-                expected = {
-                    "brainId": b,
-                    "sourceId": key,
-                    "sourceType": 2,
-                    "modificationDateTime": "0001-01-01T00:00:00",
-                    "markdown": "",
-                    "html": None,
-                    "text": None,
-                }
-                if not owner_documents and (
-                    note != expected
-                    or not isinstance(note, dict)
-                    or type(note.get("sourceType")) is not int
-                ):
-                    refuse(
-                        "Authored note absence is not established by the qualified empty state"
-                    )
-            except (MigrationFailed, MigrationRefused) as error:
-                raise with_subject(error, "item", _included_name(value)) from None
+            expected = self._inspect_note_absence(key, value, owner_documents)
             record("thought", "thought:" + key, b, value)
             record("graph", "graph:" + key, key, graph)
             if not owner_documents:
@@ -614,36 +690,12 @@ class Acquisition:
                     "evidence": ["thought:" + key],
                 }
             )
-            items.append(
-                Item(
-                    key=key,
-                    original_identity=key,
-                    naming_seed=key.replace("-", ""),
-                    document_ids=tuple(d.key for d in owner_documents),
-                    resource_ids=tuple(
-                        a.asset_id for a in owner_assets if a.role != "note_original"
-                    ),
-                    role={1: "ordinary", 2: "definition", 4: "tag"}[value["kind"]],
-                    title=value["name"],
-                    label=value.get("label"),
-                    declared_appearance=DeclaredAppearance(
-                        foreground_color=value["foregroundColor"],
-                        background_color=value["backgroundColor"],
-                        icon_asset_id=next(
-                            (a.asset_id for a in owner_assets if a.role == "icon"), None
-                        ),
-                    )
-                    if value["foregroundColor"] is not None
-                    or value["backgroundColor"] is not None
-                    or any(a.role == "icon" for a in owner_assets)
-                    else None,
-                    calendar_dates=CalendarDates(
-                        created=source_date(value["creationDateTime"]),
-                        updated=source_date(value["modificationDateTime"]),
-                    ),
-                    evidence=("thought:" + key,),
-                )
-            )
+            items.append(self._included_item(key, value, owner_assets, owner_documents))
+        return items, assets, documents, payloads, included, observed_forgotten
+
+    def _check_inventory_counts(
+        self, brain, start, included, active_links, observed_forgotten
+    ):
         if brain["homeThoughtId"] not in included[1]:
             refuse(
                 "Home must be an included ordinary live thought",
@@ -671,6 +723,36 @@ class Acquisition:
             or observed_forgotten > end["forgottenThoughts"]
         ):
             refuse("Required source inventory counts do not reconcile")
+        return end
+
+    def acquire(self):
+        b = self.brain_id
+        brain = self._read_brain()
+        start = self.statistics()
+        definitions, tag400 = self._read_definition_inventories(start)
+        self.seed(brain["homeThoughtId"])
+        if self.config.include_pins:
+            for value in array(self.get("thought", "/thoughts/" + b + "/pins")):
+                self.observe(value)
+        self._wildcard_search()
+        self._resolve_observations(definitions, tag400)
+        excluded, active_links, relationships, assignments = self._scoped_graph()
+
+        records, decisions = [], []
+
+        def record(domain, key, owner, value):
+            records.append(
+                {"key": key, "domain": domain, "owner_id": owner, "value": value}
+            )
+
+        record("brain", "brain:" + b, b, brain)
+        self._record_links(active_links, excluded, record, decisions)
+        items, assets, documents, payloads, included, observed_forgotten = (
+            self._capture_thought_inventory(excluded, record, decisions)
+        )
+        end = self._check_inventory_counts(
+            brain, start, included, active_links, observed_forgotten
+        )
         record("statistics", "statistics:start", b, start)
         record("statistics", "statistics:end", b, end)
         if tag400:
