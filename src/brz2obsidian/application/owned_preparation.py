@@ -44,6 +44,23 @@ class _ProducerCancellation(Event):
         return super().is_set() or bool(self.probe is not None and self.probe())
 
 
+def _cleanup_tracking_refusal(error, history):
+    from .attachment_cleanup import refused
+
+    if isinstance(error, lifecycle._ExcludedDependency):
+        return refused(
+            "excluded_dependency_requires_tracking",
+            history,
+            action="review_tracking",
+        )
+    if error.args == ("reference_inventory_incomplete",):
+        return refused(
+            "reference_inventory_incomplete",
+            history,
+            action="review_tracking",
+        )
+
+
 class _OwnedPreparation:
     """One context-owned review, never a serialized or caller-created capability."""
 
@@ -644,6 +661,90 @@ class _OwnedPreparation:
             self._session._batch_current = self._apply_source_update
             self._session._content._spool_acquisitions = self._apply_source_update
 
+    def _open_restored_review(self, checkpoint, kind, *, resume):
+        self._apply_source_update = resume and kind == "source_update"
+        borrowed = (
+            self._apply_review_owners._borrow_local(self.observed, checkpoint)
+            if self._apply_source_update
+            else None
+        )
+        if borrowed is None:
+            self._start_session()
+            self._tip = self._load_tip(checkpoint)
+        else:
+            self._session, self._tip = borrowed
+            self._tip_commit = checkpoint.locator.commit
+            self._borrowed_apply_session = True
+
+    def _resume_restored_update(self, history, plan):
+        result = self._resume_update(history, plan)
+        self.preparation = result.preparation
+        if (
+            self._apply_source_update
+            and result.ready
+            and result.code == "unchanged"
+            and result.preparation is not None
+            and result.preparation.source_ref is None
+        ):
+            self._apply_resume = (
+                result,
+                self.observed.current_domain_matcher(),
+                history.checkpoint.manifest,
+            )
+        return result
+
+    def _resume_restored_onboarding(self, history, checkpoint, plan):
+        from .onboarding import _reobserve_onboarding
+        from .update_contracts import UpdatePreparation
+
+        with self._session._operation():
+            incoming = self._source_payload(checkpoint)
+            self._session._coadmit()
+            directory, binding = self._restore_incoming(checkpoint, plan, incoming)
+            prepared = UpdatePreparation(
+                schema_id="brz2obsidian.update-preparation",
+                schema_version=1,
+                kind="onboarding",
+                vault=history.admission.vault,
+                locator=checkpoint.locator,
+                payload_directory=str(directory),
+                source_binding=binding,
+                observed_source=checkpoint.manifest.observed_source
+                or SourceIdentity.model_validate(
+                    lifecycle.record(incoming)["source_identity"]
+                ),
+                retained_source_provenance=False,
+                review=plan,
+            )
+            _, result, _ = _reobserve_onboarding(
+                self.operations, prepared, history, _owner=self
+            )
+            self.preparation = result.preparation
+            return result
+
+    def _restore_failure(self, kind, history, resuming, error):
+        if kind == "attachment_cleanup":
+            from .attachment_cleanup import refused
+
+            tracking_refusal = _cleanup_tracking_refusal(error, history)
+            if tracking_refusal is not None:
+                return tracking_refusal
+            return refused(
+                "resume_unavailable" if resuming else "saved_update_unavailable",
+                history,
+            )
+        return lifecycle._refused(
+            "resume_unavailable" if resuming else "saved_update_unavailable",
+            history,
+        )
+
+    def _release_restored_scope(self, *, resume):
+        self._cancel.probe = None
+        if self._session is not None and not self._session._closed:
+            self._session._ledger.release_failed()
+        if not resume or self.preparation is None:
+            self.close()
+
     def restore(self, vault, *, resume=False, cancel=None, check_saved=None):
         """Read saved history, optionally checking identity before resuming it."""
         from .update_contracts import UpdateResult
@@ -683,19 +784,7 @@ class _OwnedPreparation:
             ):
                 return None
             kind = checkpoint.metadata[10]
-            self._apply_source_update = resume and kind == "source_update"
-            borrowed = (
-                self._apply_review_owners._borrow_local(self.observed, checkpoint)
-                if self._apply_source_update
-                else None
-            )
-            if borrowed is None:
-                self._start_session()
-                self._tip = self._load_tip(checkpoint)
-            else:
-                self._session, self._tip = borrowed
-                self._tip_commit = checkpoint.locator.commit
-                self._borrowed_apply_session = True
+            self._open_restored_review(checkpoint, kind, resume=resume)
             plan = self._tip.saved.plan
             if not resume or check_saved is not None:
                 saved = UpdateResult(
@@ -723,48 +812,8 @@ class _OwnedPreparation:
                 "format_transition",
                 "attachment_cleanup",
             ):
-                result = self._resume_update(history, plan)
-                self.preparation = result.preparation
-                if (
-                    self._apply_source_update
-                    and result.ready
-                    and result.code == "unchanged"
-                    and result.preparation is not None
-                    and result.preparation.source_ref is None
-                ):
-                    self._apply_resume = (
-                        result,
-                        self.observed.current_domain_matcher(),
-                        history.checkpoint.manifest,
-                    )
-                return result
-            from .onboarding import _reobserve_onboarding
-            from .update_contracts import UpdatePreparation
-
-            with self._session._operation():
-                incoming = self._source_payload(checkpoint)
-                self._session._coadmit()
-                directory, binding = self._restore_incoming(checkpoint, plan, incoming)
-                prepared = UpdatePreparation(
-                    schema_id="brz2obsidian.update-preparation",
-                    schema_version=1,
-                    kind="onboarding",
-                    vault=history.admission.vault,
-                    locator=checkpoint.locator,
-                    payload_directory=str(directory),
-                    source_binding=binding,
-                    observed_source=checkpoint.manifest.observed_source
-                    or SourceIdentity.model_validate(
-                        lifecycle.record(incoming)["source_identity"]
-                    ),
-                    retained_source_provenance=False,
-                    review=plan,
-                )
-                _, result, _ = _reobserve_onboarding(
-                    self.operations, prepared, history, _owner=self
-                )
-                self.preparation = result.preparation
-                return result
+                return self._resume_restored_update(history, plan)
+            return self._resume_restored_onboarding(history, checkpoint, plan)
         except (
             OSError,
             ValueError,
@@ -773,35 +822,9 @@ class _OwnedPreparation:
             AttributeError,
             RecursionError,
         ) as error:
-            if kind == "attachment_cleanup":
-                from .attachment_cleanup import refused
-
-                if isinstance(error, lifecycle._ExcludedDependency):
-                    return refused(
-                        "excluded_dependency_requires_tracking",
-                        history,
-                        action="review_tracking",
-                    )
-                if error.args == ("reference_inventory_incomplete",):
-                    return refused(
-                        "reference_inventory_incomplete",
-                        history,
-                        action="review_tracking",
-                    )
-                return refused(
-                    "resume_unavailable" if resuming else "saved_update_unavailable",
-                    history,
-                )
-            return lifecycle._refused(
-                "resume_unavailable" if resuming else "saved_update_unavailable",
-                history,
-            )
+            return self._restore_failure(kind, history, resuming, error)
         finally:
-            self._cancel.probe = None
-            if self._session is not None and not self._session._closed:
-                self._session._ledger.release_failed()
-            if not resume or self.preparation is None:
-                self.close()
+            self._release_restored_scope(resume=resume)
 
     def _resume_update(self, history, plan):
         checkpoint = history.checkpoint
@@ -946,6 +969,108 @@ class _OwnedPreparation:
             if self._session is not None and not self._session._closed:
                 self._session._ledger.release_failed()
 
+    def _prepare_onboarding(self, vault, source, history, original_source):
+        from .onboarding import prepare_onboarding
+
+        if (
+            history.status != "absent"
+            or history.admission.status != "supported"
+            or history.admission.repository.kind != "root"
+            or not history.admission.inventory_complete
+            or source is None
+        ):
+            result = prepare_onboarding(
+                self.operations, vault, source, original_source=original_source
+            )
+            self.close()
+            return result
+        self._start_session()
+        with self._session._operation():
+            result = prepare_onboarding(
+                self.operations,
+                vault,
+                source,
+                original_source=original_source,
+                _owner=self,
+            )
+            self._stage_readonly_initial(result)
+        if result.preparation is None:
+            self.close()
+        return result
+
+    def _prepare_source_update(self, vault, source, history):
+        history, stopped = lifecycle._history(
+            self.operations,
+            vault,
+            self.observed if history.status == "intact" else None,
+        )
+        if stopped is not None:
+            self.close()
+            return stopped
+        self._session = ReviewSession._owned_preparation(
+            self.observed,
+            self._directory,
+            lifecycle.available_memory(),
+            _cancel=self._cancel,
+        )
+        self._tip = self._load_tip(history.checkpoint)
+        with self._session._operation():
+            baseline = lifecycle._read_source(
+                self.operations,
+                vault,
+                history.checkpoint,
+                self.observed,
+                _owner=self,
+            )
+            directory, incoming, source_identity, reused = lifecycle._render(
+                self.operations,
+                source,
+                baseline,
+                directory=self._directory / "incoming",
+                _owner=self,
+            )
+            association = history.checkpoint.locator.association
+            record = lifecycle.record(incoming)
+            if (
+                record["source_identity"]["source_id"],
+                record["source_identity"]["module_id"],
+            ) != (association.collection_id, association.module_id):
+                raise OSError("association_mismatch")
+            if (
+                lifecycle.output_identity(lifecycle.record(baseline))
+                != history.checkpoint.manifest.identity
+            ):
+                raise OSError("baseline_identity_mismatch")
+            memory = (
+                () if self._tip is None else lifecycle._memory(self._tip.saved.plan)
+            )
+            facts = lifecycle._observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=uuid4().hex,
+                generation=1,
+                source_memory=memory,
+                _owner=self,
+            )
+            facts = self._session._admit_values(facts)
+            history = self._scoped(history, facts)
+            self._session._coadmit()
+            plan = self._session._initial_review(facts, history.admission.preflight)
+            binding = self.operations.observe_reviewed_source(directory, plan)
+            result = lifecycle._prepared(
+                history,
+                directory,
+                binding,
+                plan,
+                source_identity,
+                reused,
+                source_ref=str(Path(source).absolute()),
+                _owner=self,
+            )
+            self._stage_readonly_initial(result)
+        return result
+
     def _prepare(self, vault, source, *, kind, original_source):
         history = None
         try:
@@ -969,104 +1094,8 @@ class _OwnedPreparation:
                     self.close()
                 return result
             if kind == "onboarding":
-                from .onboarding import prepare_onboarding
-
-                if (
-                    history.status != "absent"
-                    or history.admission.status != "supported"
-                    or history.admission.repository.kind != "root"
-                    or not history.admission.inventory_complete
-                    or source is None
-                ):
-                    result = prepare_onboarding(
-                        self.operations, vault, source, original_source=original_source
-                    )
-                    self.close()
-                    return result
-                self._start_session()
-                with self._session._operation():
-                    result = prepare_onboarding(
-                        self.operations,
-                        vault,
-                        source,
-                        original_source=original_source,
-                        _owner=self,
-                    )
-                    self._stage_readonly_initial(result)
-                if result.preparation is None:
-                    self.close()
-                return result
-            history, stopped = lifecycle._history(
-                self.operations,
-                vault,
-                self.observed if history.status == "intact" else None,
-            )
-            if stopped is not None:
-                self.close()
-                return stopped
-            self._session = ReviewSession._owned_preparation(
-                self.observed,
-                self._directory,
-                lifecycle.available_memory(),
-                _cancel=self._cancel,
-            )
-            self._tip = self._load_tip(history.checkpoint)
-            with self._session._operation():
-                baseline = lifecycle._read_source(
-                    self.operations,
-                    vault,
-                    history.checkpoint,
-                    self.observed,
-                    _owner=self,
-                )
-                directory, incoming, source_identity, reused = lifecycle._render(
-                    self.operations,
-                    source,
-                    baseline,
-                    directory=self._directory / "incoming",
-                    _owner=self,
-                )
-                association = history.checkpoint.locator.association
-                record = lifecycle.record(incoming)
-                if (
-                    record["source_identity"]["source_id"],
-                    record["source_identity"]["module_id"],
-                ) != (association.collection_id, association.module_id):
-                    raise OSError("association_mismatch")
-                if (
-                    lifecycle.output_identity(lifecycle.record(baseline))
-                    != history.checkpoint.manifest.identity
-                ):
-                    raise OSError("baseline_identity_mismatch")
-                memory = (
-                    () if self._tip is None else lifecycle._memory(self._tip.saved.plan)
-                )
-                facts = lifecycle._observed_facts(
-                    history,
-                    baseline,
-                    incoming,
-                    proposal_id=uuid4().hex,
-                    generation=1,
-                    source_memory=memory,
-                    _owner=self,
-                )
-                facts = self._session._admit_values(facts)
-                history = self._scoped(history, facts)
-                self._session._coadmit()
-                plan = self._session._initial_review(facts, history.admission.preflight)
-                binding = self.operations.observe_reviewed_source(directory, plan)
-                result = lifecycle._prepared(
-                    history,
-                    directory,
-                    binding,
-                    plan,
-                    source_identity,
-                    reused,
-                    source_ref=str(Path(source).absolute()),
-                    _owner=self,
-                )
-                self._stage_readonly_initial(result)
-            return result
+                return self._prepare_onboarding(vault, source, history, original_source)
+            return self._prepare_source_update(vault, source, history)
         except OSError, ValueError, TypeError, KeyError, RecursionError:
             self.close()
             if kind == "onboarding":
@@ -1176,6 +1205,16 @@ class _OwnedPreparation:
             self._session._coadmit()
             return self._action_result(preparation, plan, action)
 
+    def _choice_source_matches(self, preparation):
+        source_hash = hashlib.sha256()
+        with Path(preparation.source_ref).open("rb") as stream:
+            while block := stream.read(1024 * 1024):
+                if self._cancel.is_set():
+                    raise OSError("cancelled_before_choice")
+                source_hash.update(block)
+        source_sha = source_hash.hexdigest()
+        return source_sha == preparation.observed_source.source_sha256
+
     def keep_current_unresolved(self, preparation, *, group_id, cancel=None):
         from .review_choices import keep_current_group_action
 
@@ -1183,18 +1222,12 @@ class _OwnedPreparation:
         if cancel is not None:
             self._cancel.probe = cancel
         try:
-            if preparation.source_ref is not None:
-                source_hash = hashlib.sha256()
-                with Path(preparation.source_ref).open("rb") as stream:
-                    while block := stream.read(1024 * 1024):
-                        if self._cancel.is_set():
-                            raise OSError("cancelled_before_choice")
-                        source_hash.update(block)
-                source_sha = source_hash.hexdigest()
-                if source_sha != preparation.observed_source.source_sha256:
-                    return lifecycle._refused(
-                        "source_payload_changed", preparation=preparation
-                    )
+            if preparation.source_ref is not None and not self._choice_source_matches(
+                preparation
+            ):
+                return lifecycle._refused(
+                    "source_payload_changed", preparation=preparation
+                )
             history = self._observe(
                 preparation.vault,
                 preparation.locator,
@@ -1422,19 +1455,7 @@ class _OwnedPreparation:
         ):
             raise lifecycle._ExcludedDependency
 
-    def _reobserve(self, preparation, *, for_apply=False):
-        resume, self._apply_resume = self._apply_resume, None
-        if self._session is not None:
-            self._session._apply_proved_plan = None
-        if preparation.kind == "onboarding":
-            from .onboarding import reobserve_onboarding
-
-            history, result, _ = reobserve_onboarding(
-                self.operations, preparation, _owner=self
-            )
-            if history is None or result.preparation is None:
-                raise OSError(result.code)
-            return history, result, None
+    def _observe_preparation_history(self, preparation):
         history = self._observe(preparation.vault, preparation.locator)
         maintenance = preparation.kind == "format_transition"
         cleanup = preparation.kind == "attachment_cleanup"
@@ -1460,10 +1481,11 @@ class _OwnedPreparation:
             != preparation.source_binding
         ):
             raise OSError("source_payload_changed")
+        return history
+
+    def _revalidate_apply_resume(self, history, preparation, resume):
         if (
-            for_apply
-            and resume is not None
-            and resume[0].preparation is self.preparation
+            resume[0].preparation is self.preparation
             and resume[0].preparation == preparation
             and resume[2] == history.checkpoint.manifest
             and resume[1](self.observed)
@@ -1487,98 +1509,131 @@ class _OwnedPreparation:
                         resume[0].model_copy(update={"code": "current"}),
                         None,
                     )
+
+    def _revalidate_review_payloads(self, history, preparation, plan):
+        maintenance = preparation.kind == "format_transition"
+        cleanup = preparation.kind == "attachment_cleanup"
+        baseline = self._source_payload(history.checkpoint)
+        if maintenance:
+            baseline = lifecycle._baseline(history.checkpoint, baseline, _owner=self)
+        incoming = lifecycle._read_physical(
+            preparation.payload_directory,
+            preparation.source_binding.files,
+            _owner=self,
+        )
+        if cleanup:
+            expected = tuple(
+                (row.path, row.mode, row.size, row.sha256)
+                for row in history.checkpoint.manifest.source
+            )
+            if (
+                preparation.source_ref is not None
+                or preparation.source_binding.incoming_identity
+                != history.checkpoint.manifest.identity
+                or preparation.source_binding.target_source_version
+                != lifecycle.record(baseline)["source_identity"]["snapshot_digest"]
+                or tuple(
+                    (row.path, row.mode, row.size, row.sha256)
+                    for row in preparation.source_binding.files
+                )
+                != expected
+                or preparation.observed_source
+                != SourceIdentity.model_validate(
+                    lifecycle.record(baseline)["source_identity"]
+                )
+            ):
+                raise OSError("retained_source_authority_required")
+        elif preparation.source_ref is not None:
+            record = lifecycle.record(incoming)
+            metadata = RunMetadata.model_validate(record["run_metadata"])
+            with tempfile.TemporaryDirectory(
+                prefix="source-check-", dir=self._directory
+            ) as directory:
+                checked, _, identity, _ = lifecycle._render(
+                    self.operations,
+                    preparation.source_ref,
+                    baseline,
+                    metadata=metadata,
+                    directory=Path(directory) / "incoming",
+                    _owner=self,
+                )
+                binding = self.operations.observe_reviewed_source(checked, plan)
+                if (
+                    identity != preparation.observed_source
+                    or binding.files != preparation.source_binding.files
+                ):
+                    raise OSError("incoming_source_changed")
+        return baseline, incoming
+
+    def _reobserve_review_facts(self, history, preparation, plan, baseline, incoming):
+        maintenance = preparation.kind == "format_transition"
+        cleanup = preparation.kind == "attachment_cleanup"
+        if cleanup:
+            from .attachment_cleanup import cleanup_facts
+
+            facts = cleanup_facts(
+                history,
+                baseline,
+                observed=self.observed,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                source_memory=lifecycle._producer_memory(
+                    history.checkpoint, plan.proposal.proposal_id, _owner=self
+                ),
+                _owner=self,
+            )
+        elif maintenance:
+            from .format_transition import transition_facts
+
+            facts = transition_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                _owner=self,
+            )
+        else:
+            facts = lifecycle._observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                source_memory=plan.facts.source_version_memory,
+                _owner=self,
+            )
+        return facts
+
+    def _reobserve(self, preparation, *, for_apply=False):
+        resume, self._apply_resume = self._apply_resume, None
+        if self._session is not None:
+            self._session._apply_proved_plan = None
+        if preparation.kind == "onboarding":
+            from .onboarding import reobserve_onboarding
+
+            history, result, _ = reobserve_onboarding(
+                self.operations, preparation, _owner=self
+            )
+            if history is None or result.preparation is None:
+                raise OSError(result.code)
+            return history, result, None
+        history = self._observe_preparation_history(preparation)
+        if for_apply and resume is not None:
+            ready = self._revalidate_apply_resume(history, preparation, resume)
+            if ready is not None:
+                return ready
         with self._session._operation():
             plan = self._session._admit_values(preparation.review)
             self._session._coadmit()
             if self._session._replay(plan) is None:
                 raise OSError("invalid_review")
-            baseline = self._source_payload(history.checkpoint)
-            if maintenance:
-                baseline = lifecycle._baseline(
-                    history.checkpoint, baseline, _owner=self
-                )
-            incoming = lifecycle._read_physical(
-                preparation.payload_directory,
-                preparation.source_binding.files,
-                _owner=self,
+            baseline, incoming = self._revalidate_review_payloads(
+                history, preparation, plan
             )
-            if cleanup:
-                expected = tuple(
-                    (row.path, row.mode, row.size, row.sha256)
-                    for row in history.checkpoint.manifest.source
-                )
-                if (
-                    preparation.source_ref is not None
-                    or preparation.source_binding.incoming_identity
-                    != history.checkpoint.manifest.identity
-                    or preparation.source_binding.target_source_version
-                    != lifecycle.record(baseline)["source_identity"]["snapshot_digest"]
-                    or tuple(
-                        (row.path, row.mode, row.size, row.sha256)
-                        for row in preparation.source_binding.files
-                    )
-                    != expected
-                    or preparation.observed_source
-                    != SourceIdentity.model_validate(
-                        lifecycle.record(baseline)["source_identity"]
-                    )
-                ):
-                    raise OSError("retained_source_authority_required")
-            elif preparation.source_ref is not None:
-                record = lifecycle.record(incoming)
-                metadata = RunMetadata.model_validate(record["run_metadata"])
-                with tempfile.TemporaryDirectory(
-                    prefix="source-check-", dir=self._directory
-                ) as directory:
-                    checked, _, identity, _ = lifecycle._render(
-                        self.operations,
-                        preparation.source_ref,
-                        baseline,
-                        metadata=metadata,
-                        directory=Path(directory) / "incoming",
-                        _owner=self,
-                    )
-                    binding = self.operations.observe_reviewed_source(checked, plan)
-                    if (
-                        identity != preparation.observed_source
-                        or binding.files != preparation.source_binding.files
-                    ):
-                        raise OSError("incoming_source_changed")
-            if cleanup:
-                from .attachment_cleanup import cleanup_facts
-
-                facts = cleanup_facts(
-                    history,
-                    baseline,
-                    observed=self.observed,
-                    proposal_id=plan.proposal.proposal_id,
-                    generation=plan.proposal.generation,
-                    source_memory=lifecycle._producer_memory(
-                        history.checkpoint, plan.proposal.proposal_id, _owner=self
-                    ),
-                    _owner=self,
-                )
-            elif maintenance:
-                from .format_transition import transition_facts
-
-                facts = transition_facts(
-                    history,
-                    baseline,
-                    incoming,
-                    proposal_id=plan.proposal.proposal_id,
-                    generation=plan.proposal.generation,
-                    _owner=self,
-                )
-            else:
-                facts = lifecycle._observed_facts(
-                    history,
-                    baseline,
-                    incoming,
-                    proposal_id=plan.proposal.proposal_id,
-                    generation=plan.proposal.generation,
-                    source_memory=plan.facts.source_version_memory,
-                    _owner=self,
-                )
+            facts = self._reobserve_review_facts(
+                history, preparation, plan, baseline, incoming
+            )
             facts = self._session._admit_values(facts)
             history = self._scoped(history, facts, plan)
             self._session._coadmit()
@@ -1632,6 +1687,36 @@ class _OwnedPreparation:
             _owner=self,
         )
 
+    def _refresh_failure(self, preparation, error):
+        if self._cancel.is_set():
+            return lifecycle._refused(
+                "cancelled_after_refresh", preparation=preparation
+            ).model_copy(
+                update={
+                    "status": "cancelled_before_publication",
+                    "ready": False,
+                    "publication": "not_published",
+                    "preparation": preparation,
+                    "history_retained": preparation.locator is not None,
+                    "checkpoint_commit": preparation.locator.commit
+                    if preparation.locator
+                    else None,
+                    "next_actions": ("continue_review", "refresh_update"),
+                }
+            )
+        if preparation.kind == "format_transition" and error.args == (
+            "format_source_changed",
+        ):
+            from .format_transition import refused
+
+            return refused("format_source_changed", action="choose_source_reference")
+        if preparation.kind == "attachment_cleanup":
+            history = self.observed.history if self.observed is not None else None
+            tracking_refusal = _cleanup_tracking_refusal(error, history)
+            if tracking_refusal is not None:
+                return tracking_refusal
+        return lifecycle._refused("refresh_unavailable", preparation=preparation)
+
     def refresh(self, preparation, *, source=None, cancel=None):
         self._cancel.probe = cancel
         try:
@@ -1657,47 +1742,7 @@ class _OwnedPreparation:
                 self.preparation = result.preparation
             return result
         except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
-            if self._cancel.is_set():
-                return lifecycle._refused(
-                    "cancelled_after_refresh", preparation=preparation
-                ).model_copy(
-                    update={
-                        "status": "cancelled_before_publication",
-                        "ready": False,
-                        "publication": "not_published",
-                        "preparation": preparation,
-                        "history_retained": preparation.locator is not None,
-                        "checkpoint_commit": preparation.locator.commit
-                        if preparation.locator
-                        else None,
-                        "next_actions": ("continue_review", "refresh_update"),
-                    }
-                )
-            if preparation.kind == "format_transition" and error.args == (
-                "format_source_changed",
-            ):
-                from .format_transition import refused
-
-                return refused(
-                    "format_source_changed", action="choose_source_reference"
-                )
-            if preparation.kind == "attachment_cleanup":
-                from .attachment_cleanup import refused
-
-                history = self.observed.history if self.observed is not None else None
-                if isinstance(error, lifecycle._ExcludedDependency):
-                    return refused(
-                        "excluded_dependency_requires_tracking",
-                        history,
-                        action="review_tracking",
-                    )
-                if error.args == ("reference_inventory_incomplete",):
-                    return refused(
-                        "reference_inventory_incomplete",
-                        history,
-                        action="review_tracking",
-                    )
-            return lifecycle._refused("refresh_unavailable", preparation=preparation)
+            return self._refresh_failure(preparation, error)
         finally:
             self._cancel.probe = None
             if self._session is not None and not self._session._closed:
@@ -1815,6 +1860,118 @@ class _OwnedPreparation:
             if self._session is not None and not self._session._closed:
                 self._session._ledger.release_failed()
 
+    def _stage_save_baseline(self, history, current, baseline):
+        baseline_directory = self._directory / ("baseline-" + uuid4().hex)
+        with self._session._operation():
+            baseline_directory.mkdir()
+            for path, value in baseline.items():
+                self._write_content(value, baseline_directory / path)
+            source_files = (
+                self.observed.format_baseline_files()
+                if current.kind == "format_transition"
+                and history.checkpoint.manifest.boundary == "prepared"
+                else history.checkpoint.manifest.source
+            )
+            modes = {row.path: row.mode for row in source_files}
+            for path, mode in modes.items():
+                (baseline_directory / path).chmod(0o755 if mode == "100755" else 0o644)
+        return baseline_directory
+
+    def _capture_saved_review(
+        self,
+        preparation,
+        history,
+        current,
+        baseline_directory,
+        export,
+        *,
+        onboarding,
+        progress,
+    ):
+        self._session._content._detach()
+        self.observed = None
+        association = preparation.locator.association if preparation.locator else None
+        proposal_id = current.preparation.review.proposal.proposal_id
+        return self.operations.capture_checkpoint(
+            preparation.vault,
+            baseline_directory,
+            vault_id=association.vault_id if association else "vault-" + proposal_id,
+            import_id=association.import_id if association else "import-" + proposal_id,
+            identity=current.preparation.review.facts.baseline_identity,
+            admission=history.admission,
+            subjects=lifecycle._subjects(
+                current.preparation.review.producer_facts,
+                current.preparation.review,
+            )
+            if history.admission.preflight.consents
+            else (),
+            review=current.preparation.review,
+            source_binding=current.preparation.source_binding,
+            review_source=None if onboarding else current.preparation.payload_directory,
+            observed_source=current.preparation.observed_source,
+            _owned_export=export,
+            **({"progress": progress} if progress is not None else {}),
+        )
+
+    def _verify_saved_handoff(self, vault, captured, current, export):
+        fresh = self._observe(vault, captured.locator)
+        metadata = fresh.checkpoint.metadata
+        with self._session._operation():
+            self._session._coadmit()
+            loaded = self._session._load_export_for_comparison(export.saved)
+            expected = _checkpoint_review_metadata(
+                fresh.checkpoint.manifest, loaded, set(export.values)
+            )
+            if metadata != expected or _binding_signature(
+                fresh.checkpoint.manifest.reviewed_source
+            ) != _binding_signature(current.preparation.source_binding):
+                raise OSError("Published owner handoff differs from the actual review")
+
+    def _failed_saved_handoff(self, current, captured):
+        cleanup = ()
+        try:
+            self.close()
+        except OSError:
+            cleanup = ("owned_cleanup_unavailable",)
+        return current.model_copy(
+            update={
+                "status": "publication_unknown",
+                "code": "saved_context_unavailable",
+                "ready": False,
+                "preparation": None,
+                "capture": captured,
+                "history_retained": True,
+                "checkpoint_commit": captured.commit,
+                "checkpoint": captured.locator,
+                "findings": current.findings + cleanup,
+                "next_actions": ("inspect_history",),
+            }
+        )
+
+    def _save_failure(self, preparation, error):
+        if self._cancel.is_set():
+            return lifecycle._refused(
+                "cancelled_before_snapshot", preparation=preparation
+            ).model_copy(
+                update={
+                    "status": "cancelled_before_publication",
+                    "publication": "not_published",
+                    "preparation": preparation,
+                    "history_retained": preparation.locator is not None,
+                    "checkpoint_commit": preparation.locator.commit
+                    if preparation.locator
+                    else None,
+                    "ready": False,
+                    "next_actions": ("continue_review", "save_update"),
+                }
+            )
+        if preparation.kind == "attachment_cleanup":
+            history = self.observed.history if self.observed is not None else None
+            tracking_refusal = _cleanup_tracking_refusal(error, history)
+            if tracking_refusal is not None:
+                return tracking_refusal
+        return lifecycle._refused("save_unavailable", preparation=preparation)
+
     def _save(self, preparation, *, cancel=None, progress=None):
         captured = None
         try:
@@ -1847,53 +2004,17 @@ class _OwnedPreparation:
             if onboarding:
                 baseline_directory = current.preparation.payload_directory
             else:
-                baseline_directory = self._directory / ("baseline-" + uuid4().hex)
-                with self._session._operation():
-                    baseline_directory.mkdir()
-                    for path, value in baseline.items():
-                        self._write_content(value, baseline_directory / path)
-                    source_files = (
-                        self.observed.format_baseline_files()
-                        if current.kind == "format_transition"
-                        and history.checkpoint.manifest.boundary == "prepared"
-                        else history.checkpoint.manifest.source
-                    )
-                    modes = {row.path: row.mode for row in source_files}
-                    for path, mode in modes.items():
-                        (baseline_directory / path).chmod(
-                            0o755 if mode == "100755" else 0o644
-                        )
-            self._session._content._detach()
-            self.observed = None
-            association = (
-                preparation.locator.association if preparation.locator else None
-            )
-            proposal_id = current.preparation.review.proposal.proposal_id
-            captured = self.operations.capture_checkpoint(
-                preparation.vault,
-                baseline_directory,
-                vault_id=association.vault_id
-                if association
-                else "vault-" + proposal_id,
-                import_id=association.import_id
-                if association
-                else "import-" + proposal_id,
-                identity=current.preparation.review.facts.baseline_identity,
-                admission=history.admission,
-                subjects=lifecycle._subjects(
-                    current.preparation.review.producer_facts,
-                    current.preparation.review,
+                baseline_directory = self._stage_save_baseline(
+                    history, current, baseline
                 )
-                if history.admission.preflight.consents
-                else (),
-                review=current.preparation.review,
-                source_binding=current.preparation.source_binding,
-                review_source=None
-                if onboarding
-                else current.preparation.payload_directory,
-                observed_source=current.preparation.observed_source,
-                _owned_export=export,
-                **({"progress": progress} if progress is not None else {}),
+            captured = self._capture_saved_review(
+                preparation,
+                history,
+                current,
+                baseline_directory,
+                export,
+                onboarding=onboarding,
+                progress=progress,
             )
             if (
                 captured.status not in ("captured", "unchanged")
@@ -1921,76 +2042,13 @@ class _OwnedPreparation:
                     ),
                 }
             )
-            fresh = self._observe(preparation.vault, captured.locator)
-            metadata = fresh.checkpoint.metadata
-            with self._session._operation():
-                self._session._coadmit()
-                loaded = self._session._load_export_for_comparison(export.saved)
-                expected = _checkpoint_review_metadata(
-                    fresh.checkpoint.manifest, loaded, set(export.values)
-                )
-                if metadata != expected or _binding_signature(
-                    fresh.checkpoint.manifest.reviewed_source
-                ) != _binding_signature(current.preparation.source_binding):
-                    raise OSError(
-                        "Published owner handoff differs from the actual review"
-                    )
+            self._verify_saved_handoff(preparation.vault, captured, current, export)
             self.preparation = durable.preparation
             return durable
         except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
             if captured is not None and captured.status in ("captured", "unchanged"):
-                cleanup = ()
-                try:
-                    self.close()
-                except OSError:
-                    cleanup = ("owned_cleanup_unavailable",)
-                return current.model_copy(
-                    update={
-                        "status": "publication_unknown",
-                        "code": "saved_context_unavailable",
-                        "ready": False,
-                        "preparation": None,
-                        "capture": captured,
-                        "history_retained": True,
-                        "checkpoint_commit": captured.commit,
-                        "checkpoint": captured.locator,
-                        "findings": current.findings + cleanup,
-                        "next_actions": ("inspect_history",),
-                    }
-                )
-            if self._cancel.is_set():
-                return lifecycle._refused(
-                    "cancelled_before_snapshot", preparation=preparation
-                ).model_copy(
-                    update={
-                        "status": "cancelled_before_publication",
-                        "publication": "not_published",
-                        "preparation": preparation,
-                        "history_retained": preparation.locator is not None,
-                        "checkpoint_commit": preparation.locator.commit
-                        if preparation.locator
-                        else None,
-                        "ready": False,
-                        "next_actions": ("continue_review", "save_update"),
-                    }
-                )
-            if preparation.kind == "attachment_cleanup":
-                from .attachment_cleanup import refused
-
-                history = self.observed.history if self.observed is not None else None
-                if isinstance(error, lifecycle._ExcludedDependency):
-                    return refused(
-                        "excluded_dependency_requires_tracking",
-                        history,
-                        action="review_tracking",
-                    )
-                if error.args == ("reference_inventory_incomplete",):
-                    return refused(
-                        "reference_inventory_incomplete",
-                        history,
-                        action="review_tracking",
-                    )
-            return lifecycle._refused("save_unavailable", preparation=preparation)
+                return self._failed_saved_handoff(current, captured)
+            return self._save_failure(preparation, error)
 
     def close(self):
         self._clear_readonly_initial()

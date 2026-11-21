@@ -183,6 +183,170 @@ def review_choice_action(
     )
 
 
+def _compile_attachment_removal(plan, change, requirement_id, references, *, _choices):
+    context = plan.facts.link_context
+    documents = context.current_documents
+    states = context.current_target_facts
+    from .attachment_choices import validated_reference_choices
+
+    offered_refs = review_plan_attachment_references(
+        plan, requirement_id, _choices=_choices
+    )
+    subject = next(
+        row
+        for row in plan.facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    )
+    target_id = subject.attachment.current_target_id
+    if any(
+        occurrence.meaning.target_id != target_id for _, _, occurrence in offered_refs
+    ):
+        raise ValueError("Reference choice is unavailable")
+    validated_reference_choices(
+        references, {token: ("drop",) for token, _, _ in offered_refs}
+    )
+    states = tuple(
+        interpret_link_target(
+            None,
+            target_id=row.target_id,
+            existence="missing",
+            memberships=(),
+            source_path=next(
+                target.canonical_path
+                for target in context.current_targets
+                if target.target_id == row.target_id
+            ),
+            output_format=plan.facts.incoming_identity.output_format,
+        )
+        if row.target_id == target_id
+        else row
+        for row in states
+    )
+    links = tuple(
+        LinkOccurrenceChoice(
+            document_id=document.document_id,
+            occurrence_id=occurrence.occurrence_id,
+            old=occurrence.meaning,
+            replacement=b"",
+            selected=None,
+            expected_memberships=(),
+            provenance="explicit_user",
+        )
+        for _, document, occurrence in offered_refs
+    )
+    rewritten = []
+    for document in documents:
+        raw = document.content.data
+        for _, _, occurrence in reversed(
+            tuple(
+                row
+                for row in offered_refs
+                if row[1].document_id == document.document_id
+            )
+        ):
+            raw = raw[: occurrence.span.start] + raw[occurrence.span.end :]
+        rewritten.append(
+            interpret_links(
+                ExactContent(data=raw),
+                document_id=document.document_id,
+                source_path=document.source_path,
+                path_mode=document.path_mode,
+                targets=context.current_targets,
+                target_facts=states,
+                inventory=document.inventory,
+                output_format=plan.facts.incoming_identity.output_format,
+                record_format=plan.facts.baseline_identity.output_format,
+            )
+        )
+    documents = tuple(rewritten)
+    states = tuple(
+        interpret_link_target(
+            document.content,
+            target_id=row.target_id,
+            existence="present",
+            memberships=row.memberships,
+            membership_targets=context.current_targets,
+            source_path=document.source_path,
+            output_format=plan.facts.incoming_identity.output_format,
+        )
+        if (
+            document := next(
+                (doc for doc in documents if doc.document_id == row.target_id),
+                None,
+            )
+        )
+        is not None
+        else row
+        for row in states
+    )
+    return links, documents, states
+
+
+def _compile_attachment_choice(
+    plan, change, requirement, choice, references, construct, *, _choices, _owner
+):
+    requirement_id = requirement.requirement_id
+    candidate = None
+    attachment_choice = (
+        "incoming"
+        if (requirement.domain, choice)
+        in (("reversal", "reverse"), ("restoration", "restore_incoming"))
+        else choice
+    )
+    alternative = next(
+        row
+        for row in change.attachment_review.alternatives
+        if row.choice == attachment_choice and row.eligible
+    )
+    context = plan.facts.link_context
+    documents, states, links = (
+        context.current_documents,
+        context.current_target_facts,
+        (),
+    )
+    if choice == "remove":
+        links, documents, states = _compile_attachment_removal(
+            plan, change, requirement_id, references, _choices=_choices
+        )
+    elif attachment_choice in ("incoming", "both"):
+        from .attachment_choices import selected_attachment_candidate
+
+        links, candidate = selected_attachment_candidate(
+            plan,
+            change,
+            alternative,
+            references,
+            review_plan_attachment_references(plan, requirement_id, _choices=_choices),
+            _owner=_owner,
+        )
+    elif references:
+        raise ValueError("Reference choice is unavailable")
+    selection = construct(
+        AttachmentSelection,
+        schema_id="brz2obsidian.attachment-selection",
+        schema_version=1,
+        proposal_id=plan.proposal.proposal_id,
+        generation=plan.proposal.generation,
+        item_id=change.item_id,
+        facet=change.facet,
+        reviewed_change_id=change.change_id,
+        reviewed_assumptions=requirement.assumptions,
+        choice=attachment_choice,
+        link_choices=links,
+        provenance="explicit_user",
+    )
+    candidate = candidate or construct(
+        AttachmentCandidate,
+        schema_id="brz2obsidian.attachment-candidate",
+        schema_version=1,
+        outputs=alternative.outputs,
+        documents=documents,
+        targets=context.current_targets,
+        target_facts=states,
+    )
+    return selection, candidate
+
+
 def review_plan_choice_action(
     plan,
     *,
@@ -255,154 +419,15 @@ def review_plan_choice_action(
             requirement.domain == "restoration" and choice == "decline_restoration"
         )
     ):
-        attachment_choice = (
-            "incoming"
-            if (requirement.domain, choice)
-            in (("reversal", "reverse"), ("restoration", "restore_incoming"))
-            else choice
-        )
-        alternative = next(
-            row
-            for row in change.attachment_review.alternatives
-            if row.choice == attachment_choice and row.eligible
-        )
-        context = plan.facts.link_context
-        documents, states, links = (
-            context.current_documents,
-            context.current_target_facts,
-            (),
-        )
-        if choice == "remove":
-            from .attachment_choices import validated_reference_choices
-
-            offered_refs = review_plan_attachment_references(
-                plan, requirement_id, _choices=_choices
-            )
-            subject = next(
-                row
-                for row in plan.facts.subjects
-                if (row.item_id, row.facet) == (change.item_id, change.facet)
-            )
-            target_id = subject.attachment.current_target_id
-            if any(
-                occurrence.meaning.target_id != target_id
-                for _, _, occurrence in offered_refs
-            ):
-                raise ValueError("Reference choice is unavailable")
-            validated_reference_choices(
-                references, {token: ("drop",) for token, _, _ in offered_refs}
-            )
-            states = tuple(
-                interpret_link_target(
-                    None,
-                    target_id=row.target_id,
-                    existence="missing",
-                    memberships=(),
-                    source_path=next(
-                        target.canonical_path
-                        for target in context.current_targets
-                        if target.target_id == row.target_id
-                    ),
-                    output_format=plan.facts.incoming_identity.output_format,
-                )
-                if row.target_id == target_id
-                else row
-                for row in states
-            )
-            links = tuple(
-                LinkOccurrenceChoice(
-                    document_id=document.document_id,
-                    occurrence_id=occurrence.occurrence_id,
-                    old=occurrence.meaning,
-                    replacement=b"",
-                    selected=None,
-                    expected_memberships=(),
-                    provenance="explicit_user",
-                )
-                for _, document, occurrence in offered_refs
-            )
-            rewritten = []
-            for document in documents:
-                raw = document.content.data
-                for _, _, occurrence in reversed(
-                    tuple(
-                        row
-                        for row in offered_refs
-                        if row[1].document_id == document.document_id
-                    )
-                ):
-                    raw = raw[: occurrence.span.start] + raw[occurrence.span.end :]
-                rewritten.append(
-                    interpret_links(
-                        ExactContent(data=raw),
-                        document_id=document.document_id,
-                        source_path=document.source_path,
-                        path_mode=document.path_mode,
-                        targets=context.current_targets,
-                        target_facts=states,
-                        inventory=document.inventory,
-                        output_format=plan.facts.incoming_identity.output_format,
-                        record_format=plan.facts.baseline_identity.output_format,
-                    )
-                )
-            documents = tuple(rewritten)
-            states = tuple(
-                interpret_link_target(
-                    document.content,
-                    target_id=row.target_id,
-                    existence="present",
-                    memberships=row.memberships,
-                    membership_targets=context.current_targets,
-                    source_path=document.source_path,
-                    output_format=plan.facts.incoming_identity.output_format,
-                )
-                if (
-                    document := next(
-                        (doc for doc in documents if doc.document_id == row.target_id),
-                        None,
-                    )
-                )
-                is not None
-                else row
-                for row in states
-            )
-        elif attachment_choice in ("incoming", "both"):
-            from .attachment_choices import selected_attachment_candidate
-
-            links, candidate = selected_attachment_candidate(
-                plan,
-                change,
-                alternative,
-                references,
-                review_plan_attachment_references(
-                    plan, requirement_id, _choices=_choices
-                ),
-                _owner=_owner,
-            )
-        elif references:
-            raise ValueError("Reference choice is unavailable")
-        selection = construct(
-            AttachmentSelection,
-            schema_id="brz2obsidian.attachment-selection",
-            schema_version=1,
-            proposal_id=plan.proposal.proposal_id,
-            generation=plan.proposal.generation,
-            item_id=change.item_id,
-            facet=change.facet,
-            reviewed_change_id=change.change_id,
-            reviewed_assumptions=requirement.assumptions,
-            choice=attachment_choice,
-            link_choices=links,
-            provenance="explicit_user",
-        )
-        candidate = candidate or construct(
-            AttachmentCandidate,
-            schema_id="brz2obsidian.attachment-candidate",
-            schema_version=1,
-            outputs=alternative.outputs,
-            documents=documents,
-            targets=context.current_targets,
-            target_facts=states,
+        selection, candidate = _compile_attachment_choice(
+            plan,
+            change,
+            requirement,
+            choice,
+            references,
+            construct,
+            _choices=_choices,
+            _owner=_owner,
         )
     action = construct(
         ReviewAction,

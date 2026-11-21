@@ -34,22 +34,11 @@ def validated_reference_choices(references, offered):
     return choices
 
 
-def selected_attachment_candidate(
-    plan, change, alternative, references, offered_refs, *, _owner=None, _session=None
-):
-    context = plan.facts.link_context
-    subject = next(
-        row
-        for row in plan.facts.subjects
-        if (row.item_id, row.facet) == (change.item_id, change.facet)
-    )
+def _observed_attachment_destinations(facts, attachment, outputs, observe_target):
+    context = facts.link_context
     targets = {row.target_id: row for row in context.current_targets}
     states = {row.target_id: row for row in context.current_target_facts}
-    session = _session if _session is not None else getattr(_owner, "_session", None)
-    observe_target = (
-        interpret_link_target if session is None else session._assembly_link_state
-    )
-    for output in alternative.outputs:
+    for output in outputs:
         templates = tuple(
             row
             for row in context.current_targets
@@ -68,11 +57,11 @@ def selected_attachment_candidate(
             bases = tuple(
                 row
                 for row in context.current_targets
-                if row.target_id == subject.attachment.current_target_id
+                if row.target_id == attachment.current_target_id
             )
             slots = tuple(
                 row
-                for row in subject.attachment.allocation_candidates
+                for row in attachment.allocation_candidates
                 if row.path == output.path
             )
             if templates or len(bases) != 1 or len(slots) != 1:
@@ -92,8 +81,14 @@ def selected_attachment_candidate(
             existence="present",
             memberships=(),
             source_path=output.path,
-            output_format=plan.facts.incoming_identity.output_format,
+            output_format=facts.incoming_identity.output_format,
         )
+    return targets, states
+
+
+def _selected_attachment_links(
+    change, alternative, references, offered_refs, targets, states
+):
     offered = {
         (row.document_id, row.occurrence_id): row
         for row in change.attachment_review.links
@@ -150,8 +145,14 @@ def selected_attachment_candidate(
                 provenance="explicit_user",
             )
         )
+    return links, replacements
+
+
+def _reobserve_attachment_documents(
+    facts, replacements, targets, states, observe_target
+):
     documents = []
-    for document in context.current_documents:
+    for document in facts.link_context.current_documents:
         raw = document.content.data
         for start, end, replacement in sorted(
             replacements.get(document.document_id, ()), reverse=True
@@ -166,8 +167,8 @@ def selected_attachment_candidate(
                 targets=tuple(targets.values()),
                 target_facts=tuple(states.values()),
                 inventory=document.inventory,
-                output_format=plan.facts.incoming_identity.output_format,
-                record_format=plan.facts.baseline_identity.output_format,
+                output_format=facts.incoming_identity.output_format,
+                record_format=facts.baseline_identity.output_format,
             )
         )
     for target_id, state in tuple(states.items()):
@@ -186,8 +187,32 @@ def selected_attachment_candidate(
                 memberships=state.memberships,
                 membership_targets=tuple(targets.values()),
                 source_path=bound[0].source_path,
-                output_format=plan.facts.incoming_identity.output_format,
+                output_format=facts.incoming_identity.output_format,
             )
+    return documents
+
+
+def selected_attachment_candidate(
+    plan, change, alternative, references, offered_refs, *, _owner=None, _session=None
+):
+    subject = next(
+        row
+        for row in plan.facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    )
+    session = _session if _session is not None else getattr(_owner, "_session", None)
+    observe_target = (
+        interpret_link_target if session is None else session._assembly_link_state
+    )
+    targets, states = _observed_attachment_destinations(
+        plan.facts, subject.attachment, alternative.outputs, observe_target
+    )
+    links, replacements = _selected_attachment_links(
+        change, alternative, references, offered_refs, targets, states
+    )
+    documents = _reobserve_attachment_documents(
+        plan.facts, replacements, targets, states, observe_target
+    )
     return tuple(links), AttachmentCandidate(
         schema_id="brz2obsidian.attachment-candidate",
         schema_version=1,
