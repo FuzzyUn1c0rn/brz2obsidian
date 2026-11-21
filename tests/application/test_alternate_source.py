@@ -18,6 +18,7 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 from tests.application.test_module_seams import METADATA
 from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+from tests.support.import_routes import literal_imports
 from tests.support.notes import note_body
 from tests.support.paired_sources import paired_sources
 from tests.support.paired_v2_sources import paired_v2_sources
@@ -438,102 +439,114 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     assert_inward_imports(Path(brz2obsidian.__file__).parent)
 
 
+@pytest.fixture
+def inward_import_root(tmp_path):
+    root = tmp_path / "brz2obsidian"
+    (root / "core").mkdir(parents=True)
+    for original in Path(brz2obsidian.__file__).parent.glob("*.py"):
+        (root / original.name).touch()
+    return root
+
+
 @pytest.mark.parametrize(
-    ("filename", "source", "line"),
+    ("filename", "source", "line", "target"),
     [
-        ("wiring.py", "import brz2obsidian.sources.thebrain\n", 1),
+        (
+            "wiring.py",
+            "import brz2obsidian.sources.thebrain\n",
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
         (
             "planner.py",
             'import importlib as loader\nloader.import_module("brz2obsidian.sources.thebrain")\n',
             2,
+            "brz2obsidian.sources.thebrain",
         ),
         (
             "planner.py",
             'from importlib import import_module as load\nload("..sources.thebrain", __package__)\n',
             2,
+            "brz2obsidian.sources.thebrain",
         ),
-        ("planner.py", '__import__("brz2obsidian.sources.thebrain")\n', 1),
+        (
+            "planner.py",
+            '__import__("brz2obsidian.sources.thebrain")\n',
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            'import builtins as loader\nloader.__import__("brz2obsidian.sources.thebrain")\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            '__import__("brz2obsidian", fromlist=("sources",))\n',
+            1,
+            "brz2obsidian.sources",
+        ),
+        (
+            "planner.py",
+            'from builtins import __import__ as load\nload("sources.thebrain", globals(), level=2)\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def make_loader():\n"
+                "    from builtins import __import__ as load\n"
+                "    def apply():\n"
+                '        return load("brz2obsidian.sources.thebrain")\n'
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
     ],
 )
 def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(
-    tmp_path, filename, source, line
+    inward_import_root, filename, source, line, target
 ):
-    root = tmp_path / "brz2obsidian"
-    (root / "core").mkdir(parents=True)
-    for original in Path(brz2obsidian.__file__).parent.glob("*.py"):
-        (root / original.name).touch()
-    (root / "core" / filename).write_text(source, encoding="utf-8")
+    (inward_import_root / "core" / filename).write_text(source, encoding="utf-8")
 
     with pytest.raises(pytest.fail.Exception) as failure:
-        assert_inward_imports(root)
+        assert_inward_imports(inward_import_root)
 
     message = str(failure.value)
-    assert (
-        f"src/brz2obsidian/core/{filename}:{line}:1: ADR 0001 forbids "
-        "brz2obsidian.sources.thebrain"
-    ) in message
+    assert f"src/brz2obsidian/core/{filename}:{line}:" in message
+    assert f"ADR 0001 forbids {target} here" in message
     assert "outer adapter or composition module" in message
 
 
-def call_argument(call, position, keyword):
-    if position < len(call.args):
-        return call.args[position]
-    return next((arg.value for arg in call.keywords if arg.arg == keyword), None)
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            "def make_loader():\n"
+            "    from importlib import import_module as load\n"
+            "    return load\n\n"
+            "def use_collaborator(load):\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "import builtins as loader\n\n"
+            "def use_collaborator(loader):\n"
+            '    return loader.__import__("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "from importlib import import_module as load\n\n"
+            "def use_collaborator(callback):\n"
+            "    load = callback\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+    ],
+)
+def test_inward_imports_respect_unrelated_bindings(inward_import_root, source):
+    (inward_import_root / "core" / "planner.py").write_text(source, encoding="utf-8")
 
-
-def literal_imports(nodes, package):
-    module_aliases = set()
-    functions = {"__import__"}
-    for node in nodes:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "importlib":
-                    module_aliases.add(alias.asname or "importlib")
-                elif alias.name.startswith("importlib.") and alias.asname is None:
-                    module_aliases.add("importlib")
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.module == "importlib"
-            and not node.level
-        ):
-            functions.update(
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name == "import_module"
-            )
-
-    for node in nodes:
-        if not isinstance(node, ast.Call):
-            continue
-        target = node.func
-        if not (
-            isinstance(target, ast.Name)
-            and target.id in functions
-            or isinstance(target, ast.Attribute)
-            and target.attr == "import_module"
-            and isinstance(target.value, ast.Name)
-            and target.value.id in module_aliases
-        ):
-            continue
-        name = call_argument(node, 0, "name")
-        if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
-            continue
-        imported = name.value
-        if imported.startswith("."):
-            relative_to = call_argument(node, 1, "package")
-            if isinstance(relative_to, ast.Name) and relative_to.id == "__package__":
-                anchor = package
-            elif isinstance(relative_to, ast.Constant) and isinstance(
-                relative_to.value, str
-            ):
-                anchor = relative_to.value
-            else:
-                continue
-            try:
-                imported = importlib.util.resolve_name(imported, anchor)
-            except ImportError:
-                continue
-        yield node, imported
+    assert_inward_imports(inward_import_root)
 
 
 def assert_inward_imports(root):
@@ -948,9 +961,9 @@ def assert_inward_imports(root):
                 if file.name == "__init__.py"
                 else module.rsplit(".", 1)[0]
             )
-            nodes = tuple(ast.walk(ast.parse(file.read_text(encoding="utf-8"))))
-            dynamic = dict(literal_imports(nodes, package))
-            for node in nodes:
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            dynamic = dict(literal_imports(tree, package))
+            for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     imports = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom):
@@ -968,7 +981,7 @@ def assert_inward_imports(root):
                         base + "." + alias.name for alias in node.names
                     ]
                 elif node in dynamic:
-                    imports = [dynamic[node]]
+                    imports = dynamic[node]
                 else:
                     continue
                 for imported in imports:

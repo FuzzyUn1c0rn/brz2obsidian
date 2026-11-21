@@ -130,7 +130,7 @@ def write_rules_manifest(
     )
 
 
-def repository_rules(checkout):
+def repository_rules(checkout, base_ref="HEAD"):
     return command(
         "rules",
         "--checkout",
@@ -138,7 +138,25 @@ def repository_rules(checkout):
         "--python",
         sys.executable,
         "--base-ref",
-        "HEAD",
+        base_ref,
+    )
+
+
+def commit_checkout(checkout, message):
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            message,
+        ],
+        cwd=checkout,
+        check=True,
     )
 
 
@@ -175,21 +193,7 @@ def test_repository_rules_require_comment_baseline_to_only_shrink(checkout, chan
     baseline = checkout / "tools" / "comment-baseline.json"
     (checkout / original).write_text(inherited + code, encoding="utf-8")
     baseline.write_text(json.dumps({original: [inherited_hash]}), encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-qm",
-            "base",
-        ],
-        cwd=checkout,
-        check=True,
-    )
+    commit_checkout(checkout, "base")
 
     candidate = {
         "add": {original: [inherited_hash, fresh_hash]},
@@ -214,6 +218,39 @@ def test_repository_rules_require_comment_baseline_to_only_shrink(checkout, chan
         assert "deletion-only" in result.stderr
         assert (adjacent if change == "move" else original) in result.stderr
         assert not (checkout / "tmp" / "checks").exists()
+
+
+def test_repository_rules_explain_inherited_fingerprints_removed_on_target(checkout):
+    write_rules_manifest(checkout)
+    source = "src/brz2obsidian/__init__.py"
+    code = 'VERSION = "selected"\n'
+    note = "# Inherited note"
+    baseline = checkout / "tools" / "comment-baseline.json"
+    baseline.write_text(
+        json.dumps({source: [hashlib.sha256(note.encode()).hexdigest()]}),
+        encoding="utf-8",
+    )
+    (checkout / source).write_text(f"{note}\n{code}", encoding="utf-8")
+    commit_checkout(checkout, "common base")
+    subprocess.run(["git", "switch", "-c", "target"], cwd=checkout, check=True)
+    (checkout / source).write_text(code, encoding="utf-8")
+    baseline.write_text("{}\n", encoding="utf-8")
+    commit_checkout(checkout, "remove a grandfathered comment")
+    subprocess.run(["git", "switch", "--detach", "target^"], cwd=checkout, check=True)
+
+    stale = repository_rules(checkout, "target")
+
+    assert stale.returncode == 1, stale.stdout + stale.stderr
+    assert "checkout is missing target branch changes" in stale.stderr
+    assert "Merge or rebase onto the target branch" in stale.stderr
+    assert "Remove the new fingerprints" not in stale.stderr
+    assert source in stale.stderr
+
+    subprocess.run(["git", "merge", "--ff-only", "target"], cwd=checkout, check=True)
+    updated = repository_rules(checkout, "target")
+
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert "VALID:" in updated.stdout
 
 
 def test_lint_rejects_new_comments_even_with_an_existing_comment_removed(checkout):

@@ -772,21 +772,49 @@ def check_comment_baseline(root, base_ref, candidate):
             "Fetch the target branch or pass its commit with --base-ref. "
             f"Git or baseline error: {str(error).strip()}"
         ) from error
-    additions = []
+    additions = {}
     for source, counts in sorted(candidate.items()):
         extra = counts - original.get(source, Counter())
         if extra:
-            additions.append(f"{source} (+{extra.total()})")
-    if additions:
-        print(
-            f"{path}: deletion-only under ADR 0014. New fingerprints relative to {base}:\n"
-            + "\n".join(additions)
-            + "\nRemove the new fingerprints and any corresponding new Python comments.",
-            file=sys.stderr,
+            additions[source] = extra
+    if not additions:
+        print(f"Comment baseline checked against {base}", flush=True)
+        return True
+
+    try:
+        common = git(root, "merge-base", "HEAD", base)
+    except Invalid as error:
+        raise Invalid(
+            f"{path}: cannot find a common Git ancestor with {base}. "
+            "Fetch the target branch and its history, then rerun the rules check."
+        ) from error
+    ancestor = common.decode("ascii").strip()
+    if ancestor != base:
+        inherited = comment_fingerprints(git(root, "show", f"{ancestor}:{path}"))
+        stale = []
+        for source, extra in additions.items():
+            removed = inherited.get(source, Counter()) - original.get(source, Counter())
+            if extra & removed:
+                stale.append(source)
+        if stale:
+            print(
+                f"{path}: checkout is missing target branch changes from {base}. "
+                "The target removed inherited fingerprints for:\n"
+                + "\n".join(stale)
+                + "\nMerge or rebase onto the target branch and rerun the rules check.",
+                file=sys.stderr,
+            )
+            return False
+
+    print(
+        f"{path}: deletion-only under ADR 0014. New fingerprints relative to {base}:\n"
+        + "\n".join(
+            f"{source} (+{extra.total()})" for source, extra in additions.items()
         )
-        return False
-    print(f"Comment baseline checked against {base}", flush=True)
-    return True
+        + "\nRemove the new fingerprints and any corresponding new Python comments.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def run_rules(args):

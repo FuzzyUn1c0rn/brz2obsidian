@@ -818,9 +818,19 @@ from the checkout root.
 ```
 
 The command compares the Python comment baseline to the local `origin/main` ref.
-Fetch the target branch if that ref is stale, or pass `--base-ref <commit>` to
-check against the base commit of a specific pull request. The [runner contract](docs/testing.md#automated-check-runner)
-describes the selection and receipts.
+Fetch the target branch for an up-to-date comparison. If the target has removed
+inherited entries from your checkout, merge or rebase onto it and rerun the check.
+
+To replay a GitHub Actions check, use a checkout of the tested merge commit and a
+base virtual environment without Qt. Set `$eventBase` to the base SHA printed in
+the run's check output.
+
+```powershell
+.\.venv\Scripts\python.exe tools/check.py rules --environment base --base-ref $eventBase
+```
+
+The [runner contract](docs/testing.md#automated-check-runner) describes the
+selection and receipts.
 
 ### Snyk dependency scan
 
