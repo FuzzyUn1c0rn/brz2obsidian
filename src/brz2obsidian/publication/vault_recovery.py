@@ -14,7 +14,6 @@ import unicodedata
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from brz2obsidian.application.update_facts import link_state
 from brz2obsidian.application.update_subjects import review_subjects
@@ -108,14 +107,6 @@ from brz2obsidian.publication.vault_replace import (
     stage_parent_security,
     supported_durable_volume,
 )
-
-if TYPE_CHECKING:
-    from brz2obsidian.application.checkpoint_contracts import (
-        CheckpointFile,
-        CheckpointManifest,
-        VaultAssociation,
-        VaultHistoryInspection,
-    )
 
 
 def _marker_valid(root, operation_id):
@@ -1678,10 +1669,10 @@ class _RestoreEvidence:
     origin_commit: str
     git: _Git
     retained: _OperationObservation
-    before: dict[str, CheckpointFile]
-    produced: dict[str, CheckpointFile]
-    source_prepared: CheckpointManifest
-    produced_source: dict[str, CheckpointFile]
+    before: dict[str, object]
+    produced: dict[str, object]
+    source_prepared: object
+    produced_source: dict[str, object]
 
 
 def _reverse_owned_subjects(
@@ -2518,11 +2509,11 @@ class _RecoveryPublication:
 
 @dataclass(frozen=True)
 class _RecoveryLineage:
-    history: VaultHistoryInspection
-    association: VaultAssociation
+    history: object
+    association: object
     origin_commit: str
     origin: VaultOperationIntent
-    source_manifest: CheckpointManifest
+    source_manifest: object
 
 
 @dataclass(frozen=True)
@@ -2546,7 +2537,7 @@ class _RecoveryStage:
 @dataclass(frozen=True)
 class _RecoveryJournal:
     git: _Git
-    manifest: CheckpointManifest
+    manifest: object
     intent: VaultRecoveryIntent
     ref: str
 
