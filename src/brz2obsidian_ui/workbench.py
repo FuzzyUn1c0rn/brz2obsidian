@@ -130,6 +130,139 @@ class UpdateWorkbench(QWidget):
         self.queue.currentRowChanged.connect(self._queue_changed)
         self._render()
 
+    def _retain_history_scope(self, state):
+        scope = (state.selection_id, state.vault)
+        if (
+            scope != self._history_scope
+            or state.reply is not None
+            and state.reply.kind != "history"
+            or state.reply is None
+            and state.publication == "unknown"
+        ):
+            self._history = self._history_action = None
+        self._history_scope = scope
+
+    def _present_history_reply(self, state):
+        if state.reply is not None:
+            if state.reply.history is not None:
+                self._history = state.reply.history
+            if state.reply.history_action is not None:
+                self._history_action = state.reply.history_action
+            pending = self._internal_close
+            if (
+                pending is not None
+                and not state.active_request_id
+                and state.revision > pending[0]
+                and state.reply is not pending[1]
+            ):
+                self._internal_close = None
+                action, self._after_close = self._after_close, None
+                if state.reply.code == "context_closed" and action is not None:
+                    self._transition = None
+                    self._closing = False
+                    action()
+                elif self._transition is not None:
+                    self._closing = True
+
+    def _retain_read_details(self, reply):
+        request = self._read_request or {}
+        requirement = request.get("requirement_id")
+        if request.get("command") == "choice_details" and reply.status == "available":
+            self._details = (requirement, request.get("offset", 0), reply)
+        if request.get("command") == "references" and reply.status == "available":
+            self._references = (requirement, request.get("offset", 0), reply)
+        if request and reply.status == "available":
+            cursor_key = (request["command"], requirement)
+            cursor = (request.get("offset", 0), request.get("byte_offset", 0))
+            trail = self._cursors.setdefault(cursor_key, [])
+            if cursor in trail:
+                del trail[trail.index(cursor) + 1 :]
+            else:
+                trail.append(cursor)
+
+    def _present_read_reply(self, binding, reply):
+        if reply is not None and reply is not self._last_reply:
+            self._last_reply = reply
+            if reply.binding == binding and binding is not None:
+                request_queue = (self._read_request or {}).get("queue", "all")
+                matching_queue = (
+                    isinstance(binding, HistoryContextBinding)
+                    or request_queue == self._page_queue
+                )
+                if reply.page is not None and matching_queue:
+                    self._page = reply.page
+                    self._row_offers = reply.offers
+                if reply.configuration is not None:
+                    self._configuration = reply.configuration
+                if (
+                    reply.page is None
+                    and (reply.offers or reply.total_choices)
+                    and matching_queue
+                ):
+                    self._offers = reply.offers
+                    offset = (self._read_request or {}).get("offset", 0)
+                    self._offer_page = (
+                        offset,
+                        reply.total_choices,
+                        reply.next_choice_offset,
+                    )
+                self._retain_read_details(reply)
+
+    def _finish_pending_requests(self, state):
+        if (
+            self._pending_read is not None
+            and state.revision > self._pending_read
+            and not state.active_request_id
+            and state.transport_phase is not None
+        ):
+            self._pending_read = None
+        if (
+            self._pending_choice is not None
+            and state.revision > self._pending_choice
+            and not state.active_request_id
+        ):
+            self._pending_choice = None
+        if (
+            self._preparing
+            and not state.active_request_id
+            and state.transport_phase is not None
+        ):
+            self._preparing = False
+
+    def _request_initial_reads(self, state, binding):
+        if binding is None or self.busy or state.needs_inspection:
+            return
+        if isinstance(binding, HistoryContextBinding) and binding.proposal_id is None:
+            return
+        reads = [
+            ("page", {"offset": 0, "limit": 100}),
+            (
+                "choices",
+                {
+                    "offset": self._reference_owner["offer_offset"]
+                    if self._reference_owner
+                    else 0,
+                    "limit": 100,
+                },
+            ),
+        ]
+        if self._reference_owner is not None:
+            reads.append(
+                (
+                    "references",
+                    {
+                        "requirement_id": self._reference_owner["requirement_id"],
+                        "offset": self._reference_owner["offset"],
+                        "limit": 100,
+                    },
+                )
+            )
+        for command, arguments in reads:
+            if command not in self._requested:
+                self._requested.add(command)
+                self._read(command, binding=binding, **arguments)
+                break
+
     def present(self, state):
         if self._state is not None and state.revision < self._state.revision:
             return
@@ -167,16 +300,7 @@ class UpdateWorkbench(QWidget):
         self._state = state
         if applied_now:
             self.queue.setCurrentRow(1)
-        scope = (state.selection_id, state.vault)
-        if (
-            scope != self._history_scope
-            or state.reply is not None
-            and state.reply.kind != "history"
-            or state.reply is None
-            and state.publication == "unknown"
-        ):
-            self._history = self._history_action = None
-        self._history_scope = scope
+        self._retain_history_scope(state)
         if state.active_request_id != self._active_id:
             self._active_id = state.active_request_id
             self._active_started = monotonic() if self._active_id else None
@@ -184,94 +308,12 @@ class UpdateWorkbench(QWidget):
             self._active_started = min(
                 self._active_started, monotonic() - state.progress.elapsed_ms / 1000
             )
-        if state.reply is not None:
-            if state.reply.history is not None:
-                self._history = state.reply.history
-            if state.reply.history_action is not None:
-                self._history_action = state.reply.history_action
-            pending = self._internal_close
-            if (
-                pending is not None
-                and not state.active_request_id
-                and state.revision > pending[0]
-                and state.reply is not pending[1]
-            ):
-                self._internal_close = None
-                action, self._after_close = self._after_close, None
-                if state.reply.code == "context_closed" and action is not None:
-                    self._transition = None
-                    self._closing = False
-                    action()
-                elif self._transition is not None:
-                    self._closing = True
-        if (
-            self._pending_read is not None
-            and state.revision > self._pending_read
-            and not state.active_request_id
-            and state.transport_phase is not None
-        ):
-            self._pending_read = None
-        if (
-            self._pending_choice is not None
-            and state.revision > self._pending_choice
-            and not state.active_request_id
-        ):
-            self._pending_choice = None
-        if (
-            self._preparing
-            and not state.active_request_id
-            and state.transport_phase is not None
-        ):
-            self._preparing = False
+        self._present_history_reply(state)
+        self._finish_pending_requests(state)
         self._refresh_inputs()
         self._editor.present(state)
         self._complete_reference_action(state)
-        reply = state.reply
-        if reply is not None and reply is not self._last_reply:
-            self._last_reply = reply
-            if reply.binding == binding and binding is not None:
-                request_queue = (self._read_request or {}).get("queue", "all")
-                matching_queue = (
-                    isinstance(binding, HistoryContextBinding)
-                    or request_queue == self._page_queue
-                )
-                if reply.page is not None and matching_queue:
-                    self._page = reply.page
-                    self._row_offers = reply.offers
-                if reply.configuration is not None:
-                    self._configuration = reply.configuration
-                if (
-                    reply.page is None
-                    and (reply.offers or reply.total_choices)
-                    and matching_queue
-                ):
-                    self._offers = reply.offers
-                    offset = (self._read_request or {}).get("offset", 0)
-                    self._offer_page = (
-                        offset,
-                        reply.total_choices,
-                        reply.next_choice_offset,
-                    )
-                request = self._read_request or {}
-                requirement = request.get("requirement_id")
-                if (
-                    request.get("command") == "choice_details"
-                    and reply.status == "available"
-                ):
-                    self._details = (requirement, request.get("offset", 0), reply)
-                if (
-                    request.get("command") == "references"
-                    and reply.status == "available"
-                ):
-                    self._references = (requirement, request.get("offset", 0), reply)
-                if request and reply.status == "available":
-                    cursor_key = (request["command"], requirement)
-                    cursor = (request.get("offset", 0), request.get("byte_offset", 0))
-                    trail = self._cursors.setdefault(cursor_key, [])
-                    if cursor in trail:
-                        del trail[trail.index(cursor) + 1 :]
-                    else:
-                        trail.append(cursor)
+        self._present_read_reply(binding, state.reply)
         if self._pending_read is None:
             self._read_request = None
         if (
@@ -282,38 +324,7 @@ class UpdateWorkbench(QWidget):
             self.queue.setCurrentRow(1)
         self._render(preserve_position=True)
         self._refresh_choices()
-        if binding is None or self.busy or state.needs_inspection:
-            return
-        if isinstance(binding, HistoryContextBinding) and binding.proposal_id is None:
-            return
-        reads = [
-            ("page", {"offset": 0, "limit": 100}),
-            (
-                "choices",
-                {
-                    "offset": self._reference_owner["offer_offset"]
-                    if self._reference_owner
-                    else 0,
-                    "limit": 100,
-                },
-            ),
-        ]
-        if self._reference_owner is not None:
-            reads.append(
-                (
-                    "references",
-                    {
-                        "requirement_id": self._reference_owner["requirement_id"],
-                        "offset": self._reference_owner["offset"],
-                        "limit": 100,
-                    },
-                )
-            )
-        for command, arguments in reads:
-            if command not in self._requested:
-                self._requested.add(command)
-                self._read(command, binding=binding, **arguments)
-                break
+        self._request_initial_reads(state, binding)
 
     @property
     def snapshot(self):
@@ -330,51 +341,49 @@ class UpdateWorkbench(QWidget):
     def local_draft(self):
         return self._editor.active or self._reference_dirty
 
+    def _active_status_text(self, state):
+        progress = state.progress
+        phases = {
+            "current_inspection": "Inspecting current vault",
+            "reference_preparation": "Preparing reference output",
+            "review_validation": "Validating review",
+            "snapshot_preparation": "Snapshot preparation",
+            "publication": "Publishing reviewed files",
+            "final_verification": "Verifying published files",
+            "final_reporting": "Recording final result",
+        }
+        text = (
+            phases.get(progress.value.phase, progress.value.phase)
+            if progress
+            else "Running " + state.active_command.replace("_", " ")
+        )
+        elapsed = (
+            int(monotonic() - self._active_started)
+            if self._active_started is not None
+            else 0
+        )
+        text += f" · {elapsed // 60}:{elapsed % 60:02d} elapsed"
+        if progress and progress.value.completed_units is not None:
+            value = progress.value
+            text += (
+                f" · {value.completed_units}"
+                + (f" of {value.total_units}" if value.total_units is not None else "")
+                + " "
+                + value.unit.replace("_", " ")
+            )
+        if state.control_code in ("cancellation_queued", "cancellation_requested"):
+            text = (
+                "Cancellation requested. Waiting for the operation's safe stop. " + text
+            )
+        return text
+
     @property
     def status_text(self):
         state = self._state
         if state is None:
             return "Choose a vault to review."
         if state.active_request_id:
-            progress = state.progress
-            phases = {
-                "current_inspection": "Inspecting current vault",
-                "reference_preparation": "Preparing reference output",
-                "review_validation": "Validating review",
-                "snapshot_preparation": "Snapshot preparation",
-                "publication": "Publishing reviewed files",
-                "final_verification": "Verifying published files",
-                "final_reporting": "Recording final result",
-            }
-            text = (
-                phases.get(progress.value.phase, progress.value.phase)
-                if progress
-                else "Running " + state.active_command.replace("_", " ")
-            )
-            elapsed = (
-                int(monotonic() - self._active_started)
-                if self._active_started is not None
-                else 0
-            )
-            text += f" · {elapsed // 60}:{elapsed % 60:02d} elapsed"
-            if progress and progress.value.completed_units is not None:
-                value = progress.value
-                text += (
-                    f" · {value.completed_units}"
-                    + (
-                        f" of {value.total_units}"
-                        if value.total_units is not None
-                        else ""
-                    )
-                    + " "
-                    + value.unit.replace("_", " ")
-                )
-            if state.control_code in ("cancellation_queued", "cancellation_requested"):
-                text = (
-                    "Cancellation requested. Waiting for the operation's safe stop. "
-                    + text
-                )
-            return text
+            return self._active_status_text(state)
         if state.needs_inspection or state.publication in ("partial", "unknown"):
             return (
                 "Publication is unknown; inspect history before continuing."
@@ -843,6 +852,115 @@ class UpdateWorkbench(QWidget):
         ):
             self._close_internal(self._transition[1], choice)
 
+    def _render_feedback_heading(self, state, reply, *, not_started, uncertain, failed):
+        if not_started:
+            self._body.addWidget(_label("Review could not start", "sectionTitle"))
+            self._body.addWidget(
+                _label(
+                    "Check the application's Python environment and worker setup, then try again. This request was not dispatched.",
+                    "fieldError",
+                )
+            )
+        elif uncertain:
+            heading = (
+                "Connection lost"
+                if state.transport_phase == "may_have_executed"
+                else "Publication outcome unknown"
+            )
+            self._body.addWidget(_label(heading, "sectionTitle"))
+            self._body.addWidget(
+                _label(
+                    "Publication is unknown. Inspect current history before continuing.",
+                    "fieldError",
+                )
+            )
+        elif failed:
+            self._body.addWidget(_label("Review could not continue", "sectionTitle"))
+            known = {
+                "context_changed": "The review changed. Reopen or refresh the current review before choosing.",
+                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
+                "offer_changed": "This choice changed. Refresh the current review before choosing again.",
+                "uncommitted_draft": "Accept or explicitly discard your draft before continuing.",
+                "source_payload_changed": "The source changed. Refresh and review the affected choices before applying.",
+            }
+            summary = known.get(
+                reply.code,
+                reply.summary
+                or "Check the selected source and vault, then inspect current history before another attempt.",
+            )
+            self._body.addWidget(
+                _label(
+                    summary[:240]
+                    + (" See review details." if len(summary) > 240 else ""),
+                    "fieldError",
+                )
+            )
+
+    def _render_retained_feedback(self, operation, *, retained_stale, blocker):
+        if retained_stale:
+            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            reason = {
+                "source_payload_changed": "The source changed. Refresh review before applying.",
+                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
+            }.get(operation.code)
+            self._body.addWidget(
+                _label(
+                    reason
+                    or operation.summary
+                    or "The review changed. Refresh review before applying.",
+                    "fieldError",
+                )
+            )
+            if reason and operation.summary and operation.summary != reason:
+                self._body.addWidget(_label(operation.summary))
+            if operation.guidance:
+                self._body.addWidget(_label(operation.guidance))
+            elif operation.summary and not reason:
+                self._body.addWidget(_label("Refresh review before applying."))
+        if blocker:
+            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            if operation.summary:
+                self._body.addWidget(_label(operation.summary))
+            for finding in operation.findings:
+                self._body.addWidget(_label(finding))
+            if operation.guidance:
+                self._body.addWidget(_label(operation.guidance))
+
+    def _render_feedback_details(self, state, reply, *, not_started):
+        if not_started:
+            self._body.addWidget(
+                _label(
+                    "Worker launch detail: " + (state.transport_code or "not started"),
+                    "muted",
+                )
+            )
+        elif reply is not None:
+            summary = _label(reply.summary)
+            summary.setAccessibleName("Review diagnostic summary")
+            self._body.addWidget(summary)
+            self._body.addWidget(
+                _label("Status: " + reply.status + "; detail: " + reply.code, "muted")
+            )
+            for finding in reply.findings:
+                self._body.addWidget(_label(finding, "muted"))
+            if reply.recovery_gap_count:
+                self._body.addWidget(
+                    _label(f"Recovery gaps: {reply.recovery_gap_count}", "muted")
+                )
+            if reply.diagnostic_omission:
+                self._body.addWidget(
+                    _label(
+                        "Some review diagnostics were omitted from this bounded view.",
+                        "muted",
+                    )
+                )
+            if reply.guidance:
+                self._body.addWidget(_label(reply.guidance, "muted"))
+        elif state.transport_code:
+            self._body.addWidget(
+                _label("Worker contact detail: " + state.transport_code, "muted")
+            )
+
     def _render_feedback(self):
         state = self._state
         if state is None or state.active_request_id:
@@ -894,76 +1012,12 @@ class UpdateWorkbench(QWidget):
             and (reply.findings or reply.guidance or reply.recovery_gap_count)
         ):
             return
-        if not_started:
-            self._body.addWidget(_label("Review could not start", "sectionTitle"))
-            self._body.addWidget(
-                _label(
-                    "Check the application's Python environment and worker setup, then try again. This request was not dispatched.",
-                    "fieldError",
-                )
-            )
-        elif uncertain:
-            heading = (
-                "Connection lost"
-                if state.transport_phase == "may_have_executed"
-                else "Publication outcome unknown"
-            )
-            self._body.addWidget(_label(heading, "sectionTitle"))
-            self._body.addWidget(
-                _label(
-                    "Publication is unknown. Inspect current history before continuing.",
-                    "fieldError",
-                )
-            )
-        elif failed:
-            self._body.addWidget(_label("Review could not continue", "sectionTitle"))
-            known = {
-                "context_changed": "The review changed. Reopen or refresh the current review before choosing.",
-                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
-                "offer_changed": "This choice changed. Refresh the current review before choosing again.",
-                "uncommitted_draft": "Accept or explicitly discard your draft before continuing.",
-                "source_payload_changed": "The source changed. Refresh and review the affected choices before applying.",
-            }
-            summary = known.get(
-                reply.code,
-                reply.summary
-                or "Check the selected source and vault, then inspect current history before another attempt.",
-            )
-            self._body.addWidget(
-                _label(
-                    summary[:240]
-                    + (" See review details." if len(summary) > 240 else ""),
-                    "fieldError",
-                )
-            )
-        if retained_stale:
-            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
-            reason = {
-                "source_payload_changed": "The source changed. Refresh review before applying.",
-                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
-            }.get(operation.code)
-            self._body.addWidget(
-                _label(
-                    reason
-                    or operation.summary
-                    or "The review changed. Refresh review before applying.",
-                    "fieldError",
-                )
-            )
-            if reason and operation.summary and operation.summary != reason:
-                self._body.addWidget(_label(operation.summary))
-            if operation.guidance:
-                self._body.addWidget(_label(operation.guidance))
-            elif operation.summary and not reason:
-                self._body.addWidget(_label("Refresh review before applying."))
-        if blocker:
-            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
-            if operation.summary:
-                self._body.addWidget(_label(operation.summary))
-            for finding in operation.findings:
-                self._body.addWidget(_label(finding))
-            if operation.guidance:
-                self._body.addWidget(_label(operation.guidance))
+        self._render_feedback_heading(
+            state, reply, not_started=not_started, uncertain=uncertain, failed=failed
+        )
+        self._render_retained_feedback(
+            operation, retained_stale=retained_stale, blocker=blocker
+        )
         if not_started or uncertain or failed:
             self._body.addWidget(
                 _label(
@@ -1000,42 +1054,7 @@ class UpdateWorkbench(QWidget):
         toggle.clicked.connect(expand)
         self._body.addWidget(toggle)
         if self._details_expanded:
-            if not_started:
-                self._body.addWidget(
-                    _label(
-                        "Worker launch detail: "
-                        + (state.transport_code or "not started"),
-                        "muted",
-                    )
-                )
-            elif reply is not None:
-                summary = _label(reply.summary)
-                summary.setAccessibleName("Review diagnostic summary")
-                self._body.addWidget(summary)
-                self._body.addWidget(
-                    _label(
-                        "Status: " + reply.status + "; detail: " + reply.code, "muted"
-                    )
-                )
-                for finding in reply.findings:
-                    self._body.addWidget(_label(finding, "muted"))
-                if reply.recovery_gap_count:
-                    self._body.addWidget(
-                        _label(f"Recovery gaps: {reply.recovery_gap_count}", "muted")
-                    )
-                if reply.diagnostic_omission:
-                    self._body.addWidget(
-                        _label(
-                            "Some review diagnostics were omitted from this bounded view.",
-                            "muted",
-                        )
-                    )
-                if reply.guidance:
-                    self._body.addWidget(_label(reply.guidance, "muted"))
-            elif state.transport_code:
-                self._body.addWidget(
-                    _label("Worker contact detail: " + state.transport_code, "muted")
-                )
+            self._render_feedback_details(state, reply, not_started=not_started)
 
     def _pick_history_copy(self):
         binding = self._state.binding
@@ -1048,29 +1067,7 @@ class UpdateWorkbench(QWidget):
 
         self._pick_vault(selected, field="history_copy")
 
-    def _render_history(self):
-        state = self._state
-        self._body.addWidget(_label("History & recovery", "sectionTitle"))
-        self._body.addWidget(
-            _label(
-                "All saved converter history is retained locally. Disk use grows as further versions are saved.",
-                "muted",
-            )
-        )
-        if state is None:
-            self._body.addWidget(
-                _label(
-                    "Select a vault, then inspect its current history and recovery state.",
-                    "muted",
-                )
-            )
-            return
-        actions, binding = state.next_actions, state.binding
-        if binding is None and self._history_action is not None:
-            self._body.addWidget(_label(self._history_action.summary))
-            if self._history_action.repair is not None:
-                self._body.addWidget(_label(self._history_action.repair.message))
-            return
+    def _render_history_observation(self):
         if self._history is not None:
             self._body.addWidget(_label(self._history.summary))
             self._body.addWidget(_label(self._history.operation.message, "muted"))
@@ -1090,6 +1087,8 @@ class UpdateWorkbench(QWidget):
                         "muted",
                     )
                 )
+
+    def _render_history_entry_actions(self, actions, binding):
         if "setup_git" in actions:
             self._body.addWidget(
                 _label(
@@ -1134,8 +1133,42 @@ class UpdateWorkbench(QWidget):
                 "Resume saved review",
                 lambda: self._history_source("source_update", "resume"),
             )
-        if not isinstance(binding, HistoryContextBinding):
-            return
+
+    def _render_history_action(self, state, actions, binding):
+        action = self._history_action
+        if action is not None:
+            self._body.addWidget(_label(action.summary))
+            if action.status == "direction_required":
+                for direction in action.available_directions:
+                    self._action_button(
+                        "Review " + direction + " direction",
+                        "prepare_history",
+                        binding=binding,
+                        kind="recovery",
+                        direction=direction,
+                    )
+            if action.copy_validation is not None:
+                copy = action.copy_validation
+                self._body.addWidget(
+                    _label(
+                        f"History copy: {copy.status}; missing objects: {copy.missing_objects}; damaged objects: {copy.damaged_objects}.",
+                        "muted",
+                    )
+                )
+            if action.repair is not None:
+                self._body.addWidget(_label(action.repair.message))
+            if "execute_history" in actions and state.ready and action.ready:
+                self._action_button(
+                    "Execute reviewed " + action.kind,
+                    "execute_history",
+                    binding=binding,
+                )
+            if "refresh_history" in actions:
+                self._action_button(
+                    "Refresh history review", "refresh_history", binding=binding
+                )
+
+    def _render_history_review_actions(self, actions, binding):
         if "review_recovery" in actions and (
             self._history_action is None
             or self._history_action.status != "direction_required"
@@ -1177,38 +1210,36 @@ class UpdateWorkbench(QWidget):
                     kind="repair",
                     copy_path=self.history_copy,
                 )
-        action = self._history_action
-        if action is not None:
-            self._body.addWidget(_label(action.summary))
-            if action.status == "direction_required":
-                for direction in action.available_directions:
-                    self._action_button(
-                        "Review " + direction + " direction",
-                        "prepare_history",
-                        binding=binding,
-                        kind="recovery",
-                        direction=direction,
-                    )
-            if action.copy_validation is not None:
-                copy = action.copy_validation
-                self._body.addWidget(
-                    _label(
-                        f"History copy: {copy.status}; missing objects: {copy.missing_objects}; damaged objects: {copy.damaged_objects}.",
-                        "muted",
-                    )
+
+    def _render_history(self):
+        state = self._state
+        self._body.addWidget(_label("History & recovery", "sectionTitle"))
+        self._body.addWidget(
+            _label(
+                "All saved converter history is retained locally. Disk use grows as further versions are saved.",
+                "muted",
+            )
+        )
+        if state is None:
+            self._body.addWidget(
+                _label(
+                    "Select a vault, then inspect its current history and recovery state.",
+                    "muted",
                 )
-            if action.repair is not None:
-                self._body.addWidget(_label(action.repair.message))
-            if "execute_history" in actions and state.ready and action.ready:
-                self._action_button(
-                    "Execute reviewed " + action.kind,
-                    "execute_history",
-                    binding=binding,
-                )
-            if "refresh_history" in actions:
-                self._action_button(
-                    "Refresh history review", "refresh_history", binding=binding
-                )
+            )
+            return
+        actions, binding = state.next_actions, state.binding
+        if binding is None and self._history_action is not None:
+            self._body.addWidget(_label(self._history_action.summary))
+            if self._history_action.repair is not None:
+                self._body.addWidget(_label(self._history_action.repair.message))
+            return
+        self._render_history_observation()
+        self._render_history_entry_actions(actions, binding)
+        if not isinstance(binding, HistoryContextBinding):
+            return
+        self._render_history_review_actions(actions, binding)
+        self._render_history_action(state, actions, binding)
 
     def _render_close(self):
         panel = self._close_panel = QWidget()
@@ -1395,6 +1426,283 @@ class UpdateWorkbench(QWidget):
 
         QTimer.singleShot(0, position_workspace)
 
+    def _rebuild_workspace(self, key, *, preserve_position):
+        scope = (self.queue.currentRow(), self._binding_key)
+        if (
+            preserve_position
+            and self._rendered is not None
+            and self._rendered[:2] == scope
+        ):
+            if self._read_position is None or self._read_position[0] != scope:
+                self._read_position = (scope, self.scroll.verticalScrollBar().value())
+        else:
+            self._read_position = None
+        self._rendered = key
+        self._choice_buttons = []
+        self._read_buttons = []
+        self._draft_buttons = []
+        while self._body.count():
+            item = self._body.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                if item.widget() not in (self._inputs, self._editor):
+                    item.widget().deleteLater()
+
+    def _render_conflict_summary(self):
+        operation = self._state.last_operation
+        if isinstance(self._state.binding, UpdateContextBinding) and operation:
+            self._body.addWidget(
+                _label(f"Unresolved conflicts: {operation.unresolved_conflicts}")
+            )
+            if operation.unresolved_exceptions:
+                self._body.addWidget(
+                    _label(
+                        f"Other choices requiring attention: {operation.unresolved_exceptions}"
+                    )
+                )
+            if operation.keep_current_count and operation.keep_current_group_id:
+                if operation.keep_current_count < operation.unresolved_conflicts:
+                    self._body.addWidget(
+                        _label(
+                            "Other conflicts require individual resolution.",
+                            "muted",
+                        )
+                    )
+                self._action_button(
+                    f"Keep current for all unresolved conflicts ({operation.keep_current_count})",
+                    "keep_current_unresolved",
+                    binding=self._state.binding,
+                    group_id=operation.keep_current_group_id,
+                )
+
+    def _render_prepared_summary(self):
+        self._body.addWidget(
+            _label(
+                f"Prepared changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
+                if isinstance(self._state.binding, UpdateContextBinding)
+                else f"Changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
+            )
+        )
+        self._body.addWidget(
+            _label(
+                "Your decisions are retained as you move through the review.",
+                "muted",
+            )
+        )
+        reply = self._state.reply
+        if (
+            isinstance(self._state.binding, HistoryContextBinding)
+            and not self._state.review_ready
+            and not self._state.needs_inspection
+            and self._state.unresolved == 0
+            and reply is not None
+            and reply.binding == self._state.binding
+            and reply.status in ("prepared_review", "available")
+            and reply.history_action is not None
+            and reply.history_action.status == "review_required"
+            and reply.history_action.summary
+        ):
+            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            self._body.addWidget(_label(reply.history_action.summary))
+            if reply.guidance:
+                self._body.addWidget(_label(reply.guidance))
+        self._render_conflict_summary()
+
+    def _render_review_summary(self):
+        self._body.addWidget(_label("Review the whole update", "sectionTitle"))
+        state = self._state
+        applied = (
+            state is not None
+            and state.binding is None
+            and state.active_request_id is None
+            and not state.needs_inspection
+            and state.reply is not None
+            and state.reply is state.last_operation
+            and state.reply.status == "applied"
+            and state.reply.kind != "history"
+            and state.last_operation_vault == state.vault
+            and state.vault is not None
+        )
+        if applied:
+            self._body.addWidget(_label("Update applied", "sectionTitle"))
+            self._body.addWidget(_label(state.reply.summary or "Update applied."))
+            self._body.addWidget(_label("Updated vault: " + state.vault))
+            if self.vault is None or self.vault == state.vault:
+                self._action_button_callback(
+                    "Inspect history for Undo", self._inspect_history
+                )
+        elif state is None or state.binding is None:
+            self._body.addWidget(
+                _label("Choose an incoming BRZ archive and an existing vault.", "muted")
+            )
+        else:
+            self._render_prepared_summary()
+
+    def _render_comparison_versions(self, row):
+        for title, raw in (
+            ("Original", row.original),
+            ("Current", row.current),
+            ("Incoming", row.incoming),
+            ("Result", row.result),
+        ):
+            self._body.addWidget(_label(title, "sectionTitle"))
+            if raw is None:
+                self._body.addWidget(_label("Not available", "muted"))
+                continue
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                self._body.addWidget(
+                    _label(
+                        f"{len(raw)} bytes; content cannot be displayed as text.",
+                        "muted",
+                    )
+                )
+                continue
+            view = QPlainTextEdit()
+            view.setAccessibleName(title + " version")
+            view.setReadOnly(True)
+            view.setPlainText(text)
+            view.setMinimumHeight(90)
+            self._body.addWidget(view)
+
+    def _render_comparison_actions(self, row, offer):
+        if offer is not None and offer.domain in ("text", "reversal"):
+            for choice, title in (
+                ("current", "Keep vault version"),
+                ("incoming", "Use incoming version"),
+                ("reverse", "Reverse reviewed change"),
+            ):
+                if choice not in offer.choices:
+                    continue
+                button = QPushButton(title)
+                button.setAccessibleName(title + " for " + row.current_path)
+                button.setProperty("draftRequirement", offer.requirement_id)
+                binding = self._state.binding
+                button.clicked.connect(
+                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(
+                        b, o, c
+                    )
+                )
+                self._choice_buttons.append(button)
+                self._body.addWidget(button)
+            if "edited" in offer.choices:
+                button = QPushButton("Edit result")
+                button.setAccessibleName("Edit result for " + row.current_path)
+                initial = row.current if not row.omitted and row.offset == 0 else None
+                binding = self._state.binding
+                button.clicked.connect(
+                    lambda checked=False, b=binding, o=offer, p=row.current_path, raw=initial: (
+                        self._editor.open(b, o, p, raw)
+                    )
+                )
+                self._choice_buttons.append(button)
+                self._body.addWidget(button)
+
+    def _render_comparison(self, row, offer, renames, positions):
+        self._body.addWidget(_label(row.current_path, "sectionTitle"))
+        self._body.addWidget(
+            _label(
+                "Decision recorded"
+                if offer is not None and offer.selected is not None
+                else row.disposition.replace("_", " ").capitalize(),
+                "muted",
+            )
+        )
+        if row.incoming_path != row.current_path:
+            self._body.addWidget(_label("Incoming path: " + row.incoming_path, "muted"))
+        if offer is not None and offer.selected is not None:
+            self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
+        self._render_comparison_versions(row)
+        if row.omitted:
+            self._body.addWidget(
+                _label(
+                    "This comparison is paged; more bytes are available.",
+                    "muted",
+                )
+            )
+        if row.next_byte_offset is not None:
+            self._read_button(
+                "More comparison bytes",
+                "page",
+                name="More comparison bytes for " + row.current_path,
+                offset=positions[row.change_id],
+                limit=1,
+                byte_offset=row.next_byte_offset,
+            )
+        self._render_comparison_actions(row, offer)
+        if row.change_id in renames:
+            self._render_path_choices(renames[row.change_id], row.current_path)
+
+    def _render_comparisons(self):
+        compatible = self.queue.currentRow() == 5
+        catalogue = self.queue.currentRow() == 6
+        self._body.addWidget(
+            _label(
+                "All changes"
+                if catalogue
+                else "Compatible changes"
+                if compatible
+                else "Conflicts",
+                "sectionTitle",
+            )
+        )
+        rows = () if self._page is None else self._page.items
+        offers = {
+            row.change_id: row
+            for row in (*self._offers, *self._row_offers)
+            if row.domain != "rename"
+        }
+        renames = {
+            row.change_id: row
+            for row in (*self._offers, *self._row_offers)
+            if row.domain == "rename"
+        }
+        positions = {
+            row.change_id: self._page.offset + index for index, row in enumerate(rows)
+        }
+        rows = sorted(
+            (
+                row
+                for row in rows
+                if catalogue
+                or row.disposition == ("compatible" if compatible else "unresolved")
+            ),
+            key=lambda row: (
+                offers.get(row.change_id) is not None
+                and offers[row.change_id].selected is not None
+            ),
+        )
+        if not rows:
+            self._body.addWidget(
+                _label("No matching comparisons in the current page.", "muted")
+            )
+        for row in rows:
+            self._render_comparison(row, offers.get(row.change_id), renames, positions)
+        if self._page is not None:
+            self._previous_button("Previous comparison page", "page")
+            if self._page.next_offset is not None:
+                self._read_button(
+                    "Next comparison items",
+                    "page",
+                    offset=self._page.next_offset,
+                    limit=100,
+                    byte_offset=0,
+                )
+
+    def _render_workspace_page(self):
+        if self.queue.currentRow() == 0:
+            self._body.addWidget(self._inputs)
+            self._inputs.show()
+        elif self.queue.currentRow() == 1:
+            self._render_review_summary()
+        elif self.queue.currentRow() == 3:
+            self._render_offers()
+        elif self.queue.currentRow() == 4:
+            self._render_history()
+        else:
+            self._render_comparisons()
+
     def _render(self, *_, preserve_position=False):
         key = (
             self.queue.currentRow(),
@@ -1423,273 +1731,8 @@ class UpdateWorkbench(QWidget):
         )
         if key == self._rendered:
             return
-        scope = (self.queue.currentRow(), self._binding_key)
-        if (
-            preserve_position
-            and self._rendered is not None
-            and self._rendered[:2] == scope
-        ):
-            if self._read_position is None or self._read_position[0] != scope:
-                self._read_position = (scope, self.scroll.verticalScrollBar().value())
-        else:
-            self._read_position = None
-        self._rendered = key
-        self._choice_buttons = []
-        self._read_buttons = []
-        self._draft_buttons = []
-        while self._body.count():
-            item = self._body.takeAt(0)
-            if item.widget() is not None:
-                item.widget().hide()
-                if item.widget() not in (self._inputs, self._editor):
-                    item.widget().deleteLater()
-        if self.queue.currentRow() == 0:
-            self._body.addWidget(self._inputs)
-            self._inputs.show()
-        elif self.queue.currentRow() == 1:
-            self._body.addWidget(_label("Review the whole update", "sectionTitle"))
-            state = self._state
-            applied = (
-                state is not None
-                and state.binding is None
-                and state.active_request_id is None
-                and not state.needs_inspection
-                and state.reply is not None
-                and state.reply is state.last_operation
-                and state.reply.status == "applied"
-                and state.reply.kind != "history"
-                and state.last_operation_vault == state.vault
-                and state.vault is not None
-            )
-            if applied:
-                self._body.addWidget(_label("Update applied", "sectionTitle"))
-                self._body.addWidget(_label(state.reply.summary or "Update applied."))
-                self._body.addWidget(_label("Updated vault: " + state.vault))
-                if self.vault is None or self.vault == state.vault:
-                    self._action_button_callback(
-                        "Inspect history for Undo", self._inspect_history
-                    )
-            elif state is None or state.binding is None:
-                self._body.addWidget(
-                    _label(
-                        "Choose an incoming BRZ archive and an existing vault.", "muted"
-                    )
-                )
-            else:
-                self._body.addWidget(
-                    _label(
-                        f"Prepared changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
-                        if isinstance(self._state.binding, UpdateContextBinding)
-                        else f"Changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
-                    )
-                )
-                self._body.addWidget(
-                    _label(
-                        "Your decisions are retained as you move through the review.",
-                        "muted",
-                    )
-                )
-                reply = self._state.reply
-                if (
-                    isinstance(self._state.binding, HistoryContextBinding)
-                    and not self._state.review_ready
-                    and not self._state.needs_inspection
-                    and self._state.unresolved == 0
-                    and reply is not None
-                    and reply.binding == self._state.binding
-                    and reply.status in ("prepared_review", "available")
-                    and reply.history_action is not None
-                    and reply.history_action.status == "review_required"
-                    and reply.history_action.summary
-                ):
-                    self._body.addWidget(
-                        _label("Review needs attention", "sectionTitle")
-                    )
-                    self._body.addWidget(_label(reply.history_action.summary))
-                    if reply.guidance:
-                        self._body.addWidget(_label(reply.guidance))
-                operation = self._state.last_operation
-                if isinstance(self._state.binding, UpdateContextBinding) and operation:
-                    self._body.addWidget(
-                        _label(
-                            f"Unresolved conflicts: {operation.unresolved_conflicts}"
-                        )
-                    )
-                    if operation.unresolved_exceptions:
-                        self._body.addWidget(
-                            _label(
-                                f"Other choices requiring attention: {operation.unresolved_exceptions}"
-                            )
-                        )
-                    if operation.keep_current_count and operation.keep_current_group_id:
-                        if (
-                            operation.keep_current_count
-                            < operation.unresolved_conflicts
-                        ):
-                            self._body.addWidget(
-                                _label(
-                                    "Other conflicts require individual resolution.",
-                                    "muted",
-                                )
-                            )
-                        self._action_button(
-                            f"Keep current for all unresolved conflicts ({operation.keep_current_count})",
-                            "keep_current_unresolved",
-                            binding=self._state.binding,
-                            group_id=operation.keep_current_group_id,
-                        )
-        elif self.queue.currentRow() == 3:
-            self._render_offers()
-        elif self.queue.currentRow() == 4:
-            self._render_history()
-        else:
-            compatible = self.queue.currentRow() == 5
-            catalogue = self.queue.currentRow() == 6
-            self._body.addWidget(
-                _label(
-                    "All changes"
-                    if catalogue
-                    else "Compatible changes"
-                    if compatible
-                    else "Conflicts",
-                    "sectionTitle",
-                )
-            )
-            rows = () if self._page is None else self._page.items
-            offers = {
-                row.change_id: row
-                for row in (*self._offers, *self._row_offers)
-                if row.domain != "rename"
-            }
-            renames = {
-                row.change_id: row
-                for row in (*self._offers, *self._row_offers)
-                if row.domain == "rename"
-            }
-            positions = {
-                row.change_id: self._page.offset + index
-                for index, row in enumerate(rows)
-            }
-            rows = sorted(
-                (
-                    row
-                    for row in rows
-                    if catalogue
-                    or row.disposition == ("compatible" if compatible else "unresolved")
-                ),
-                key=lambda row: (
-                    offers.get(row.change_id) is not None
-                    and offers[row.change_id].selected is not None
-                ),
-            )
-            if not rows:
-                self._body.addWidget(
-                    _label("No matching comparisons in the current page.", "muted")
-                )
-            for row in rows:
-                self._body.addWidget(_label(row.current_path, "sectionTitle"))
-                offer = offers.get(row.change_id)
-                self._body.addWidget(
-                    _label(
-                        "Decision recorded"
-                        if offer is not None and offer.selected is not None
-                        else row.disposition.replace("_", " ").capitalize(),
-                        "muted",
-                    )
-                )
-                if row.incoming_path != row.current_path:
-                    self._body.addWidget(
-                        _label("Incoming path: " + row.incoming_path, "muted")
-                    )
-                if offer is not None and offer.selected is not None:
-                    self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
-                for title, raw in (
-                    ("Original", row.original),
-                    ("Current", row.current),
-                    ("Incoming", row.incoming),
-                    ("Result", row.result),
-                ):
-                    self._body.addWidget(_label(title, "sectionTitle"))
-                    if raw is None:
-                        self._body.addWidget(_label("Not available", "muted"))
-                        continue
-                    try:
-                        text = raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        self._body.addWidget(
-                            _label(
-                                f"{len(raw)} bytes; content cannot be displayed as text.",
-                                "muted",
-                            )
-                        )
-                        continue
-                    view = QPlainTextEdit()
-                    view.setAccessibleName(title + " version")
-                    view.setReadOnly(True)
-                    view.setPlainText(text)
-                    view.setMinimumHeight(90)
-                    self._body.addWidget(view)
-                if row.omitted:
-                    self._body.addWidget(
-                        _label(
-                            "This comparison is paged; more bytes are available.",
-                            "muted",
-                        )
-                    )
-                if row.next_byte_offset is not None:
-                    self._read_button(
-                        "More comparison bytes",
-                        "page",
-                        name="More comparison bytes for " + row.current_path,
-                        offset=positions[row.change_id],
-                        limit=1,
-                        byte_offset=row.next_byte_offset,
-                    )
-                if offer is not None and offer.domain in ("text", "reversal"):
-                    for choice, title in (
-                        ("current", "Keep vault version"),
-                        ("incoming", "Use incoming version"),
-                        ("reverse", "Reverse reviewed change"),
-                    ):
-                        if choice not in offer.choices:
-                            continue
-                        button = QPushButton(title)
-                        button.setAccessibleName(title + " for " + row.current_path)
-                        button.setProperty("draftRequirement", offer.requirement_id)
-                        binding = self._state.binding
-                        button.clicked.connect(
-                            lambda checked=False, b=binding, o=offer, c=choice: (
-                                self._choose(b, o, c)
-                            )
-                        )
-                        self._choice_buttons.append(button)
-                        self._body.addWidget(button)
-                    if "edited" in offer.choices:
-                        button = QPushButton("Edit result")
-                        button.setAccessibleName("Edit result for " + row.current_path)
-                        initial = (
-                            row.current if not row.omitted and row.offset == 0 else None
-                        )
-                        binding = self._state.binding
-                        button.clicked.connect(
-                            lambda checked=False, b=binding, o=offer, p=row.current_path, raw=initial: (
-                                self._editor.open(b, o, p, raw)
-                            )
-                        )
-                        self._choice_buttons.append(button)
-                        self._body.addWidget(button)
-                if row.change_id in renames:
-                    self._render_path_choices(renames[row.change_id], row.current_path)
-            if self._page is not None:
-                self._previous_button("Previous comparison page", "page")
-                if self._page.next_offset is not None:
-                    self._read_button(
-                        "Next comparison items",
-                        "page",
-                        offset=self._page.next_offset,
-                        limit=100,
-                        byte_offset=0,
-                    )
+        self._rebuild_workspace(key, preserve_position=preserve_position)
+        self._render_workspace_page()
         if self._draft_message:
             self._body.addWidget(_label(self._draft_message, "muted"))
         if self.queue.currentRow() == 1:
@@ -1743,6 +1786,278 @@ class UpdateWorkbench(QWidget):
                 )
             )
 
+    def _render_offer_actions(
+        self,
+        offer,
+        domain,
+        title,
+        action_identity,
+        labels,
+        *,
+        text_identity_unavailable,
+    ):
+        scoped_configuration = (
+            offer.domain == "configuration" and self._configuration is not None
+        )
+        if scoped_configuration:
+            button = QPushButton("Review vault configuration")
+            button.setAccessibleName("Review vault configuration")
+            button.clicked.connect(lambda checked=False: self.queue.setCurrentRow(1))
+            self._body.addWidget(button)
+        for choice in () if scoped_configuration else offer.choices:
+            if choice in ("edited", "associate"):
+                continue
+            text = labels[choice]
+            action_name = (
+                text + " " + domain
+                if choice in ("approve", "accept", "decline")
+                else text + " for " + action_identity
+            )
+            button = QPushButton(text)
+            button.setAccessibleName(action_name)
+            button.setProperty("draftRequirement", offer.requirement_id)
+            binding = self._state.binding
+            button.setEnabled(not text_identity_unavailable)
+            if not text_identity_unavailable:
+                button.clicked.connect(
+                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(
+                        b, o, c
+                    )
+                )
+                self._choice_buttons.append(button)
+            self._body.addWidget(button)
+        for unavailable in () if scoped_configuration else offer.unavailable_choices:
+            self._body.addWidget(
+                _label(
+                    "Unavailable: "
+                    + labels[unavailable.choice]
+                    + " — "
+                    + ", ".join(r.replace("_", " ") for r in unavailable.reasons),
+                    "muted",
+                )
+            )
+            button = QPushButton(labels[unavailable.choice])
+            button.setAccessibleName(labels[unavailable.choice] + " for " + title)
+            button.setEnabled(False)
+            self._body.addWidget(button)
+
+    def _render_offer_details(self, offer, title):
+        if self._details is not None and self._details[0] == offer.requirement_id:
+            _, _, reply = self._details
+            if not reply.choice_details:
+                self._body.addWidget(
+                    _label("No additional details for this choice.", "muted")
+                )
+            for row in reply.choice_details:
+                if row.choice is not None:
+                    wording = {
+                        "current": "Vault version",
+                        "incoming": "Incoming version",
+                        "both": "Both versions",
+                    }
+                    self._body.addWidget(
+                        _label(
+                            "Output for: "
+                            + wording.get(row.choice, row.choice.replace("_", " ")),
+                            "sectionTitle",
+                        )
+                    )
+                fields = [
+                    row.path,
+                    row.entry_id,
+                    row.target_id,
+                    None if row.size is None else f"{row.size} bytes",
+                    row.sha256,
+                    row.identity_state,
+                    row.existence,
+                ]
+                self._body.addWidget(
+                    _label("\n".join(str(v) for v in fields if v is not None))
+                )
+            if offer.domain == "identity" and "associate" in offer.choices:
+                self._render_identity(offer, title, reply.choice_details)
+            self._previous_button(
+                "Previous choice details",
+                "choice_details",
+                requirement_id=offer.requirement_id,
+            )
+            if reply.next_choice_detail_offset is not None:
+                self._read_button(
+                    "Next choice details",
+                    "choice_details",
+                    requirement_id=offer.requirement_id,
+                    offset=reply.next_choice_detail_offset,
+                    limit=100,
+                )
+
+    def _render_reference_rows(self, reply):
+        for row in reply.references:
+            self._body.addWidget(_label(row.document_path, "sectionTitle"))
+            self._body.addWidget(
+                _label("Reference text: " + (row.old.display_text or "No display text"))
+            )
+            self._body.addWidget(_label(row.snippet.decode("utf-8", errors="replace")))
+            combo = QComboBox()
+            combo.setAccessibleName(
+                "Reference target for " + (row.old.display_text or row.document_path)
+            )
+            combo.addItem("Choose a reference result", None)
+            wordings = {
+                "drop": "Remove reference",
+                "keep_current": "Keep current target",
+                "use_incoming": "Use incoming target",
+                "use_secondary": "Use secondary target",
+            }
+            for choice in row.choices:
+                destination = next(
+                    (d.meaning for d in row.destinations if d.choice == choice),
+                    None,
+                )
+                text = wordings[choice] + (
+                    ": " + destination.path
+                    if destination is not None and destination.path is not None
+                    else ""
+                )
+                combo.addItem(text, choice)
+            chosen = self._reference_selections.get(row.reference_id, row.selected)
+            combo.setCurrentIndex(max(0, combo.findData(chosen)))
+
+            def changed(
+                index,
+                control=combo,
+                token=row.reference_id,
+                previous=row.selected,
+            ):
+                value = control.itemData(index)
+                if value is None or value == previous:
+                    self._reference_selections.pop(token, None)
+                else:
+                    self._reference_selections[token] = value
+                self._reference_dirty = bool(self._reference_selections)
+                self._refresh_choices()
+                self.availability_changed.emit()
+
+            combo.currentIndexChanged.connect(changed)
+            self._body.addWidget(combo)
+
+    def _render_offer_references(self, offer):
+        if self._references is None or self._references[0] != offer.requirement_id:
+            return
+        _, reference_offset, reply = self._references
+        if not reply.references:
+            self._body.addWidget(
+                _label("No reference occurrences for this choice.", "muted")
+            )
+        self._render_reference_rows(reply)
+        if reply.references:
+            stage = QPushButton("Stage reference choices")
+            stage.setAccessibleName("Stage reference choices")
+            binding = self._state.binding
+            stage.clicked.connect(
+                lambda checked=False, b=binding, o=offer, offset=reference_offset, r=reply: (
+                    self._stage_references(b, o, offset, r)
+                )
+            )
+            self._body.addWidget(stage)
+
+            def may_stage(r=reply):
+                return (
+                    not self._external_busy()
+                    and not self._editor.active
+                    and self._state.binding == r.binding
+                    and not self._state.needs_inspection
+                    and all(
+                        self._reference_selections.get(row.reference_id, row.selected)
+                        in row.choices
+                        for row in r.references
+                    )
+                )
+
+            self._draft_buttons.append((stage, may_stage))
+            discard = QPushButton("Discard reference draft")
+            discard.setAccessibleName("Discard reference draft")
+            discard.clicked.connect(self._discard_references)
+            self._body.addWidget(discard)
+            self._draft_buttons.append(
+                (
+                    discard,
+                    lambda: not self._external_busy() and not self._editor.active,
+                )
+            )
+        self._previous_button(
+            "Previous reference page",
+            "references",
+            requirement_id=offer.requirement_id,
+        )
+        if reply.next_reference_offset is not None:
+            self._read_button(
+                "Next reference page",
+                "references",
+                requirement_id=offer.requirement_id,
+                offset=reply.next_reference_offset,
+                limit=100,
+            )
+
+    def _render_offer(self, index, offer, domain, labels):
+        title = f"{domain} choice {index}"
+        text_identity_unavailable = offer.domain == "text" and (
+            not offer.disclosure or offer.detail_omitted
+        )
+        action_identity = (
+            offer.disclosure.removeprefix("Current file: ")
+            if offer.domain == "text"
+            else title
+        )
+        self._body.addWidget(_label(title.capitalize(), "sectionTitle"))
+        if offer.disclosure:
+            self._body.addWidget(_label(offer.disclosure))
+        if offer.detail_omitted:
+            self._body.addWidget(
+                _label(
+                    "Some disclosure was omitted from this bounded view.",
+                    "muted",
+                )
+            )
+        if text_identity_unavailable:
+            self._body.addWidget(
+                _label(
+                    "Text actions unavailable: complete file identity is not shown.",
+                    "muted",
+                )
+            )
+        if offer.selected is not None:
+            selected = (
+                labels[offer.selected] if offer.domain == "rename" else offer.selected
+            )
+            self._body.addWidget(_label("Chosen: " + selected, "muted"))
+        self._render_offer_actions(
+            offer,
+            domain,
+            title,
+            action_identity,
+            labels,
+            text_identity_unavailable=text_identity_unavailable,
+        )
+        self._read_button(
+            "Review details",
+            "choice_details",
+            name="Review details for " + title,
+            requirement_id=offer.requirement_id,
+            offset=0,
+            limit=100,
+        )
+        if offer.reference_review or offer.domain == "attachment":
+            self._read_button(
+                "Review references",
+                "references",
+                name="Review references for " + title,
+                requirement_id=offer.requirement_id,
+                offset=0,
+                limit=100,
+            )
+        self._render_offer_details(offer, title)
+        self._render_offer_references(offer)
+
     def _render_offers(self):
         self._body.addWidget(_label("Review choices", "sectionTitle"))
         offset, total, following = self._offer_page
@@ -1783,269 +2098,7 @@ class UpdateWorkbench(QWidget):
             "edited": "Use edited result",
         }
         for index, offer in enumerate(self._offers, offset + 1):
-            domain = names[offer.domain]
-            title = f"{domain} choice {index}"
-            text_identity_unavailable = offer.domain == "text" and (
-                not offer.disclosure or offer.detail_omitted
-            )
-            action_identity = (
-                offer.disclosure.removeprefix("Current file: ")
-                if offer.domain == "text"
-                else title
-            )
-            self._body.addWidget(_label(title.capitalize(), "sectionTitle"))
-            if offer.disclosure:
-                self._body.addWidget(_label(offer.disclosure))
-            if offer.detail_omitted:
-                self._body.addWidget(
-                    _label(
-                        "Some disclosure was omitted from this bounded view.",
-                        "muted",
-                    )
-                )
-            if text_identity_unavailable:
-                self._body.addWidget(
-                    _label(
-                        "Text actions unavailable: complete file identity is not shown.",
-                        "muted",
-                    )
-                )
-            if offer.selected is not None:
-                selected = (
-                    labels[offer.selected]
-                    if offer.domain == "rename"
-                    else offer.selected
-                )
-                self._body.addWidget(_label("Chosen: " + selected, "muted"))
-            scoped_configuration = (
-                offer.domain == "configuration" and self._configuration is not None
-            )
-            if scoped_configuration:
-                button = QPushButton("Review vault configuration")
-                button.setAccessibleName("Review vault configuration")
-                button.clicked.connect(
-                    lambda checked=False: self.queue.setCurrentRow(1)
-                )
-                self._body.addWidget(button)
-            for choice in () if scoped_configuration else offer.choices:
-                if choice in ("edited", "associate"):
-                    continue
-                text = labels[choice]
-                action_name = (
-                    text + " " + domain
-                    if choice in ("approve", "accept", "decline")
-                    else text + " for " + action_identity
-                )
-                button = QPushButton(text)
-                button.setAccessibleName(action_name)
-                button.setProperty("draftRequirement", offer.requirement_id)
-                binding = self._state.binding
-                button.setEnabled(not text_identity_unavailable)
-                if not text_identity_unavailable:
-                    button.clicked.connect(
-                        lambda checked=False, b=binding, o=offer, c=choice: (
-                            self._choose(b, o, c)
-                        )
-                    )
-                    self._choice_buttons.append(button)
-                self._body.addWidget(button)
-            for unavailable in (
-                () if scoped_configuration else offer.unavailable_choices
-            ):
-                self._body.addWidget(
-                    _label(
-                        "Unavailable: "
-                        + labels[unavailable.choice]
-                        + " — "
-                        + ", ".join(r.replace("_", " ") for r in unavailable.reasons),
-                        "muted",
-                    )
-                )
-                button = QPushButton(labels[unavailable.choice])
-                button.setAccessibleName(labels[unavailable.choice] + " for " + title)
-                button.setEnabled(False)
-                self._body.addWidget(button)
-            self._read_button(
-                "Review details",
-                "choice_details",
-                name="Review details for " + title,
-                requirement_id=offer.requirement_id,
-                offset=0,
-                limit=100,
-            )
-            if offer.reference_review or offer.domain == "attachment":
-                self._read_button(
-                    "Review references",
-                    "references",
-                    name="Review references for " + title,
-                    requirement_id=offer.requirement_id,
-                    offset=0,
-                    limit=100,
-                )
-            if self._details is not None and self._details[0] == offer.requirement_id:
-                _, _, reply = self._details
-                if not reply.choice_details:
-                    self._body.addWidget(
-                        _label("No additional details for this choice.", "muted")
-                    )
-                for row in reply.choice_details:
-                    if row.choice is not None:
-                        wording = {
-                            "current": "Vault version",
-                            "incoming": "Incoming version",
-                            "both": "Both versions",
-                        }
-                        self._body.addWidget(
-                            _label(
-                                "Output for: "
-                                + wording.get(row.choice, row.choice.replace("_", " ")),
-                                "sectionTitle",
-                            )
-                        )
-                    fields = [
-                        row.path,
-                        row.entry_id,
-                        row.target_id,
-                        None if row.size is None else f"{row.size} bytes",
-                        row.sha256,
-                        row.identity_state,
-                        row.existence,
-                    ]
-                    self._body.addWidget(
-                        _label("\n".join(str(v) for v in fields if v is not None))
-                    )
-                if offer.domain == "identity" and "associate" in offer.choices:
-                    self._render_identity(offer, title, reply.choice_details)
-                self._previous_button(
-                    "Previous choice details",
-                    "choice_details",
-                    requirement_id=offer.requirement_id,
-                )
-                if reply.next_choice_detail_offset is not None:
-                    self._read_button(
-                        "Next choice details",
-                        "choice_details",
-                        requirement_id=offer.requirement_id,
-                        offset=reply.next_choice_detail_offset,
-                        limit=100,
-                    )
-            if (
-                self._references is not None
-                and self._references[0] == offer.requirement_id
-            ):
-                _, reference_offset, reply = self._references
-                if not reply.references:
-                    self._body.addWidget(
-                        _label("No reference occurrences for this choice.", "muted")
-                    )
-                for row in reply.references:
-                    self._body.addWidget(_label(row.document_path, "sectionTitle"))
-                    self._body.addWidget(
-                        _label(
-                            "Reference text: "
-                            + (row.old.display_text or "No display text")
-                        )
-                    )
-                    self._body.addWidget(
-                        _label(row.snippet.decode("utf-8", errors="replace"))
-                    )
-                    combo = QComboBox()
-                    combo.setAccessibleName(
-                        "Reference target for "
-                        + (row.old.display_text or row.document_path)
-                    )
-                    combo.addItem("Choose a reference result", None)
-                    wordings = {
-                        "drop": "Remove reference",
-                        "keep_current": "Keep current target",
-                        "use_incoming": "Use incoming target",
-                        "use_secondary": "Use secondary target",
-                    }
-                    for choice in row.choices:
-                        destination = next(
-                            (d.meaning for d in row.destinations if d.choice == choice),
-                            None,
-                        )
-                        text = wordings[choice] + (
-                            ": " + destination.path
-                            if destination is not None and destination.path is not None
-                            else ""
-                        )
-                        combo.addItem(text, choice)
-                    chosen = self._reference_selections.get(
-                        row.reference_id, row.selected
-                    )
-                    combo.setCurrentIndex(max(0, combo.findData(chosen)))
-
-                    def changed(
-                        index,
-                        control=combo,
-                        token=row.reference_id,
-                        previous=row.selected,
-                    ):
-                        value = control.itemData(index)
-                        if value is None or value == previous:
-                            self._reference_selections.pop(token, None)
-                        else:
-                            self._reference_selections[token] = value
-                        self._reference_dirty = bool(self._reference_selections)
-                        self._refresh_choices()
-                        self.availability_changed.emit()
-
-                    combo.currentIndexChanged.connect(changed)
-                    self._body.addWidget(combo)
-                if reply.references:
-                    stage = QPushButton("Stage reference choices")
-                    stage.setAccessibleName("Stage reference choices")
-                    binding = self._state.binding
-                    stage.clicked.connect(
-                        lambda checked=False, b=binding, o=offer, offset=reference_offset, r=reply: (
-                            self._stage_references(b, o, offset, r)
-                        )
-                    )
-                    self._body.addWidget(stage)
-
-                    def may_stage(r=reply):
-                        return (
-                            not self._external_busy()
-                            and not self._editor.active
-                            and self._state.binding == r.binding
-                            and not self._state.needs_inspection
-                            and all(
-                                self._reference_selections.get(
-                                    row.reference_id, row.selected
-                                )
-                                in row.choices
-                                for row in r.references
-                            )
-                        )
-
-                    self._draft_buttons.append((stage, may_stage))
-                    discard = QPushButton("Discard reference draft")
-                    discard.setAccessibleName("Discard reference draft")
-                    discard.clicked.connect(self._discard_references)
-                    self._body.addWidget(discard)
-                    self._draft_buttons.append(
-                        (
-                            discard,
-                            lambda: (
-                                not self._external_busy() and not self._editor.active
-                            ),
-                        )
-                    )
-                self._previous_button(
-                    "Previous reference page",
-                    "references",
-                    requirement_id=offer.requirement_id,
-                )
-                if reply.next_reference_offset is not None:
-                    self._read_button(
-                        "Next reference page",
-                        "references",
-                        requirement_id=offer.requirement_id,
-                        offset=reply.next_reference_offset,
-                        limit=100,
-                    )
+            self._render_offer(index, offer, names[offer.domain], labels)
         self._previous_button("Previous review choices", "choices")
         if following is not None:
             self._read_button(
