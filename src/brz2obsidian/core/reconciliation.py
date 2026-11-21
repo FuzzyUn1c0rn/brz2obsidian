@@ -190,6 +190,81 @@ def _proposal(subject, *, automatic=False):
     return "compatible", subject.incoming, "source_only", True
 
 
+def _reversal_proposal(subject, binary_review):
+    proof = subject.operation_reversal
+    already_target = all(
+        row.current.existence == row.target_existence
+        and content_bytes(row.current.content) == content_bytes(row.target)
+        for row in proof.outputs
+    )
+    primary = primary_reversal_content(subject)
+    disposition, result, rule, requires_decision = (
+        "local_deleted"
+        if already_target and primary is None
+        else "no_change"
+        if already_target
+        else "operation_reversal",
+        primary if already_target else None,
+        "operation_reversal",
+        not already_target,
+    )
+    if not any(
+        row.target is not None
+        and content_bytes(row.target) != content_bytes(row.current.content)
+        for row in proof.outputs
+    ):
+        binary_review = None
+    return (disposition, result, rule, requires_decision), binary_review
+
+
+def _comparison_safety(
+    subject, binding, problems, structure_problem, outcome, structured_result
+):
+    disposition, result, rule, requires_decision = outcome
+    if structure_problem is not None:
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "unresolved",
+            None,
+            structure_problem,
+            True,
+        )
+    if subject.moved_navigation and not any(problem.blocking for problem in problems):
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "unresolved",
+            None,
+            "moved_navigation",
+            True,
+        )
+    if binding.review.status != "matched":
+        disposition, result, rule, requires_decision = (
+            "identity_resolution",
+            None,
+            "identity_resolution",
+            True,
+        )
+    if binding.review.status == "stale":
+        disposition = "stale"
+    if binding.rename is not None and binding.rename.status == "stale":
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "stale",
+            None,
+            "rename_review",
+            True,
+        )
+    if any(problem.blocking for problem in problems):
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "refused",
+            None,
+            "unsafe_input",
+            True,
+        )
+    return (disposition, result, rule, requires_decision), structured_result
+
+
 def _reconcile_subject(
     facts, subject, applicability, *, reversal_fingerprint=None, _links=None
 ):
@@ -298,30 +373,10 @@ def _reconcile_subject(
             )
         )
     if subject.operation_reversal is not None:
-        proof = subject.operation_reversal
-        already_target = all(
-            row.current.existence == row.target_existence
-            and content_bytes(row.current.content) == content_bytes(row.target)
-            for row in proof.outputs
-        )
-        primary = primary_reversal_content(subject)
-        disposition, result, rule, requires_decision = (
-            "local_deleted"
-            if already_target and primary is None
-            else "no_change"
-            if already_target
-            else "operation_reversal",
-            primary if already_target else None,
-            "operation_reversal",
-            not already_target,
+        (disposition, result, rule, requires_decision), binary_review = (
+            _reversal_proposal(subject, binary_review)
         )
         preservation_review = None
-        if not any(
-            row.target is not None
-            and content_bytes(row.target) != content_bytes(row.current.content)
-            for row in proof.outputs
-        ):
-            binary_review = None
     structured_result = None
     if (
         subject.structure is not None
@@ -339,51 +394,18 @@ def _reconcile_subject(
                 automatic=facts.format_operation.automatic_merge,
             )
         )
-    if (
-        structure_problem is not None
-        and format_review is None
-        and format_choice is None
-    ):
-        structured_result = None
-        disposition, result, rule, requires_decision = (
-            "unresolved",
-            None,
-            structure_problem,
-            True,
+    (disposition, result, rule, requires_decision), structured_result = (
+        _comparison_safety(
+            subject,
+            binding,
+            problems,
+            structure_problem
+            if format_review is None and format_choice is None
+            else None,
+            (disposition, result, rule, requires_decision),
+            structured_result,
         )
-    if subject.moved_navigation and not any(problem.blocking for problem in problems):
-        structured_result = None
-        disposition, result, rule, requires_decision = (
-            "unresolved",
-            None,
-            "moved_navigation",
-            True,
-        )
-    if binding.review.status != "matched":
-        disposition, result, rule, requires_decision = (
-            "identity_resolution",
-            None,
-            "identity_resolution",
-            True,
-        )
-    if binding.review.status == "stale":
-        disposition = "stale"
-    if binding.rename is not None and binding.rename.status == "stale":
-        structured_result = None
-        disposition, result, rule, requires_decision = (
-            "stale",
-            None,
-            "rename_review",
-            True,
-        )
-    if any(problem.blocking for problem in problems):
-        structured_result = None
-        disposition, result, rule, requires_decision = (
-            "refused",
-            None,
-            "unsafe_input",
-            True,
-        )
+    )
     if (
         subject.baseline.status == "known"
         and subject.current.existence != "unknown"

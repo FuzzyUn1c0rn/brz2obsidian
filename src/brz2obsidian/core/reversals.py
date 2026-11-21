@@ -280,6 +280,98 @@ def reversal_document_entry(facts, subject):
     return entry
 
 
+def _reversal_owner_matches(facts, subject, retained, owner):
+    if subject.attachment is not None:
+        if retained.kind != "resource" or retained.identity is not None:
+            return False
+    elif reversal_document_target(subject) is not None:
+        if reversal_document_entry(facts, subject) is None:
+            return False
+    elif (
+        retained.identity is None
+        or (
+            retained.identity.module_id,
+            retained.identity.collection_id,
+            retained.identity.item_id,
+        )
+        != owner
+    ):
+        return False
+    return True
+
+
+def _matching_reversal_entries(facts, subject, row):
+    entries = tuple(e for e in facts.identity_inventory if e.current.path == row.path)
+    if len(entries) > 1 or (row.current.existence == "present" and len(entries) != 1):
+        return None
+    for entry in entries:
+        if (
+            entry.current.existence != row.current.existence
+            or content_bytes(entry.current.content)
+            != content_bytes(row.current.content)
+            or (
+                row.path != subject.current.path
+                and entry.identity is not None
+                and not reversal_physical_entry(facts, entry)
+            )
+        ):
+            return None
+    if row.path == subject.current.path and (
+        row.current.existence != subject.current.existence
+        or content_bytes(row.current.content) != content_bytes(subject.current.content)
+    ):
+        return None
+    return entries
+
+
+def _reversal_registry_safe(facts, context, row, retained, entries):
+    targets = tuple(
+        t
+        for t in context.current_targets
+        if (t.target_id, t.canonical_path) == (row.target_id, row.path)
+    )
+    # A moved logical target can have one current registry path; retained
+    # original facts still establish its other proven absent physical path.
+    physical = bool(entries) and reversal_physical_entry(facts, entries[0])
+    if not targets and (row.current.existence == "absent" or physical):
+        targets = (retained,)
+    if (
+        len(targets) != 1
+        or targets[0].target != retained.target
+        or targets[0].identity != retained.identity
+    ):
+        return False
+    target = targets[0]
+    if (
+        target.status != "safe"
+        or retained.target is None
+        or not _target_safe(
+            row.path,
+            retained.target,
+            tuple(
+                e
+                for e in facts.identity_inventory
+                if e.current.path != row.path
+                and _paths_collide(e.current.path, row.path)
+            ),
+        )
+    ):
+        return False
+    states = tuple(
+        s for s in context.current_target_facts if s.target_id == row.target_id
+    )
+    registered = any(t.canonical_path == row.path for t in context.current_targets)
+    return not (
+        row.current.existence == "present"
+        and (registered or not physical)
+        and (
+            len(states) != 1
+            or states[0].existence != "present"
+            or content_bytes(states[0].content) != content_bytes(row.current.content)
+        )
+    )
+
+
 def reversal_safe(facts, subject, target_path):
     proof = subject.operation_reversal
     context = facts.link_context
@@ -302,92 +394,11 @@ def reversal_safe(facts, subject, target_path):
     )
     for row in proof.outputs:
         retained = reversal_target(proof, row)
-        if subject.attachment is not None:
-            if retained.kind != "resource" or retained.identity is not None:
-                return False
-        elif reversal_document_target(subject) is not None:
-            if reversal_document_entry(facts, subject) is None:
-                return False
-        elif (
-            retained.identity is None
-            or (
-                retained.identity.module_id,
-                retained.identity.collection_id,
-                retained.identity.item_id,
-            )
-            != owner
-        ):
+        if not _reversal_owner_matches(facts, subject, retained, owner):
             return False
-        entries = tuple(
-            e for e in facts.identity_inventory if e.current.path == row.path
-        )
-        if len(entries) > 1 or (
-            row.current.existence == "present" and len(entries) != 1
-        ):
-            return False
-        for entry in entries:
-            if (
-                entry.current.existence != row.current.existence
-                or content_bytes(entry.current.content)
-                != content_bytes(row.current.content)
-                or (
-                    row.path != subject.current.path
-                    and entry.identity is not None
-                    and not reversal_physical_entry(facts, entry)
-                )
-            ):
-                return False
-        if row.path == subject.current.path and (
-            row.current.existence != subject.current.existence
-            or content_bytes(row.current.content)
-            != content_bytes(subject.current.content)
-        ):
-            return False
-        targets = tuple(
-            t
-            for t in context.current_targets
-            if (t.target_id, t.canonical_path) == (row.target_id, row.path)
-        )
-        # A moved logical target can have one current registry path; retained
-        # original facts still establish its other proven absent physical path.
-        physical = bool(entries) and reversal_physical_entry(facts, entries[0])
-        if not targets and (row.current.existence == "absent" or physical):
-            targets = (retained,)
-        if (
-            len(targets) != 1
-            or targets[0].target != retained.target
-            or targets[0].identity != retained.identity
-        ):
-            return False
-        target = targets[0]
-        if (
-            target.status != "safe"
-            or retained.target is None
-            or not _target_safe(
-                row.path,
-                retained.target,
-                tuple(
-                    e
-                    for e in facts.identity_inventory
-                    if e.current.path != row.path
-                    and _paths_collide(e.current.path, row.path)
-                ),
-            )
-        ):
-            return False
-        states = tuple(
-            s for s in context.current_target_facts if s.target_id == row.target_id
-        )
-        registered = any(t.canonical_path == row.path for t in context.current_targets)
-        if (
-            row.current.existence == "present"
-            and (registered or not physical)
-            and (
-                len(states) != 1
-                or states[0].existence != "present"
-                or content_bytes(states[0].content)
-                != content_bytes(row.current.content)
-            )
+        entries = _matching_reversal_entries(facts, subject, row)
+        if entries is None or not _reversal_registry_safe(
+            facts, context, row, retained, entries
         ):
             return False
     return True
@@ -441,6 +452,28 @@ def review_owned_target_groups(plan, requests):
         _owned_targets(plan, change_id, decision_id, selected_effects)
         for change_id, decision_id in requests
     )
+
+
+def _owned_targets_by_path(plan, change, targets, paths):
+    owner = (
+        plan.producer_facts.incoming_identity.module_id,
+        plan.producer_facts.incoming_identity.collection_id,
+        change.item_id,
+    )
+    selected = {}
+    for path in sorted(paths):
+        matching = tuple(
+            t
+            for t in targets
+            if t.canonical_path == path
+            and t.identity is not None
+            and (t.identity.module_id, t.identity.collection_id, t.identity.item_id)
+            == owner
+        )
+        if not matching or len({t.target_id for t in matching}) != 1:
+            raise ValueError("Origin output has no unambiguous retained target")
+        selected[path] = matching[0]
+    return tuple(selected.values())
 
 
 def _owned_targets(plan, change_id, decision_id, selected_effects):
@@ -511,25 +544,7 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         and change.path in effects.remove_paths
     ):
         paths.add(change.path)
-    owner = (
-        plan.producer_facts.incoming_identity.module_id,
-        plan.producer_facts.incoming_identity.collection_id,
-        change.item_id,
-    )
-    selected = {}
-    for path in sorted(paths):
-        matching = tuple(
-            t
-            for t in targets
-            if t.canonical_path == path
-            and t.identity is not None
-            and (t.identity.module_id, t.identity.collection_id, t.identity.item_id)
-            == owner
-        )
-        if not matching or len({t.target_id for t in matching}) != 1:
-            raise ValueError("Origin output has no unambiguous retained target")
-        selected[path] = matching[0]
-    return tuple(selected.values())
+    return _owned_targets_by_path(plan, change, targets, paths)
 
 
 def review_owned_documents(plan):
@@ -542,6 +557,35 @@ def review_owned_documents(plan):
     """
     plan = _ready_origin(plan)
     return _owned_documents(plan, _lazy_effects(plan))
+
+
+def _reversed_document_selected(facts, effects, approval, change, subject, retained):
+    context = facts.link_context
+    files = tuple(f for f in effects.files if f.path == subject.path)
+    if len(files) != 1 or files[0].subject_id != change.subject_id:
+        raise ValueError("Reversed document lacks its selected owner")
+    if content_bytes(files[0].content) == content_bytes(subject.current.content):
+        return False
+    documents = tuple(
+        d
+        for d in context.incoming_documents
+        if (d.document_id, d.source_path)
+        == (retained.target_id, retained.canonical_path)
+        and canonical_equal(d.content, files[0].content)
+        and d.status == "supported"
+        and d.inventory == "complete"
+    )
+    if (
+        reversal_document_entry(facts, subject) is None
+        or approval.domain != "reversal"
+        or approval.choice != "reverse"
+        or not canonical_equal(
+            files[0].content, subject.operation_reversal.outputs[0].target
+        )
+        or len(documents) != 1
+    ):
+        raise ValueError("Reversed document lacks exact retained byte authority")
+    return True
 
 
 def _owned_documents(plan, selected_effects):
@@ -557,35 +601,10 @@ def _owned_documents(plan, selected_effects):
         subject = reversal_subject(plan.producer_facts, change)
         retained = reversal_document_target(subject)
         if retained is not None:
-            files = tuple(f for f in effects.files if f.path == subject.path)
-            if len(files) != 1 or files[0].subject_id != change.subject_id:
-                raise ValueError("Reversed document lacks its selected owner")
-            if content_bytes(files[0].content) == content_bytes(
-                subject.current.content
+            if _reversed_document_selected(
+                plan.producer_facts, effects, approval, change, subject, retained
             ):
-                continue
-            documents = tuple(
-                d
-                for d in context.incoming_documents
-                if (d.document_id, d.source_path)
-                == (retained.target_id, retained.canonical_path)
-                and canonical_equal(d.content, files[0].content)
-                and d.status == "supported"
-                and d.inventory == "complete"
-            )
-            if (
-                reversal_document_entry(plan.producer_facts, subject) is None
-                or approval.domain != "reversal"
-                or approval.choice != "reverse"
-                or not canonical_equal(
-                    files[0].content, subject.operation_reversal.outputs[0].target
-                )
-                or len(documents) != 1
-            ):
-                raise ValueError(
-                    "Reversed document lacks exact retained byte authority"
-                )
-            selected.append((approval.change_id, approval.decision_id, retained))
+                selected.append((approval.change_id, approval.decision_id, retained))
             continue
         candidate = approval.attachment_candidate
         if candidate is None:

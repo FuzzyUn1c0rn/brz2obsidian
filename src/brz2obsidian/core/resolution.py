@@ -396,6 +396,64 @@ class PlanWork:
     automatic_action: object = None
 
 
+def _collect_automatic_attachment(work, returned):
+    if type(returned) is ReviewApproval:
+        approval = returned.model_copy(update={"provenance": "automatic_merge"})
+        work = replace(
+            work,
+            actions=work.actions + (work.automatic_action,),
+            approvals=work.approvals + (approval,),
+        )
+    return replace(work, phase="automatic", automatic_index=work.automatic_index + 1)
+
+
+def _automatic_attachment_action(work, facts):
+    change, subject = work.automatic_jobs[work.automatic_index]
+    selection = AttachmentSelection(
+        schema_id="brz2obsidian.attachment-selection",
+        schema_version=1,
+        proposal_id=facts.proposal_id,
+        generation=facts.generation,
+        item_id=change.item_id,
+        facet=change.facet,
+        reviewed_change_id=change.change_id,
+        reviewed_assumptions=change.assumptions,
+        choice="incoming",
+        link_choices=subject.automatic_attachment_links,
+        provenance="explicit_user",
+    )
+    action = ReviewAction(
+        schema_id="brz2obsidian.review-action",
+        schema_version=1,
+        decision_id="automatic:" + change.change_id,
+        proposal_id=facts.proposal_id,
+        expected_generation=facts.generation,
+        change_id=change.change_id,
+        reviewed_assumptions=change.assumptions,
+        domain="attachment",
+        choice="incoming",
+        candidate=None,
+        attachment_selection=selection,
+        attachment_candidate=subject.automatic_attachment,
+        selected_entry_id=None,
+        disassociate_entry_ids=(),
+    )
+    plan = work.automatic_plan.model_copy(
+        update={"actions": work.actions, "approvals": work.approvals}
+    )
+    return ChildWork(
+        AttachmentActionWork(
+            plan,
+            action,
+            change,
+            selection,
+            subject.automatic_attachment,
+            group_defer=True,
+        ),
+        replace(work, phase="automatic_member", automatic_action=action),
+    )
+
+
 def advance_plan(work, returned=None):
     facts = work.producer_facts or work.facts
     if work.phase == "proposal":
@@ -417,62 +475,10 @@ def advance_plan(work, returned=None):
     elif work.phase == "finish":
         proposal = returned
     elif work.phase == "automatic_member":
-        if type(returned) is ReviewApproval:
-            approval = returned.model_copy(update={"provenance": "automatic_merge"})
-            work = replace(
-                work,
-                actions=work.actions + (work.automatic_action,),
-                approvals=work.approvals + (approval,),
-            )
-        return replace(
-            work, phase="automatic", automatic_index=work.automatic_index + 1
-        )
+        return _collect_automatic_attachment(work, returned)
     elif work.phase == "automatic":
         if work.automatic_index < len(work.automatic_jobs):
-            change, subject = work.automatic_jobs[work.automatic_index]
-            selection = AttachmentSelection(
-                schema_id="brz2obsidian.attachment-selection",
-                schema_version=1,
-                proposal_id=facts.proposal_id,
-                generation=facts.generation,
-                item_id=change.item_id,
-                facet=change.facet,
-                reviewed_change_id=change.change_id,
-                reviewed_assumptions=change.assumptions,
-                choice="incoming",
-                link_choices=subject.automatic_attachment_links,
-                provenance="explicit_user",
-            )
-            action = ReviewAction(
-                schema_id="brz2obsidian.review-action",
-                schema_version=1,
-                decision_id="automatic:" + change.change_id,
-                proposal_id=facts.proposal_id,
-                expected_generation=facts.generation,
-                change_id=change.change_id,
-                reviewed_assumptions=change.assumptions,
-                domain="attachment",
-                choice="incoming",
-                candidate=None,
-                attachment_selection=selection,
-                attachment_candidate=subject.automatic_attachment,
-                selected_entry_id=None,
-                disassociate_entry_ids=(),
-            )
-            plan = work.automatic_plan.model_copy(
-                update={"actions": work.actions, "approvals": work.approvals}
-            )
-            return ChildWork(
-                AttachmentActionWork(
-                    plan,
-                    action,
-                    change,
-                    selection,
-                    subject.automatic_attachment,
-                    group_defer=True,
-                ),
-                replace(work, phase="automatic_member", automatic_action=action),
-            )
+            return _automatic_attachment_action(work, facts)
         proposal = work.proposal
     elif work.phase == "composed":
         return CompletedWork(
@@ -748,8 +754,381 @@ def _producer_transition(plan, action, facts, change):
     return ProducerActionWork(plan, action, facts, change.subject_id)
 
 
-def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
-    action = ReviewAction.model_validate(action)
+def _resolve_consent(plan, action):
+    requirement = next(
+        (
+            r
+            for r in plan.requirements
+            if r.change_id == action.change_id and r.domain == action.domain
+        ),
+        None,
+    )
+    if requirement is None:
+        return _transition(plan, "refused", "unknown_change")
+    if action.reviewed_assumptions != requirement.assumptions:
+        return _transition(plan, "stale", "assumptions_changed")
+    if (
+        action.choice not in requirement.choices
+        or action.candidate is not None
+        or action.selected_entry_id is not None
+        or action.disassociate_entry_ids
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    consent_id = action.change_id.removeprefix("consent:")
+    decision = ReviewConsentDecision(
+        schema_id="brz2obsidian.review-consent-decision",
+        schema_version=1,
+        decision_id=action.decision_id,
+        consent_id=consent_id,
+        kind=action.domain,
+        choice=action.choice,
+        assumptions=requirement.assumptions,
+        provenance="explicit_user",
+    )
+    consents = tuple(c for c in plan.consents if c.consent_id != consent_id) + (
+        decision,
+    )
+    return _transition(
+        PlanWork(
+            plan.facts,
+            plan.preflight,
+            plan.actions + (action,),
+            plan.approvals,
+            consents,
+            producer_facts=plan.producer_facts,
+            producer_applicability=plan.producer_applicability,
+            attachment_applicability=plan.attachment_applicability,
+            canonical_prior=plan,
+        ),
+        "accepted",
+        "accepted",
+    )
+
+
+def _resolve_compatible_group(plan, action):
+    group = next((g for g in plan.groups if g.group_id == action.change_id), None)
+    if group is None:
+        return _transition(plan, "refused", "unknown_change")
+    if action.reviewed_assumptions != group.assumptions:
+        return _transition(plan, "stale", "assumptions_changed")
+    if (
+        action.choice != "approve"
+        or action.candidate is not None
+        or action.selected_entry_id is not None
+        or action.disassociate_entry_ids
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    approvals = tuple(
+        ReviewApproval(
+            schema_id="brz2obsidian.review-approval",
+            schema_version=1,
+            decision_id=action.decision_id,
+            change_id=c.change_id,
+            domain="text",
+            choice="approve",
+            result=c.result,
+            target_path=c.target_path,
+            assumptions=c.assumptions,
+            provenance="compatible_bulk",
+            source_accepted=True,
+            source_memory=None,
+            attachment_selection=None,
+            attachment_candidate=None,
+        )
+        for c in group.comparisons
+    )
+    return _transition(
+        PlanWork(
+            plan.facts,
+            plan.preflight,
+            plan.actions + (action,),
+            plan.approvals + approvals,
+            plan.consents,
+            producer_facts=plan.producer_facts,
+            producer_applicability=plan.producer_applicability,
+            attachment_applicability=plan.attachment_applicability,
+            canonical_prior=plan,
+        ),
+        "accepted",
+        "accepted",
+    )
+
+
+def _resolve_identity(plan, action, change):
+    review = change.identity_review
+    if (
+        _domain(plan.producer_facts, change) != "identity"
+        or action.choice != "associate"
+        or action.candidate is not None
+        or action.selected_entry_id is None
+        or action.selected_entry_id in action.disassociate_entry_ids
+        or len(set(action.disassociate_entry_ids)) != len(action.disassociate_entry_ids)
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    requested = (action.selected_entry_id, *action.disassociate_entry_ids)
+    assumptions = review.assumptions + tuple(
+        a for c in review.candidates if c.entry_id in requested for a in c.assumptions
+    )
+    decision = IdentityAssociationDecision(
+        schema_id="brz2obsidian.identity-association-decision",
+        schema_version=1,
+        decision_id=action.decision_id,
+        proposal_id=action.proposal_id,
+        generation=action.expected_generation,
+        collection_id=plan.producer_facts.incoming_identity.collection_id,
+        module_id=plan.producer_facts.incoming_identity.module_id,
+        item_id=change.item_id,
+        facet=change.facet,
+        selected_entry_id=action.selected_entry_id,
+        disassociate_entry_ids=action.disassociate_entry_ids,
+        reviewed_assumptions=assumptions,
+        provenance="explicit_user",
+    )
+    facts = plan.producer_facts.model_copy(
+        update={
+            "association_decisions": tuple(
+                d
+                for d in plan.producer_facts.association_decisions
+                if (d.item_id, d.facet) != (change.item_id, change.facet)
+            )
+            + (decision,)
+        }
+    )
+    return _producer_transition(plan, action, facts, change)
+
+
+def _resolve_restoration(plan, action, change, _epoch):
+    if (
+        _domain(plan.producer_facts, change) != "restoration"
+        or action.choice not in ("decline_restoration", "restore_incoming")
+        or action.selected_entry_id is not None
+        or action.disassociate_entry_ids
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    result = None
+    dependencies = change.assumptions
+    if action.choice == "decline_restoration":
+        if (
+            action.candidate is not None
+            or action.attachment_selection is not None
+            or action.attachment_candidate is not None
+        ):
+            return _transition(plan, "refused", "choice_not_admitted")
+        return ApprovalWork(
+            plan,
+            action,
+            change,
+            None,
+            dependencies,
+            False,
+            memory_choice="decline_restoration",
+        )
+    elif change.attachment_review is not None:
+        if not _attachment_selection_matches(
+            plan.producer_facts, change, action, "incoming"
+        ):
+            return _transition(plan, "refused", "attachment_invalid")
+        return AttachmentActionWork(
+            plan,
+            action,
+            change,
+            action.attachment_selection,
+            action.attachment_candidate,
+            _epoch,
+        )
+    elif (
+        action.attachment_selection is not None
+        or action.attachment_candidate is not None
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    elif action.candidate is None or not validate_text_candidate(
+        plan.producer_facts, change, action.candidate, "incoming"
+    ):
+        return _transition(plan, "refused", "invalid_candidate")
+    else:
+        result = action.candidate.content
+        dependencies += (
+            _candidate_assumption(action.candidate, change, action.decision_id),
+        )
+    return ApprovalWork(plan, action, change, result, dependencies, True)
+
+
+def _resolve_rename(plan, action, change):
+    review = change.rename_review
+    if (
+        review is None
+        or action.choice not in ("keep_path", "source_path")
+        or action.candidate is not None
+        or action.selected_entry_id is not None
+        or action.disassociate_entry_ids
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    if review.status == "blocked" and action.choice == "source_path":
+        return _transition(plan, "refused", "unsafe_producer_choice")
+    decision = RenamePathDecision(
+        schema_id="brz2obsidian.rename-decision",
+        schema_version=1,
+        decision_id=action.decision_id,
+        proposal_id=action.proposal_id,
+        generation=action.expected_generation,
+        collection_id=plan.producer_facts.incoming_identity.collection_id,
+        module_id=plan.producer_facts.incoming_identity.module_id,
+        item_id=change.item_id,
+        facet=change.facet,
+        choice=action.choice,
+        reviewed_assumptions=review.assumptions,
+        provenance="explicit_user",
+    )
+    facts = plan.producer_facts.model_copy(
+        update={
+            "rename_decisions": tuple(
+                d
+                for d in plan.producer_facts.rename_decisions
+                if (d.item_id, d.facet) != (change.item_id, change.facet)
+            )
+            + (decision,)
+        }
+    )
+    return _producer_transition(plan, action, facts, change)
+
+
+def _resolve_attachment(plan, action, change, _epoch):
+    if (
+        action.domain != _domain(plan.producer_facts, change)
+        or action.choice not in _choices(plan.producer_facts, change, action.domain)
+        or action.candidate is not None
+        or action.selected_entry_id is not None
+        or action.disassociate_entry_ids
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    selection, candidate = action.attachment_selection, action.attachment_candidate
+    if (
+        selection is None
+        or candidate is None
+        or selection.choice
+        != ("incoming" if action.domain == "reversal" else action.choice)
+        or (
+            selection.proposal_id,
+            selection.generation,
+            selection.item_id,
+            selection.facet,
+            selection.reviewed_change_id,
+            selection.reviewed_assumptions,
+        )
+        != (
+            action.proposal_id,
+            action.expected_generation,
+            change.item_id,
+            change.facet,
+            change.change_id,
+            action.reviewed_assumptions,
+        )
+    ):
+        return _transition(plan, "refused", "attachment_invalid")
+    if _format_choice_unavailable(change, action.domain, action.choice):
+        return _transition(plan, "refused", "unsafe_producer_choice")
+    return AttachmentActionWork(plan, action, change, selection, candidate, _epoch)
+
+
+def _plain_candidate_refusal(plan, action, change):
+    if _format_choice_unavailable(change, action.domain, action.choice):
+        return "unsafe_producer_choice"
+    reversal_present = (
+        action.domain == "reversal"
+        and action.choice == "reverse"
+        and reversal_subject(plan.producer_facts, change).attachment is None
+        and reversal_document_target(reversal_subject(plan.producer_facts, change))
+        is None
+        and any(
+            r.target is not None
+            for r in reversal_subject(
+                plan.producer_facts, change
+            ).operation_reversal.outputs
+        )
+    )
+    if (
+        action.choice in ("incoming", "edited") or reversal_present
+    ) and action.candidate is None:
+        return "invalid_candidate"
+    if action.candidate is not None and not validate_text_candidate(
+        plan.producer_facts,
+        reversal_text_comparison(plan.producer_facts, change)
+        if action.domain == "reversal" and action.choice in ("reverse", "edited")
+        else change,
+        action.candidate,
+        "incoming" if reversal_present else action.choice,
+        mapping_choice=action.domain == "mapping",
+    ):
+        return "invalid_candidate"
+    if action.choice == "approve" and action.candidate is not None:
+        return "choice_not_admitted"
+    if (
+        action.choice == "reverse"
+        and not reversal_present
+        and action.candidate is not None
+    ):
+        return "choice_not_admitted"
+    return None
+
+
+def _resolve_plain_comparison(plan, action, change):
+    if (
+        action.attachment_selection is not None
+        or action.attachment_candidate is not None
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    if action.domain != _domain(plan.producer_facts, change):
+        return _transition(plan, "refused", "choice_not_admitted")
+    if (
+        action.domain not in ("text", "configuration", "mapping", "format", "reversal")
+        or (
+            action.choice == "approve"
+            and (
+                change.disposition != "compatible"
+                or not compatible_result_eligible(plan.producer_facts, change)
+            )
+        )
+        or action.choice not in _choices(plan.producer_facts, change, action.domain)
+    ):
+        return _transition(plan, "refused", "choice_not_admitted")
+    if action.selected_entry_id is not None or action.disassociate_entry_ids:
+        return _transition(plan, "refused", "choice_not_admitted")
+    refusal = _plain_candidate_refusal(plan, action, change)
+    if refusal is not None:
+        return _transition(plan, "refused", refusal)
+    memory_choice = None
+    if action.choice == "current":
+        if not selected_current_links_safe(
+            plan.producer_facts, change, candidate=action.candidate
+        ):
+            return _transition(plan, "refused", "invalid_candidate")
+        if change.current is None and not _observed_absence(
+            plan.producer_facts, change, action.domain
+        ):
+            return _transition(plan, "refused", "choice_not_admitted")
+        if (
+            action.domain in ("text", "mapping")
+            or action.domain == "configuration"
+            and plan.producer_facts.format_operation.kind == "source_update"
+        ) and not (
+            change.current is not None
+            and change.incoming is not None
+            and same_content(change.current, change.incoming)
+        ):
+            memory_choice = "keep_vault"
+    return ApprovalWork(
+        plan,
+        action,
+        change,
+        None,
+        (),
+        action.choice in ("approve", "incoming"),
+        memory_choice=memory_choice,
+        derive_plain=True,
+    )
+
+
+def _action_envelope_refusal(plan, action, *, group_admitted):
     reserved = {
         d.decision_id
         for d in plan.producer_facts.association_decisions
@@ -766,11 +1145,11 @@ def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
     if action.expected_generation != plan.proposal.generation:
         return _transition(plan, "stale", "generation_changed")
     if (
-        not _group_admitted
+        not group_admitted
         and current_observation_problem(plan.producer_facts) is not None
     ):
         return _transition(plan, "refused", "unsafe_producer_choice")
-    if not _group_admitted and preflight_blockers(
+    if not group_admitted and preflight_blockers(
         plan.facts, plan.preflight, plan.proposal
     ):
         return _transition(plan, "refused", "preflight_refused")
@@ -785,107 +1164,10 @@ def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
         or action.attachment_candidate is not None
     ):
         return _transition(plan, "refused", "choice_not_admitted")
-    if action.domain in ("storage", "tracking"):
-        requirement = next(
-            (
-                r
-                for r in plan.requirements
-                if r.change_id == action.change_id and r.domain == action.domain
-            ),
-            None,
-        )
-        if requirement is None:
-            return _transition(plan, "refused", "unknown_change")
-        if action.reviewed_assumptions != requirement.assumptions:
-            return _transition(plan, "stale", "assumptions_changed")
-        if (
-            action.choice not in requirement.choices
-            or action.candidate is not None
-            or action.selected_entry_id is not None
-            or action.disassociate_entry_ids
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        consent_id = action.change_id.removeprefix("consent:")
-        decision = ReviewConsentDecision(
-            schema_id="brz2obsidian.review-consent-decision",
-            schema_version=1,
-            decision_id=action.decision_id,
-            consent_id=consent_id,
-            kind=action.domain,
-            choice=action.choice,
-            assumptions=requirement.assumptions,
-            provenance="explicit_user",
-        )
-        consents = tuple(c for c in plan.consents if c.consent_id != consent_id) + (
-            decision,
-        )
-        return _transition(
-            PlanWork(
-                plan.facts,
-                plan.preflight,
-                plan.actions + (action,),
-                plan.approvals,
-                consents,
-                producer_facts=plan.producer_facts,
-                producer_applicability=plan.producer_applicability,
-                attachment_applicability=plan.attachment_applicability,
-                canonical_prior=plan,
-            ),
-            "accepted",
-            "accepted",
-        )
-    if action.domain == "compatible_group":
-        group = next((g for g in plan.groups if g.group_id == action.change_id), None)
-        if group is None:
-            return _transition(plan, "refused", "unknown_change")
-        if action.reviewed_assumptions != group.assumptions:
-            return _transition(plan, "stale", "assumptions_changed")
-        if (
-            action.choice != "approve"
-            or action.candidate is not None
-            or action.selected_entry_id is not None
-            or action.disassociate_entry_ids
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        approvals = tuple(
-            ReviewApproval(
-                schema_id="brz2obsidian.review-approval",
-                schema_version=1,
-                decision_id=action.decision_id,
-                change_id=c.change_id,
-                domain="text",
-                choice="approve",
-                result=c.result,
-                target_path=c.target_path,
-                assumptions=c.assumptions,
-                provenance="compatible_bulk",
-                source_accepted=True,
-                source_memory=None,
-                attachment_selection=None,
-                attachment_candidate=None,
-            )
-            for c in group.comparisons
-        )
-        return _transition(
-            PlanWork(
-                plan.facts,
-                plan.preflight,
-                plan.actions + (action,),
-                plan.approvals + approvals,
-                plan.consents,
-                producer_facts=plan.producer_facts,
-                producer_applicability=plan.producer_applicability,
-                attachment_applicability=plan.attachment_applicability,
-                canonical_prior=plan,
-            ),
-            "accepted",
-            "accepted",
-        )
-    change = next(
-        (c for c in plan.proposal.changes if c.change_id == action.change_id), None
-    )
-    if change is None:
-        return _transition(plan, "refused", "unknown_change")
+    return None
+
+
+def _change_admission_refusal(plan, action, change):
     if sorted(action.reviewed_assumptions, key=lambda a: a.key) != sorted(
         change.assumptions, key=lambda a: a.key
     ):
@@ -914,142 +1196,32 @@ def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
             is not None
         ):
             return _transition(plan, "refused", "unsafe_producer_choice")
+    return None
+
+
+def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
+    action = ReviewAction.model_validate(action)
+    refused = _action_envelope_refusal(plan, action, group_admitted=_group_admitted)
+    if refused is not None:
+        return refused
+    if action.domain in ("storage", "tracking"):
+        return _resolve_consent(plan, action)
+    if action.domain == "compatible_group":
+        return _resolve_compatible_group(plan, action)
+    change = next(
+        (c for c in plan.proposal.changes if c.change_id == action.change_id), None
+    )
+    if change is None:
+        return _transition(plan, "refused", "unknown_change")
+    refused = _change_admission_refusal(plan, action, change)
+    if refused is not None:
+        return refused
     if action.domain == "identity":
-        review = change.identity_review
-        if (
-            _domain(plan.producer_facts, change) != "identity"
-            or action.choice != "associate"
-            or action.candidate is not None
-            or action.selected_entry_id is None
-            or action.selected_entry_id in action.disassociate_entry_ids
-            or len(set(action.disassociate_entry_ids))
-            != len(action.disassociate_entry_ids)
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        requested = (action.selected_entry_id, *action.disassociate_entry_ids)
-        assumptions = review.assumptions + tuple(
-            a
-            for c in review.candidates
-            if c.entry_id in requested
-            for a in c.assumptions
-        )
-        decision = IdentityAssociationDecision(
-            schema_id="brz2obsidian.identity-association-decision",
-            schema_version=1,
-            decision_id=action.decision_id,
-            proposal_id=action.proposal_id,
-            generation=action.expected_generation,
-            collection_id=plan.producer_facts.incoming_identity.collection_id,
-            module_id=plan.producer_facts.incoming_identity.module_id,
-            item_id=change.item_id,
-            facet=change.facet,
-            selected_entry_id=action.selected_entry_id,
-            disassociate_entry_ids=action.disassociate_entry_ids,
-            reviewed_assumptions=assumptions,
-            provenance="explicit_user",
-        )
-        facts = plan.producer_facts.model_copy(
-            update={
-                "association_decisions": tuple(
-                    d
-                    for d in plan.producer_facts.association_decisions
-                    if (d.item_id, d.facet) != (change.item_id, change.facet)
-                )
-                + (decision,)
-            }
-        )
-        return _producer_transition(plan, action, facts, change)
+        return _resolve_identity(plan, action, change)
     if action.domain == "restoration":
-        if (
-            _domain(plan.producer_facts, change) != "restoration"
-            or action.choice not in ("decline_restoration", "restore_incoming")
-            or action.selected_entry_id is not None
-            or action.disassociate_entry_ids
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        result = None
-        dependencies = change.assumptions
-        if action.choice == "decline_restoration":
-            if (
-                action.candidate is not None
-                or action.attachment_selection is not None
-                or action.attachment_candidate is not None
-            ):
-                return _transition(plan, "refused", "choice_not_admitted")
-            return ApprovalWork(
-                plan,
-                action,
-                change,
-                None,
-                dependencies,
-                False,
-                memory_choice="decline_restoration",
-            )
-        elif change.attachment_review is not None:
-            if not _attachment_selection_matches(
-                plan.producer_facts, change, action, "incoming"
-            ):
-                return _transition(plan, "refused", "attachment_invalid")
-            return AttachmentActionWork(
-                plan,
-                action,
-                change,
-                action.attachment_selection,
-                action.attachment_candidate,
-                _epoch,
-            )
-        elif (
-            action.attachment_selection is not None
-            or action.attachment_candidate is not None
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        elif action.candidate is None or not validate_text_candidate(
-            plan.producer_facts, change, action.candidate, "incoming"
-        ):
-            return _transition(plan, "refused", "invalid_candidate")
-        else:
-            result = action.candidate.content
-            dependencies += (
-                _candidate_assumption(action.candidate, change, action.decision_id),
-            )
-        return ApprovalWork(plan, action, change, result, dependencies, True)
+        return _resolve_restoration(plan, action, change, _epoch)
     if action.domain == "rename":
-        review = change.rename_review
-        if (
-            review is None
-            or action.choice not in ("keep_path", "source_path")
-            or action.candidate is not None
-            or action.selected_entry_id is not None
-            or action.disassociate_entry_ids
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        if review.status == "blocked" and action.choice == "source_path":
-            return _transition(plan, "refused", "unsafe_producer_choice")
-        decision = RenamePathDecision(
-            schema_id="brz2obsidian.rename-decision",
-            schema_version=1,
-            decision_id=action.decision_id,
-            proposal_id=action.proposal_id,
-            generation=action.expected_generation,
-            collection_id=plan.producer_facts.incoming_identity.collection_id,
-            module_id=plan.producer_facts.incoming_identity.module_id,
-            item_id=change.item_id,
-            facet=change.facet,
-            choice=action.choice,
-            reviewed_assumptions=review.assumptions,
-            provenance="explicit_user",
-        )
-        facts = plan.producer_facts.model_copy(
-            update={
-                "rename_decisions": tuple(
-                    d
-                    for d in plan.producer_facts.rename_decisions
-                    if (d.item_id, d.facet) != (change.item_id, change.facet)
-                )
-                + (decision,)
-            }
-        )
-        return _producer_transition(plan, action, facts, change)
+        return _resolve_rename(plan, action, change)
     if change.attachment_review is not None and not (
         action.choice == "current"
         and (
@@ -1057,134 +1229,8 @@ def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
             or _observed_absence(plan.producer_facts, change, action.domain)
         )
     ):
-        if (
-            action.domain != _domain(plan.producer_facts, change)
-            or action.choice not in _choices(plan.producer_facts, change, action.domain)
-            or action.candidate is not None
-            or action.selected_entry_id is not None
-            or action.disassociate_entry_ids
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        selection, candidate = action.attachment_selection, action.attachment_candidate
-        if (
-            selection is None
-            or candidate is None
-            or selection.choice
-            != ("incoming" if action.domain == "reversal" else action.choice)
-            or (
-                selection.proposal_id,
-                selection.generation,
-                selection.item_id,
-                selection.facet,
-                selection.reviewed_change_id,
-                selection.reviewed_assumptions,
-            )
-            != (
-                action.proposal_id,
-                action.expected_generation,
-                change.item_id,
-                change.facet,
-                change.change_id,
-                action.reviewed_assumptions,
-            )
-        ):
-            return _transition(plan, "refused", "attachment_invalid")
-        if _format_choice_unavailable(change, action.domain, action.choice):
-            return _transition(plan, "refused", "unsafe_producer_choice")
-        return AttachmentActionWork(plan, action, change, selection, candidate, _epoch)
-    if (
-        action.attachment_selection is not None
-        or action.attachment_candidate is not None
-    ):
-        return _transition(plan, "refused", "choice_not_admitted")
-    if action.domain != _domain(plan.producer_facts, change):
-        return _transition(plan, "refused", "choice_not_admitted")
-    if (
-        action.domain not in ("text", "configuration", "mapping", "format", "reversal")
-        or (
-            action.choice == "approve"
-            and (
-                change.disposition != "compatible"
-                or not compatible_result_eligible(plan.producer_facts, change)
-            )
-        )
-        or action.choice not in _choices(plan.producer_facts, change, action.domain)
-    ):
-        return _transition(plan, "refused", "choice_not_admitted")
-    if action.selected_entry_id is not None or action.disassociate_entry_ids:
-        return _transition(plan, "refused", "choice_not_admitted")
-    if _format_choice_unavailable(change, action.domain, action.choice):
-        return _transition(plan, "refused", "unsafe_producer_choice")
-    reversal_present = (
-        action.domain == "reversal"
-        and action.choice == "reverse"
-        and reversal_subject(plan.producer_facts, change).attachment is None
-        and reversal_document_target(reversal_subject(plan.producer_facts, change))
-        is None
-        and any(
-            r.target is not None
-            for r in reversal_subject(
-                plan.producer_facts, change
-            ).operation_reversal.outputs
-        )
-    )
-    if (
-        action.choice in ("incoming", "edited") or reversal_present
-    ) and action.candidate is None:
-        return _transition(plan, "refused", "invalid_candidate")
-    if action.candidate is not None and not validate_text_candidate(
-        plan.producer_facts,
-        reversal_text_comparison(plan.producer_facts, change)
-        if action.domain == "reversal" and action.choice in ("reverse", "edited")
-        else change,
-        action.candidate,
-        "incoming" if reversal_present else action.choice,
-        mapping_choice=action.domain == "mapping",
-    ):
-        return _transition(plan, "refused", "invalid_candidate")
-    if action.choice == "approve" and action.candidate is not None:
-        return _transition(plan, "refused", "choice_not_admitted")
-    if (
-        action.choice == "reverse"
-        and not reversal_present
-        and action.candidate is not None
-    ):
-        return _transition(plan, "refused", "choice_not_admitted")
-    memory_choice = None
-    if action.choice == "current":
-        if not selected_current_links_safe(
-            plan.producer_facts, change, candidate=action.candidate
-        ):
-            return _transition(plan, "refused", "invalid_candidate")
-        if change.current is None and not _observed_absence(
-            plan.producer_facts, change, action.domain
-        ):
-            return _transition(plan, "refused", "choice_not_admitted")
-        subject = next(
-            s
-            for s in plan.producer_facts.subjects
-            if (s.item_id, s.facet) == (change.item_id, change.facet)
-        )
-        if (
-            action.domain in ("text", "mapping")
-            or action.domain == "configuration"
-            and plan.producer_facts.format_operation.kind == "source_update"
-        ) and not (
-            change.current is not None
-            and change.incoming is not None
-            and same_content(change.current, change.incoming)
-        ):
-            memory_choice = "keep_vault"
-    return ApprovalWork(
-        plan,
-        action,
-        change,
-        None,
-        (),
-        action.choice in ("approve", "incoming"),
-        memory_choice=memory_choice,
-        derive_plain=True,
-    )
+        return _resolve_attachment(plan, action, change, _epoch)
+    return _resolve_plain_comparison(plan, action, change)
 
 
 def _append_action(plan, action, result):
@@ -1598,6 +1644,32 @@ class AttachmentActionWork:
     pending: object = None
 
 
+def _validated_attachment_action(work, returned):
+    plan, action, change = work.plan, work.action, work.change
+    selection, candidate = work.selection, work.candidate
+    if not _candidate_validation(
+        plan.producer_facts, selection, candidate, returned
+    ).valid:
+        return CompletedWork(_transition(plan, "refused", "attachment_invalid"))
+    if (
+        not work.group_defer
+        and action.choice == "current"
+        and plan.producer_facts.format_operation.kind == "source_update"
+        and not (
+            change.current is not None
+            and change.incoming is not None
+            and same_content(change.current, change.incoming)
+        )
+    ):
+        return ChildWork(
+            PreservedMemoryWork(plan, change, action, "keep_vault"),
+            replace(work, phase="memory"),
+        )
+    return replace(
+        work, phase="request", memory=work.memory if work.group_defer else None
+    )
+
+
 def advance_attachment_action(work, returned=None, context=None):
     plan, action, change = work.plan, work.action, work.change
     selection, candidate = work.selection, work.candidate
@@ -1612,27 +1684,7 @@ def advance_attachment_action(work, returned=None, context=None):
             replace(work, phase="validated"),
         )
     if work.phase == "validated":
-        if not _candidate_validation(
-            plan.producer_facts, selection, candidate, returned
-        ).valid:
-            return CompletedWork(_transition(plan, "refused", "attachment_invalid"))
-        if (
-            not work.group_defer
-            and action.choice == "current"
-            and plan.producer_facts.format_operation.kind == "source_update"
-            and not (
-                change.current is not None
-                and change.incoming is not None
-                and same_content(change.current, change.incoming)
-            )
-        ):
-            return ChildWork(
-                PreservedMemoryWork(plan, change, action, "keep_vault"),
-                replace(work, phase="memory"),
-            )
-        return replace(
-            work, phase="request", memory=work.memory if work.group_defer else None
-        )
+        return _validated_attachment_action(work, returned)
     if work.phase == "memory":
         memory = _consume_memory(returned, plan, change, action, "keep_vault")
         if memory is None:
@@ -1775,68 +1827,127 @@ class KeepCurrentWork:
     source_memories: object = None
 
 
-def advance_keep_current(work, returned=None, context=None):
+def _validate_keep_current_member(work, context):
     plan, event = work.plan, work.event
-    if work.phase == "validate":
-        digest, members = unresolved_current_scope(plan)
-        if digest != event.group_id or len(members) != len(event.actions):
-            return CompletedWork(_transition(plan, "stale", "assumptions_changed"))
-        if current_observation_problem(
-            plan.producer_facts
-        ) is not None or preflight_blockers(plan.facts, plan.preflight, plan.proposal):
-            return CompletedWork(_transition(plan, "refused", "preflight_refused"))
-        return replace(
-            work,
-            phase="validate_member",
-            members=members,
-            memory_facts=plan.producer_facts,
+    if work.index == len(work.members):
+        if work.memory_facts is not plan.producer_facts:
+            return ChildWork(
+                ReconcileWork(work.memory_facts, plan.producer_applicability),
+                replace(work, phase="memory", index=0),
+            )
+        return replace(work, phase="member", index=0)
+    row, action = work.members[work.index], event.actions[work.index]
+    if (
+        action.change_id != row.change_id
+        or action.domain != row.domain
+        or action.choice != "current"
+        or action.decision_id in work.decision_ids
+    ):
+        return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
+    job = _resolve_action(plan, action, _epoch=context.epoch, _group_admitted=True)
+    if type(job) not in (ApprovalWork, AttachmentActionWork):
+        return CompletedWork(
+            job
+            if hasattr(job, "status")
+            else _transition(plan, "refused", "choice_not_admitted")
         )
-    if work.phase == "validate_member":
-        if work.index == len(work.members):
-            if work.memory_facts is not plan.producer_facts:
-                return ChildWork(
-                    ReconcileWork(work.memory_facts, plan.producer_applicability),
-                    replace(work, phase="memory", index=0),
-                )
-            return replace(work, phase="member", index=0)
-        row, action = work.members[work.index], event.actions[work.index]
+    memory_choice = (
+        job.memory_choice
+        if type(job) is ApprovalWork
+        else (
+            "keep_vault"
+            if plan.producer_facts.format_operation.kind == "source_update"
+            and not same_content(job.change.current, job.change.incoming)
+            else None
+        )
+    )
+    memory_facts = work.memory_facts
+    if memory_choice is not None:
+        memory_plan = plan.model_copy(update={"producer_facts": memory_facts})
+        memory_facts = _preserved_memory_facts(
+            memory_plan, job.change, action, memory_choice
+        )
+    return replace(
+        work,
+        jobs=work.jobs + ((job, memory_choice),),
+        memory_facts=memory_facts,
+        decision_ids=work.decision_ids | {action.decision_id},
+        index=work.index + 1,
+    )
+
+
+def _retain_keep_current_memory(work):
+    plan = work.plan
+    if work.index == len(work.jobs):
+        return replace(work, phase="member", index=0)
+    job, choice = work.jobs[work.index]
+    memory = None
+    if choice is not None:
+        change = work.selected[job.change.subject_id]
+        memory = work.source_memories.get(job.action.decision_id)
         if (
-            action.change_id != row.change_id
-            or action.domain != row.domain
-            or action.choice != "current"
-            or action.decision_id in work.decision_ids
+            memory is None
+            or change.requires_decision
+            or change.disposition != "preserve_vault"
+            or not same_content(change.result, job.change.current)
         ):
-            return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
-        job = _resolve_action(plan, action, _epoch=context.epoch, _group_admitted=True)
-        if type(job) not in (ApprovalWork, AttachmentActionWork):
-            return CompletedWork(
-                job
-                if hasattr(job, "status")
-                else _transition(plan, "refused", "choice_not_admitted")
-            )
-        memory_choice = (
-            job.memory_choice
+            return CompletedWork(_transition(plan, "refused", "unsafe_producer_choice"))
+    return replace(work, memories=work.memories + (memory,), index=work.index + 1)
+
+
+def _approve_keep_current_member(work):
+    plan, event = work.plan, work.event
+    if work.index == len(work.jobs):
+        return ChildWork(
+            PlanWork(
+                plan.facts,
+                plan.preflight,
+                plan.actions + event.actions,
+                plan.approvals + work.approvals,
+                plan.consents,
+                producer_facts=plan.producer_facts,
+                producer_applicability=plan.producer_applicability,
+                attachment_applicability=plan.attachment_applicability,
+                canonical_prior=plan,
+            ),
+            replace(work, phase="finish"),
+        )
+    job, _ = work.jobs[work.index]
+    memory = work.memories[work.index] if work.memories else None
+    job = replace(
+        job,
+        group_defer=True,
+        **(
+            {"group_memory": memory}
             if type(job) is ApprovalWork
-            else (
-                "keep_vault"
-                if plan.producer_facts.format_operation.kind == "source_update"
-                and not same_content(job.change.current, job.change.incoming)
-                else None
-            )
-        )
-        memory_facts = work.memory_facts
-        if memory_choice is not None:
-            memory_plan = plan.model_copy(update={"producer_facts": memory_facts})
-            memory_facts = _preserved_memory_facts(
-                memory_plan, job.change, action, memory_choice
-            )
-        return replace(
-            work,
-            jobs=work.jobs + ((job, memory_choice),),
-            memory_facts=memory_facts,
-            decision_ids=work.decision_ids | {action.decision_id},
-            index=work.index + 1,
-        )
+            else {"memory": memory}
+        ),
+    )
+    return ChildWork(job, replace(work, phase="collected"))
+
+
+def _validate_keep_current_group(work):
+    plan, event = work.plan, work.event
+    digest, members = unresolved_current_scope(plan)
+    if digest != event.group_id or len(members) != len(event.actions):
+        return CompletedWork(_transition(plan, "stale", "assumptions_changed"))
+    if current_observation_problem(
+        plan.producer_facts
+    ) is not None or preflight_blockers(plan.facts, plan.preflight, plan.proposal):
+        return CompletedWork(_transition(plan, "refused", "preflight_refused"))
+    return replace(
+        work,
+        phase="validate_member",
+        members=members,
+        memory_facts=plan.producer_facts,
+    )
+
+
+def advance_keep_current(work, returned=None, context=None):
+    if work.phase == "validate":
+        return _validate_keep_current_group(work)
+    if work.phase == "validate_member":
+        return _validate_keep_current_member(work, context)
     if work.phase == "memory":
         return replace(
             work,
@@ -1847,51 +1958,9 @@ def advance_keep_current(work, returned=None, context=None):
             },
         )
     if work.phase == "memory_member":
-        if work.index == len(work.jobs):
-            return replace(work, phase="member", index=0)
-        job, choice = work.jobs[work.index]
-        memory = None
-        if choice is not None:
-            change = work.selected[job.change.subject_id]
-            memory = work.source_memories.get(job.action.decision_id)
-            if (
-                memory is None
-                or change.requires_decision
-                or change.disposition != "preserve_vault"
-                or not same_content(change.result, job.change.current)
-            ):
-                return CompletedWork(
-                    _transition(plan, "refused", "unsafe_producer_choice")
-                )
-        return replace(work, memories=work.memories + (memory,), index=work.index + 1)
+        return _retain_keep_current_memory(work)
     if work.phase == "member":
-        if work.index == len(work.jobs):
-            return ChildWork(
-                PlanWork(
-                    plan.facts,
-                    plan.preflight,
-                    plan.actions + event.actions,
-                    plan.approvals + work.approvals,
-                    plan.consents,
-                    producer_facts=plan.producer_facts,
-                    producer_applicability=plan.producer_applicability,
-                    attachment_applicability=plan.attachment_applicability,
-                    canonical_prior=plan,
-                ),
-                replace(work, phase="finish"),
-            )
-        job, _ = work.jobs[work.index]
-        memory = work.memories[work.index] if work.memories else None
-        job = replace(
-            job,
-            group_defer=True,
-            **(
-                {"group_memory": memory}
-                if type(job) is ApprovalWork
-                else {"memory": memory}
-            ),
-        )
-        return ChildWork(job, replace(work, phase="collected"))
+        return _approve_keep_current_member(work)
     if work.phase == "collected":
         if type(returned) is not ReviewApproval:
             return CompletedWork(returned)
