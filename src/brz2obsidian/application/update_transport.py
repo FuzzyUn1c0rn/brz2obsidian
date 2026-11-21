@@ -133,6 +133,55 @@ class UpdateChannel:
                     answers.put_nowait(None)
         self._on_uncertain()
 
+    def _feed_pending_frame(self, identity, pending, frame):
+        decoder, answers, observer = pending
+        observation = None
+        response = decoder.feed(frame)
+        if decoder.progress is not None and observer is not None:
+            observation = (observer, decoder.request, decoder.progress)
+        if response is not None:
+            del self._pending[identity]
+            if response.protocol_error is not None:
+                self._diagnostics = replace(
+                    self._diagnostics,
+                    first_failure=(
+                        self._diagnostics.first_failure or "worker_protocol_error"
+                    ),
+                    worker_protocol_error=(
+                        self._diagnostics.worker_protocol_error
+                        or response.protocol_error.code
+                    ),
+                )
+            if response.result is not None and response.result.code == "context_closed":
+                self._expected_eof = True
+            answers.put_nowait(response)
+        return observation
+
+    def _accept_worker_frame(self, frame):
+        category = "oversized_frame"
+        try:
+            if len(frame) > RESPONSE_LIMIT:
+                raise ProtocolFailure("Oversized worker frame")
+            category = "invalid_outer_frame"
+            value = json.loads(frame.decode("utf-8"), object_pairs_hook=_pairs)
+            category = "unexpected_request"
+            identity = value.get("request_id") if isinstance(value, dict) else None
+            with self._state:
+                pending = self._pending.get(identity)
+                if pending is None:
+                    raise ProtocolFailure("Unexpected worker frame")
+                category = "decoder_rejected"
+                observation = self._feed_pending_frame(identity, pending, frame)
+            if observation is not None:
+                callback, actual, progress = observation
+                category = "observer_failure"
+                try:
+                    callback(actual, progress)
+                except Exception:  # noqa: BLE001 -- loss of observation delivery cannot confer authority.
+                    raise ProtocolFailure("Progress delivery failed") from None
+        except ValueError, TypeError, KeyError, RecursionError:
+            self._poison(category)
+
     def _read(self):
         try:
             while True:
@@ -146,55 +195,7 @@ class UpdateChannel:
                 if not frame:
                     break
                 self._observe_stdout(frame, frame=True)
-                category = "oversized_frame"
-                try:
-                    if len(frame) > RESPONSE_LIMIT:
-                        raise ProtocolFailure("Oversized worker frame")
-                    category = "invalid_outer_frame"
-                    value = json.loads(frame.decode("utf-8"), object_pairs_hook=_pairs)
-                    category = "unexpected_request"
-                    identity = (
-                        value.get("request_id") if isinstance(value, dict) else None
-                    )
-                    observation = None
-                    with self._state:
-                        pending = self._pending.get(identity)
-                        if pending is None:
-                            raise ProtocolFailure("Unexpected worker frame")
-                        category = "decoder_rejected"
-                        decoder, answers, observer = pending
-                        response = decoder.feed(frame)
-                        if decoder.progress is not None and observer is not None:
-                            observation = (observer, decoder.request, decoder.progress)
-                        if response is not None:
-                            del self._pending[identity]
-                            if response.protocol_error is not None:
-                                self._diagnostics = replace(
-                                    self._diagnostics,
-                                    first_failure=(
-                                        self._diagnostics.first_failure
-                                        or "worker_protocol_error"
-                                    ),
-                                    worker_protocol_error=(
-                                        self._diagnostics.worker_protocol_error
-                                        or response.protocol_error.code
-                                    ),
-                                )
-                            if (
-                                response.result is not None
-                                and response.result.code == "context_closed"
-                            ):
-                                self._expected_eof = True
-                            answers.put_nowait(response)
-                    if observation is not None:
-                        callback, actual, progress = observation
-                        category = "observer_failure"
-                        try:
-                            callback(actual, progress)
-                        except Exception:  # noqa: BLE001 -- loss of observation delivery cannot confer authority.
-                            raise ProtocolFailure("Progress delivery failed") from None
-                except ValueError, TypeError, KeyError, RecursionError:
-                    self._poison(category)
+                self._accept_worker_frame(frame)
             if not self._expected_eof:
                 self._poison("unexpected_eof")
         except OSError:

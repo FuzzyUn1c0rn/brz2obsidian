@@ -740,165 +740,173 @@ class ApplicationSession:
                 )
             else:
                 effects = (CloseWindow(),)
-        elif (
-            isinstance(command, (ApplyResult, ApplyTransportFailure))
-            and command.request_id == state.validation_request_id
-        ):
-            state = self._validation_terminal(state, command)
-        elif (
-            isinstance(command, (ApplyResult, ApplyTransportFailure))
-            and state.busy_operation == "list_brains"
-        ):
-            if command.request_id != state.active_request_id:
-                return SessionUpdate(snapshot=state)
-            trusted = (
-                isinstance(command, ApplyResult)
-                and isinstance(command.result, BrainListResult)
-                and command.input_revision == self._active_revision == state.revision
-                and command.process_status
-                == (0 if command.result.outcome == "clean" else 1)
-            )
-            result = (
-                command.result
-                if trusted
-                else BrainListResult(
-                    outcome="failed",
-                    status="brains_failed",
-                    findings=(
-                        Finding(
-                            code="api_listing_failed",
-                            severity="error",
-                            message="Brain listing did not complete reliably. Check the connection and refresh again.",
-                        ),
-                    ),
-                )
-            )
-            brains = result.brains if result.outcome == "clean" else state.brains
-            selected = state.source_selection
-            if (
-                result.outcome == "clean"
-                and isinstance(selected, LocalApiSourceSelection)
-                and selected.brain_id not in {b.brain_id for b in brains}
-            ):
-                selected = None
-            state = state.model_copy(
-                update={
-                    "brains": brains,
-                    "brain_list_status": "failed"
-                    if result.outcome != "clean"
-                    else "ready"
-                    if brains
-                    else "empty",
-                    "source_selection": selected,
-                    "result": result,
-                    "active_request_id": None,
-                    "busy_operation": None,
-                    "feedback": "",
-                    "reviewed": None,
-                    "review_required": True,
-                }
-            )
-            self._active_revision = None
-            self._diagnostic_text = result.diagnostic_text
-            self._diagnostic_generation += 1
         elif isinstance(command, (ApplyResult, ApplyTransportFailure)):
-            if command.request_id != state.active_request_id:
+            if command.request_id == state.validation_request_id:
+                state = self._validation_terminal(state, command)
+            elif command.request_id != state.active_request_id:
                 return SessionUpdate(snapshot=state)
-            if isinstance(command, ApplyResult):
-                expected_exit = {
-                    "clean": 0,
-                    "warnings": 2,
-                    "refused": 1,
-                    "failed": 1,
-                    "valid": 0,
-                    "invalid": 1,
-                    "issues": 2,
-                }[command.result.outcome]
-                trusted = (
-                    command.result.operation == state.busy_operation
-                    and command.process_status == expected_exit
-                )
-                if trusted:
-                    self._diagnostic_generation += 1
-                    self._diagnostic_text = command.result.diagnostic_text
-                    eligible = (
-                        command.input_revision
-                        == self._active_revision
-                        == state.revision
-                    )
-                    reviewed = (
-                        command.result.reviewed
-                        if eligible
-                        and command.result.reviewed is not None
-                        and same_source_selection(
-                            command.result.reviewed.source_selection,
-                            state.source_selection,
-                        )
-                        else None
-                    )
-                    if command.result.operation == "check_vault" or (
-                        command.result.operation == "convert_reviewed"
-                        and eligible
-                        and not command.result.review_required
-                        and command.result.publication.state == "not_published"
-                    ):
-                        reviewed = state.reviewed
-                    state = state.model_copy(
-                        update={
-                            "result": command.result,
-                            "reviewed": reviewed,
-                            "review_required": state.review_required
-                            if command.result.operation == "check_vault"
-                            else command.result.review_required or not eligible,
-                            "feedback": "",
-                            "operational_status": None,
-                            "retry_operation": (
-                                "inspect"
-                                if command.result.operation == "convert_reviewed"
-                                and command.result.review_required
-                                else command.result.operation
-                            )
-                            if command.result.outcome in ("refused", "failed", "issues")
-                            else None,
-                        }
-                    )
-                    if command.result.operation == "convert_reviewed":
-                        state = state.model_copy(
-                            update={
-                                "publication": state.publication
-                                if state.publication is not None
-                                and state.publication.state == "unknown"
-                                and not command.result.publication.receipt_verified
-                                else command.result.publication,
-                                "destination": command.result.destination,
-                                "field_errors": command.result.field_errors,
-                                "destination_validation": None,
-                                "destination_revision": None,
-                                "validation_pending": False,
-                                "recovery_findings": tuple(
-                                    finding
-                                    for finding in command.result.findings
-                                    if finding.code == "cleanup_failure"
-                                ),
-                            }
-                        )
-                else:
-                    state = self._failure(
-                        state, "may_have_executed", "protocol_failure"
-                    )
+            elif state.busy_operation == "list_brains":
+                state = self._brain_list_terminal(state, command)
             else:
-                state = self._failure(state, command.phase, command.code)
-            state = state.model_copy(
-                update={"active_request_id": None, "busy_operation": None}
-            )
-            self._active_revision = None
-            if state.close_pending and not state.validation_request_id:
-                effects = (CloseWindow(),)
+                state, effects = self._operation_terminal(state, command)
         elif state.active_request_id or state.close_pending:
             # UI disabling is only presentation; bypassed calls cannot mutate the
             # active source/review or start overlapping primary operations.
             return SessionUpdate(snapshot=state)
-        elif (
+        else:
+            changed = self._dispatch_idle(state, command, name)
+            if changed is None:
+                return SessionUpdate(snapshot=state)
+            state, effects = changed
+        return self._finish_dispatch(state, effects)
+
+    def _brain_list_terminal(self, state, command):
+        trusted = (
+            isinstance(command, ApplyResult)
+            and isinstance(command.result, BrainListResult)
+            and command.input_revision == self._active_revision == state.revision
+            and command.process_status
+            == (0 if command.result.outcome == "clean" else 1)
+        )
+        result = (
+            command.result
+            if trusted
+            else BrainListResult(
+                outcome="failed",
+                status="brains_failed",
+                findings=(
+                    Finding(
+                        code="api_listing_failed",
+                        severity="error",
+                        message="Brain listing did not complete reliably. Check the connection and refresh again.",
+                    ),
+                ),
+            )
+        )
+        brains = result.brains if result.outcome == "clean" else state.brains
+        selected = state.source_selection
+        if (
+            result.outcome == "clean"
+            and isinstance(selected, LocalApiSourceSelection)
+            and selected.brain_id not in {b.brain_id for b in brains}
+        ):
+            selected = None
+        state = state.model_copy(
+            update={
+                "brains": brains,
+                "brain_list_status": "failed"
+                if result.outcome != "clean"
+                else "ready"
+                if brains
+                else "empty",
+                "source_selection": selected,
+                "result": result,
+                "active_request_id": None,
+                "busy_operation": None,
+                "feedback": "",
+                "reviewed": None,
+                "review_required": True,
+            }
+        )
+        self._active_revision = None
+        self._diagnostic_text = result.diagnostic_text
+        self._diagnostic_generation += 1
+        return state
+
+    def _operation_terminal(self, state, command):
+        effects = ()
+        if isinstance(command, ApplyResult):
+            expected_exit = {
+                "clean": 0,
+                "warnings": 2,
+                "refused": 1,
+                "failed": 1,
+                "valid": 0,
+                "invalid": 1,
+                "issues": 2,
+            }[command.result.outcome]
+            trusted = (
+                command.result.operation == state.busy_operation
+                and command.process_status == expected_exit
+            )
+            if trusted:
+                state = self._apply_trusted_terminal(state, command)
+            else:
+                state = self._failure(state, "may_have_executed", "protocol_failure")
+        else:
+            state = self._failure(state, command.phase, command.code)
+        state = state.model_copy(
+            update={"active_request_id": None, "busy_operation": None}
+        )
+        self._active_revision = None
+        if state.close_pending and not state.validation_request_id:
+            effects = (CloseWindow(),)
+        return state, effects
+
+    def _apply_trusted_terminal(self, state, command):
+        self._diagnostic_generation += 1
+        self._diagnostic_text = command.result.diagnostic_text
+        eligible = command.input_revision == self._active_revision == state.revision
+        reviewed = (
+            command.result.reviewed
+            if eligible
+            and command.result.reviewed is not None
+            and same_source_selection(
+                command.result.reviewed.source_selection,
+                state.source_selection,
+            )
+            else None
+        )
+        if command.result.operation == "check_vault" or (
+            command.result.operation == "convert_reviewed"
+            and eligible
+            and not command.result.review_required
+            and command.result.publication.state == "not_published"
+        ):
+            reviewed = state.reviewed
+        state = state.model_copy(
+            update={
+                "result": command.result,
+                "reviewed": reviewed,
+                "review_required": state.review_required
+                if command.result.operation == "check_vault"
+                else command.result.review_required or not eligible,
+                "feedback": "",
+                "operational_status": None,
+                "retry_operation": (
+                    "inspect"
+                    if command.result.operation == "convert_reviewed"
+                    and command.result.review_required
+                    else command.result.operation
+                )
+                if command.result.outcome in ("refused", "failed", "issues")
+                else None,
+            }
+        )
+        if command.result.operation == "convert_reviewed":
+            state = state.model_copy(
+                update={
+                    "publication": state.publication
+                    if state.publication is not None
+                    and state.publication.state == "unknown"
+                    and not command.result.publication.receipt_verified
+                    else command.result.publication,
+                    "destination": command.result.destination,
+                    "field_errors": command.result.field_errors,
+                    "destination_validation": None,
+                    "destination_revision": None,
+                    "validation_pending": False,
+                    "recovery_findings": tuple(
+                        finding
+                        for finding in command.result.findings
+                        if finding.code == "cleanup_failure"
+                    ),
+                }
+            )
+        return state
+
+    def _dispatch_idle(self, state, command, name):
+        if (
             name == "start_another_conversion"
             and "start_another_conversion" in state.allowed_actions
         ):
@@ -924,6 +932,7 @@ class ApplicationSession:
                     "feedback": "Inspect the current source and choose another usable destination for a new conversion.",
                 }
             )
+            return state, ()
         elif (
             name == "acknowledge_destination_review"
             and "review_destination" in state.allowed_actions
@@ -939,7 +948,8 @@ class ApplicationSession:
                     }
                 )
             )
-        elif (
+            return state, ()
+        if (
             state.publication is not None
             and (
                 state.publication.receipt_verified
@@ -961,8 +971,20 @@ class ApplicationSession:
         ):
             # Neither a bypassed form command nor a retry establishes what an
             # unknown attempt published or discards a verified receipt.
-            return SessionUpdate(snapshot=state)
-        elif name in ("configure_api", "set_source_kind"):
+            return None
+        if name in (
+            "configure_api",
+            "set_source_kind",
+            "select_source",
+            "set_destination",
+            "select_vault",
+        ):
+            return self._edit_form(state, command, name)
+        return self._dispatch_idle_operation(state, command, name)
+
+    def _edit_form(self, state, command, name):
+        effects = ()
+        if name in ("configure_api", "set_source_kind"):
             config = command.config if name == "configure_api" else state.api_config
             kind = command.kind if name == "set_source_kind" else "local-api"
             if kind != state.source_kind or config != state.api_config:
@@ -985,25 +1007,6 @@ class ApplicationSession:
                 self._diagnostic_text = ""
                 self._diagnostic_generation += 1
                 state = self._destination_edited(state)
-        elif name == "list_brains" and "list_brains" in state.allowed_actions:
-            request = WorkerRequest(
-                request_id=str(uuid4()),
-                operation="list_brains",
-                arguments=ListBrainsArguments(config=state.api_config),
-            )
-            self._active_revision = state.revision
-            state = state.model_copy(
-                update={
-                    "active_request_id": request.request_id,
-                    "busy_operation": "list_brains",
-                    "brain_list_status": "loading",
-                    "reviewed": None,
-                    "review_required": True,
-                    "result": None,
-                    "feedback": "",
-                }
-            )
-            effects = (RunOperation(request=request, input_revision=state.revision),)
         elif name == "select_source":
             selected = command.source_selection
             if selected is not None and not same_source_selection(
@@ -1052,19 +1055,45 @@ class ApplicationSession:
                         }
                     )
                 )
-        elif name == "select_vault":
-            if command.path_or_null is not None and command.path_or_null != state.vault:
-                self._diagnostic_generation += 1
-                self._diagnostic_text = ""
-                state = state.model_copy(
-                    update={
-                        "vault": command.path_or_null,
-                        "revision": state.revision + 1,
-                        "result": None,
-                        "operational_status": None,
-                        "feedback": "",
-                    }
-                )
+        elif (
+            name == "select_vault"
+            and command.path_or_null is not None
+            and command.path_or_null != state.vault
+        ):
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+            state = state.model_copy(
+                update={
+                    "vault": command.path_or_null,
+                    "revision": state.revision + 1,
+                    "result": None,
+                    "operational_status": None,
+                    "feedback": "",
+                }
+            )
+        return state, effects
+
+    def _dispatch_idle_operation(self, state, command, name):
+        effects = ()
+        if name == "list_brains" and "list_brains" in state.allowed_actions:
+            request = WorkerRequest(
+                request_id=str(uuid4()),
+                operation="list_brains",
+                arguments=ListBrainsArguments(config=state.api_config),
+            )
+            self._active_revision = state.revision
+            state = state.model_copy(
+                update={
+                    "active_request_id": request.request_id,
+                    "busy_operation": "list_brains",
+                    "brain_list_status": "loading",
+                    "reviewed": None,
+                    "review_required": True,
+                    "result": None,
+                    "feedback": "",
+                }
+            )
+            effects = (RunOperation(request=request, input_revision=state.revision),)
         elif (
             name == "check_vault"
             and "check_vault" in state.allowed_actions
@@ -1145,7 +1174,34 @@ class ApplicationSession:
             "start_another_conversion",
             "acknowledge_destination_review",
         ):
-            return SessionUpdate(snapshot=state)
+            return None
+        return state, effects
+
+    def _finish_dispatch(self, state, effects):
+        state, effects = self._schedule_session_followup(state, effects)
+        if any(
+            effect.effect == "run_operation"
+            and effect.request.operation != "validate_destination"
+            for effect in effects
+        ):
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+            state = state.model_copy(update={"retry_operation": None})
+        if any(effect.effect == "close_window" for effect in effects):
+            self._closed = True
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+            if state.result is not None:
+                state = state.model_copy(
+                    update={
+                        "result": state.result.model_copy(
+                            update={"diagnostic_text": "", "diagnostic_omission": None}
+                        )
+                    }
+                )
+        return self._commit_session_snapshot(state, effects)
+
+    def _schedule_session_followup(self, state, effects):
         if state.close_pending and not (
             state.active_request_id or state.validation_request_id
         ):
@@ -1168,112 +1224,16 @@ class ApplicationSession:
                 update={"validation_request_id": request.request_id}
             )
             effects += (RunOperation(request=request, input_revision=state.revision),)
-        if any(
-            effect.effect == "run_operation"
-            and effect.request.operation != "validate_destination"
-            for effect in effects
-        ):
-            self._diagnostic_generation += 1
-            self._diagnostic_text = ""
-            state = state.model_copy(update={"retry_operation": None})
-        if any(effect.effect == "close_window" for effect in effects):
-            self._closed = True
-            self._diagnostic_generation += 1
-            self._diagnostic_text = ""
-            if state.result is not None:
-                state = state.model_copy(
-                    update={
-                        "result": state.result.model_copy(
-                            update={"diagnostic_text": "", "diagnostic_omission": None}
-                        )
-                    }
-                )
-        actions = []
-        if not self._closed and not state.active_request_id and not state.close_pending:
-            if (
-                state.source_kind == "local-api"
-                and state.api_config is not None
-                and (
-                    state.publication is None
-                    or state.publication.state == "not_published"
-                    or state.destination_review_acknowledged
-                )
-            ):
-                actions.append("list_brains")
-            if state.publication is not None and state.publication.receipt_verified:
-                actions.append("start_another_conversion")
-            if (
-                state.publication is not None
-                and state.publication.state == "unknown"
-                and not state.destination_review_acknowledged
-            ):
-                actions.append("review_destination")
-            if (
-                state.source_selection
-                and not (
-                    state.source_kind == "local-api"
-                    and state.brain_list_status == "failed"
-                )
-                and (
-                    state.publication is None
-                    or state.publication.state == "not_published"
-                    or state.destination_review_acknowledged
-                )
-            ):
-                actions.append("inspect")
-            if state.reviewed:
-                actions.append("convert_this_archive")
-            if (
-                state.reviewed is not None
-                and same_source_selection(
-                    state.reviewed.source_selection, state.source_selection
-                )
-                and not state.review_required
-                and state.destination_validation is not None
-                and state.destination_validation.outcome == "valid"
-                and state.destination == state.destination_validation.destination
-                and not state.validation_pending
-                and not state.validation_request_id
-                and (
-                    state.publication is None
-                    or state.publication.state == "not_published"
-                    or state.publication.state == "unknown"
-                    and state.destination_review_acknowledged
-                )
-            ):
-                actions.append(
-                    "convert"
-                    if state.reviewed.outcome == "clean"
-                    else "convert_with_warnings"
-                )
-            if state.publication is not None and state.publication.receipt_verified:
-                actions.extend(
-                    ("open_folder", "open_migration_report", "open_in_obsidian")
-                )
-            if state.vault or (
-                state.publication is not None and state.publication.receipt_verified
-            ):
-                actions.append("check_vault")
-            if (
-                state.retry_operation is not None
-                and (
-                    state.retry_operation == "check_vault"
-                    or state.publication is None
-                    or state.publication.state == "not_published"
-                    or state.publication.state == "unknown"
-                    and state.destination_review_acknowledged
-                )
-                and not state.validation_pending
-                and not state.validation_request_id
-                and (
-                    state.retry_operation != "convert_reviewed"
-                    or state.destination_validation is None
-                    or state.destination_validation.outcome != "valid"
-                )
-            ):
-                actions.append("retry")
-            if self._diagnostic_text:
-                actions.extend(("copy_details", "save_diagnostic_report"))
+        return state, effects
+
+    def _commit_session_snapshot(self, state, effects):
+        actions = (
+            self._available_actions(state)
+            if not self._closed
+            and not state.active_request_id
+            and not state.close_pending
+            else []
+        )
         actions.append("close")
         # Presentation intent is independent of destination readiness. The UI
         # must not inspect the opaque review to label its disabled primary.
@@ -1299,6 +1259,95 @@ class ApplicationSession:
             }
         )
         return SessionUpdate(snapshot=self._snapshot, effects=effects)
+
+    def _available_actions(self, state):
+        actions = self._source_actions(state)
+        if (
+            state.reviewed is not None
+            and same_source_selection(
+                state.reviewed.source_selection, state.source_selection
+            )
+            and not state.review_required
+            and state.destination_validation is not None
+            and state.destination_validation.outcome == "valid"
+            and state.destination == state.destination_validation.destination
+            and not state.validation_pending
+            and not state.validation_request_id
+            and (
+                state.publication is None
+                or state.publication.state == "not_published"
+                or state.publication.state == "unknown"
+                and state.destination_review_acknowledged
+            )
+        ):
+            actions.append(
+                "convert"
+                if state.reviewed.outcome == "clean"
+                else "convert_with_warnings"
+            )
+        if state.publication is not None and state.publication.receipt_verified:
+            actions.extend(("open_folder", "open_migration_report", "open_in_obsidian"))
+        if state.vault or (
+            state.publication is not None and state.publication.receipt_verified
+        ):
+            actions.append("check_vault")
+        if (
+            state.retry_operation is not None
+            and (
+                state.retry_operation == "check_vault"
+                or state.publication is None
+                or state.publication.state == "not_published"
+                or state.publication.state == "unknown"
+                and state.destination_review_acknowledged
+            )
+            and not state.validation_pending
+            and not state.validation_request_id
+            and (
+                state.retry_operation != "convert_reviewed"
+                or state.destination_validation is None
+                or state.destination_validation.outcome != "valid"
+            )
+        ):
+            actions.append("retry")
+        if self._diagnostic_text:
+            actions.extend(("copy_details", "save_diagnostic_report"))
+        return actions
+
+    def _source_actions(self, state):
+        actions = []
+        if (
+            state.source_kind == "local-api"
+            and state.api_config is not None
+            and (
+                state.publication is None
+                or state.publication.state == "not_published"
+                or state.destination_review_acknowledged
+            )
+        ):
+            actions.append("list_brains")
+        if state.publication is not None and state.publication.receipt_verified:
+            actions.append("start_another_conversion")
+        if (
+            state.publication is not None
+            and state.publication.state == "unknown"
+            and not state.destination_review_acknowledged
+        ):
+            actions.append("review_destination")
+        if (
+            state.source_selection
+            and not (
+                state.source_kind == "local-api" and state.brain_list_status == "failed"
+            )
+            and (
+                state.publication is None
+                or state.publication.state == "not_published"
+                or state.destination_review_acknowledged
+            )
+        ):
+            actions.append("inspect")
+        if state.reviewed:
+            actions.append("convert_this_archive")
+        return actions
 
     def _destination_edited(self, state):
         return state.model_copy(

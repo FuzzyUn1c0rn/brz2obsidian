@@ -33,6 +33,40 @@ class Terminal:
     ) = None
 
 
+def _exchange_once(process, wire):
+    output, internal_stderr = bytearray(), bytearray()
+    oversized = [False]
+    drain_failed = [False]
+
+    def drain(pipe, retained, limit, track_excess=False):
+        try:
+            with pipe:
+                while chunk := pipe.read(65536):
+                    if len(retained) + len(chunk) > limit and track_excess:
+                        oversized[0] = True
+                    retained.extend(chunk[: max(0, limit - len(retained))])
+        except OSError:
+            drain_failed[0] = True
+
+    readers = (
+        Thread(target=drain, args=(process.stdout, output, RESPONSE_LIMIT, True)),
+        Thread(target=drain, args=(process.stderr, internal_stderr, STDERR_LIMIT)),
+    )
+    for reader in readers:
+        reader.start()
+    write_failed = False
+    try:
+        process.stdin.write(wire)
+        process.stdin.close()
+    except OSError:
+        write_failed = True
+    status = process.wait()
+    for reader in readers:
+        reader.join()
+    internal_stderr.clear()
+    return status, output, oversized[0] or drain_failed[0] or write_failed
+
+
 class Supervisor:
     def __init__(self, interpreter: Path, source_root: Path):
         if not interpreter.is_absolute() or not source_root.is_absolute():
@@ -69,37 +103,8 @@ class Supervisor:
             )
         except OSError:
             return Terminal(phase="not_started", code="launch_failure")
-        output, internal_stderr = bytearray(), bytearray()
-        oversized = [False]
-        drain_failed = [False]
-
-        def drain(pipe, retained, limit, track_excess=False):
-            try:
-                with pipe:
-                    while chunk := pipe.read(65536):
-                        if len(retained) + len(chunk) > limit and track_excess:
-                            oversized[0] = True
-                        retained.extend(chunk[: max(0, limit - len(retained))])
-            except OSError:
-                drain_failed[0] = True
-
-        readers = (
-            Thread(target=drain, args=(process.stdout, output, RESPONSE_LIMIT, True)),
-            Thread(target=drain, args=(process.stderr, internal_stderr, STDERR_LIMIT)),
-        )
-        for reader in readers:
-            reader.start()
-        write_failed = False
-        try:
-            process.stdin.write(wire)
-            process.stdin.close()
-        except OSError:
-            write_failed = True
-        status = process.wait()
-        for reader in readers:
-            reader.join()
-        internal_stderr.clear()
-        if oversized[0] or drain_failed[0] or write_failed:
+        status, output, io_failed = _exchange_once(process, wire)
+        if io_failed:
             return Terminal(
                 phase="may_have_executed",
                 process_status=status,

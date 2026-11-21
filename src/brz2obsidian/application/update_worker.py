@@ -143,6 +143,136 @@ class UpdateWorker:
             self._delivery.close()
             self._delivery = None
 
+    def _execute_context_command(self, command, values, request, cancel):
+        if command in (
+            "history",
+            "initialize_vault",
+            "prepare_history",
+            "refresh_history",
+            "execute_history",
+            "history_choices",
+            "choose_history",
+        ):
+            return self._perform_history(command, values, request, cancel)
+        if command in ("page", "references", "choices", "choice_details"):
+            return self._read_review(command, values)
+        if command in (
+            "choose",
+            "keep_current_unresolved",
+            "choose_configuration",
+            "stage_references",
+            "begin_edit",
+            "write_edit",
+            "seal_edit",
+        ):
+            return self._edit_review(command, values, cancel)
+        if command in (
+            "prepare",
+            "apply",
+            "refresh",
+            "save",
+            "load",
+            "resume",
+            "close",
+            "discard_draft",
+        ):
+            return self._perform_update(command, values, request, cancel)
+        raise ProtocolFailure("Unsupported producer command")
+
+    def _perform_history(self, command, values, request, cancel):
+        if command == "history":
+            return self.context.history(**values, cancel=cancel.is_set)
+        if command == "initialize_vault":
+            return self.context.initialize_vault(**values)
+        if command == "prepare_history":
+            return self.context.prepare_history(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "refresh_history":
+            return self.context.refresh_history(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "execute_history":
+            return self.context.execute_history(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "history_choices":
+            return self.context.history_choices(**values)
+        if command == "choose_history":
+            return self.context.choose_history(**values)
+        raise ProtocolFailure("Unsupported producer command")
+
+    def _read_review(self, command, values):
+        if command == "page":
+            return self.context.page(**values)
+        if command == "references":
+            return self.context.reference_page(**values)
+        if command == "choices":
+            return self.context.choice_page(**values)
+        if command == "choice_details":
+            return self.context.choice_details(**values)
+        raise ProtocolFailure("Unsupported producer command")
+
+    def _edit_review(self, command, values, cancel):
+        if command == "choose":
+            return self.context.choose(**values)
+        if command == "keep_current_unresolved":
+            return self.context.keep_current_unresolved(**values, cancel=cancel.is_set)
+        if command == "choose_configuration":
+            return self.context.choose_configuration(**values)
+        if command == "stage_references":
+            return self.context.stage_references(**values)
+        if command == "begin_edit":
+            return self.context.begin_edit(**values)
+        if command == "write_edit":
+            return self.context.write_edit(**values)
+        if command == "seal_edit":
+            return self.context.seal_edit(**values)
+        raise ProtocolFailure("Unsupported producer command")
+
+    def _perform_update(self, command, values, request, cancel):
+        if command == "prepare":
+            return self.context.prepare(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "apply":
+            return self.context.apply(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "refresh":
+            return self.context.refresh(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "save":
+            return self.context.save(
+                **values,
+                cancel=cancel.is_set,
+                progress=self._output().observer(request),
+            )
+        if command == "load":
+            return self.context.load(**values, cancel=cancel.is_set)
+        if command == "resume":
+            return self.context.resume(**values, cancel=cancel.is_set)
+        if command == "close":
+            result = self.context.close(**values)
+            self.closed = result.code == "context_closed"
+            return result
+        if command == "discard_draft":
+            return self.context.discard_draft(**values)
+        raise ProtocolFailure("Unsupported producer command")
+
     def _perform(self, request):
         args = request.arguments
         with self._activity:
@@ -154,89 +284,9 @@ class UpdateWorker:
             request_owner._cancel.probe = cancel.is_set
         try:
             values = args.model_dump(exclude={"command"})
-            if args.command == "prepare":
-                result = self.context.prepare(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "history":
-                result = self.context.history(**values, cancel=cancel.is_set)
-            elif args.command == "initialize_vault":
-                result = self.context.initialize_vault(**values)
-            elif args.command == "prepare_history":
-                result = self.context.prepare_history(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "refresh_history":
-                result = self.context.refresh_history(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "execute_history":
-                result = self.context.execute_history(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "history_choices":
-                result = self.context.history_choices(**values)
-            elif args.command == "choose_history":
-                result = self.context.choose_history(**values)
-            elif args.command == "page":
-                result = self.context.page(**values)
-            elif args.command == "references":
-                result = self.context.reference_page(**values)
-            elif args.command == "choices":
-                result = self.context.choice_page(**values)
-            elif args.command == "choice_details":
-                result = self.context.choice_details(**values)
-            elif args.command == "choose":
-                result = self.context.choose(**values)
-            elif args.command == "keep_current_unresolved":
-                result = self.context.keep_current_unresolved(
-                    **values, cancel=cancel.is_set
-                )
-            elif args.command == "choose_configuration":
-                result = self.context.choose_configuration(**values)
-            elif args.command == "stage_references":
-                result = self.context.stage_references(**values)
-            elif args.command == "begin_edit":
-                result = self.context.begin_edit(**values)
-            elif args.command == "write_edit":
-                result = self.context.write_edit(**values)
-            elif args.command == "seal_edit":
-                result = self.context.seal_edit(**values)
-            elif args.command == "apply":
-                result = self.context.apply(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "refresh":
-                result = self.context.refresh(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "save":
-                result = self.context.save(
-                    **values,
-                    cancel=cancel.is_set,
-                    progress=self._output().observer(request),
-                )
-            elif args.command == "load":
-                result = self.context.load(**values, cancel=cancel.is_set)
-            elif args.command == "resume":
-                result = self.context.resume(**values, cancel=cancel.is_set)
-            elif args.command == "close":
-                result = self.context.close(**values)
-                self.closed = result.code == "context_closed"
-            elif args.command == "discard_draft":
-                result = self.context.discard_draft(**values)
+            result = self._execute_context_command(
+                args.command, values, request, cancel
+            )
             self._reply(request, result=result)
         except Exception:  # noqa: BLE001 -- process boundary never exposes exception/source data.
             self.closed = True
@@ -266,34 +316,39 @@ class UpdateWorker:
             if self.closed and isinstance(self.context, UpdateContext):
                 self.context._retire_owner()
 
+    def _read_controls(self, incoming, first, pending, bad_input):
+        try:
+            request = first
+            while not self.closed:
+                if request is None:
+                    frame = incoming.readline(REQUEST_LIMIT + 1)
+                    if not frame:
+                        break
+                    request = decode_request(frame)
+                self._accept(request)
+                if request.arguments.command == "cancel":
+                    self._control(request)
+                else:
+                    pending.put_nowait(request)
+                request = None
+        except OSError, ProtocolFailure, Full:
+            bad_input.set()
+            self.closed = True
+        finally:
+            self._cancel.set()
+            pending.put(None)
+
     def serve(self, incoming, *, first=None):
         self._output()
         pending = Queue(maxsize=1)
         bad_input = Event()
 
-        def read():
-            try:
-                request = first
-                while not self.closed:
-                    if request is None:
-                        frame = incoming.readline(REQUEST_LIMIT + 1)
-                        if not frame:
-                            break
-                        request = decode_request(frame)
-                    self._accept(request)
-                    if request.arguments.command == "cancel":
-                        self._control(request)
-                    else:
-                        pending.put_nowait(request)
-                    request = None
-            except OSError, ProtocolFailure, Full:
-                bad_input.set()
-                self.closed = True
-            finally:
-                self._cancel.set()
-                pending.put(None)
-
-        reader = Thread(target=read, daemon=True, name="update-worker-control")
+        reader = Thread(
+            target=self._read_controls,
+            args=(incoming, first, pending, bad_input),
+            daemon=True,
+            name="update-worker-control",
+        )
         reader.start()
         while (request := pending.get()) is not None:
             if not bad_input.is_set():
