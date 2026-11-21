@@ -41,19 +41,23 @@ def number(text, *, positive=False, bound=1000000):
         raise ValueError
 
 
+def _svg_dimensions(values):
+    if values.keys() != {"width", "height", "viewBox"}:
+        raise ValueError
+    for key in ("width", "height"):
+        number(values[key], positive=True, bound=32768)
+    terms = re.split(
+        r"[ \t\r\n]*,[ \t\r\n]*|[ \t\r\n]+", values["viewBox"].strip(SPACE)
+    )
+    if len(terms) != 4:
+        raise ValueError
+    for index, term in enumerate(terms):
+        number(term, positive=index >= 2)
+
+
 def attributes(name, values):
     if name == "svg":
-        if values.keys() != {"width", "height", "viewBox"}:
-            raise ValueError
-        for key in ("width", "height"):
-            number(values[key], positive=True, bound=32768)
-        terms = re.split(
-            r"[ \t\r\n]*,[ \t\r\n]*|[ \t\r\n]+", values["viewBox"].strip(SPACE)
-        )
-        if len(terms) != 4:
-            raise ValueError
-        for index, term in enumerate(terms):
-            number(term, positive=index >= 2)
+        _svg_dimensions(values)
         return
     required = (
         {"width", "height"} if name == "rect" else {"x1", "y1", "x2", "y2", "stroke"}
@@ -76,6 +80,68 @@ def attributes(name, values):
             number(value, positive=key in {"width", "height", "stroke-width"})
 
 
+def _prohibited(*args):
+    raise ValueError
+
+
+def _namespace(prefix, uri):
+    if prefix is not None or uri != NAMESPACE:
+        raise ValueError
+
+
+def _declaration(version, encoding, standalone):
+    if (
+        version != "1.0"
+        or encoding is not None
+        and encoding.lower() != "utf-8"
+        or standalone != -1
+    ):
+        raise ValueError
+
+
+def _characters(value):
+    if value.strip(SPACE):
+        raise ValueError
+
+
+def _parse_drawing(text):
+    parser = expat.ParserCreate(namespace_separator="|")
+    depth = count = 0
+
+    def start(expanded, values):
+        nonlocal depth, count
+        depth += 1
+        count += 1
+        local = expanded.removeprefix(NAMESPACE + "|")
+        if (
+            count > 4096
+            or expanded != NAMESPACE + "|" + local
+            or (depth == 1 and local != "svg")
+            or (depth == 2 and local not in {"rect", "line"})
+            or depth > 2
+        ):
+            raise ValueError
+        attributes(local, values)
+
+    def end(name):
+        nonlocal depth
+        depth -= 1
+
+    parser.StartNamespaceDeclHandler = _namespace
+    parser.XmlDeclHandler = _declaration
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.CharacterDataHandler = _characters
+    parser.CommentHandler = _prohibited
+    parser.ProcessingInstructionHandler = _prohibited
+    parser.StartDoctypeDeclHandler = _prohibited
+    parser.EntityDeclHandler = _prohibited
+    parser.ExternalEntityRefHandler = _prohibited
+    parser.Parse(text, True)
+    if count == 0 or depth:
+        raise ValueError
+
+
 def validate_svg(raw):
     """Validate all source bytes without rewriting or resolving dependencies."""
     if isinstance(raw, Path):
@@ -89,60 +155,6 @@ def validate_svg(raw):
         text = data.decode("utf-8", errors="strict")
         if "&" in text or "\x00" in text:
             raise ValueError
-        parser = expat.ParserCreate(namespace_separator="|")
-        depth = count = 0
-
-        def prohibited(*args):
-            raise ValueError
-
-        def namespace(prefix, uri):
-            if prefix is not None or uri != NAMESPACE:
-                raise ValueError
-
-        def declaration(version, encoding, standalone):
-            if (
-                version != "1.0"
-                or encoding is not None
-                and encoding.lower() != "utf-8"
-                or standalone != -1
-            ):
-                raise ValueError
-
-        def start(expanded, values):
-            nonlocal depth, count
-            depth += 1
-            count += 1
-            local = expanded.removeprefix(NAMESPACE + "|")
-            if (
-                count > 4096
-                or expanded != NAMESPACE + "|" + local
-                or (depth == 1 and local != "svg")
-                or (depth == 2 and local not in {"rect", "line"})
-                or depth > 2
-            ):
-                raise ValueError
-            attributes(local, values)
-
-        def end(name):
-            nonlocal depth
-            depth -= 1
-
-        def characters(value):
-            if value.strip(SPACE):
-                raise ValueError
-
-        parser.StartNamespaceDeclHandler = namespace
-        parser.XmlDeclHandler = declaration
-        parser.StartElementHandler = start
-        parser.EndElementHandler = end
-        parser.CharacterDataHandler = characters
-        parser.CommentHandler = prohibited
-        parser.ProcessingInstructionHandler = prohibited
-        parser.StartDoctypeDeclHandler = prohibited
-        parser.EntityDeclHandler = prohibited
-        parser.ExternalEntityRefHandler = prohibited
-        parser.Parse(text, True)
-        if count == 0 or depth:
-            raise ValueError
+        _parse_drawing(text)
     except UnicodeError, ValueError, expat.ExpatError:
         refuse("Required image bytes do not match the finite SVG qualification")

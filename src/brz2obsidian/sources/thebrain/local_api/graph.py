@@ -55,174 +55,139 @@ def endpoint_description(value, thoughts):
     return " \u2014 ".join(thoughts[node]["name"] for node in nodes)
 
 
-def normalize_relationships(
-    links, graphs, thoughts, excluded=(), *, profile_version="1"
+def _validate_link_declaration(value, thoughts, profile_version):
+    if (
+        not LINK_FIELDS - {"cleanedUpName"} <= value.keys()
+        or value.keys() - LINK_FIELDS
+    ):
+        refuse("An included relationship declaration is incomplete or unsupported")
+    for name in ("kind", "relation", "direction", "meaning"):
+        if type(value[name]) is not int:
+            refuse("A relationship scalar is not qualified")
+    a, b = value["thoughtIdA"], value["thoughtIdB"]
+    if a == b and not (
+        profile_version in {"4", "5"}
+        and value["meaning"] == 3
+        and thoughts[a]["kind"] == 2
+    ):
+        refuse("An included relationship meaning is not qualified")
+    if profile_version in {"3", "4", "5"} and value["typeId"] is not None:
+        uuid(value["typeId"])
+    if value["kind"] != 1 or value["typeId"] is not None:
+        unsupported_shape(
+            profile_version,
+            "relationship",
+            "An included relationship meaning is not qualified",
+        )
+    return a, b
+
+
+def _relationship_shape(value, thoughts, a, b, profile_version):
+    pair = value["relation"], value["direction"]
+    roles = thoughts[a]["kind"], thoughts[b]["kind"]
+    if (
+        value["meaning"] == 2
+        and pair == (1, -1)
+        or profile_version in {"4", "5"}
+        and value["meaning"] == 3
+        and pair == (1, -1)
+    ):
+        if roles != ((2, 2) if value["meaning"] == 3 else (2, 1)):
+            refuse(
+                "A type assignment requires an inventoried definition and ordinary member"
+            )
+        kind, left, right = "classification", "children_ids", "type_ids"
+    elif (
+        value["meaning"] == 5
+        and pair == (1, -1)
+        or profile_version in {"4", "5"}
+        and value["meaning"] == 7
+        and pair == (1, -1)
+    ):
+        if thoughts[a]["kind"] != 4:
+            refuse("A tag association requires an inventoried source tag")
+        if profile_version in {"4", "5"} and roles not in (
+            {(4, 4)} if value["meaning"] == 7 else {(4, 1), (4, 2)}
+        ):
+            unsupported_shape(
+                profile_version, "relationship", "Unqualified tag endpoints"
+            )
+        kind, left, right = "tag", "children_ids", "tag_ids"
+    elif value["meaning"] == 1 and (
+        pair in {(1, -1), (1, 1)}
+        or (
+            profile_version in {"3", "4", "5"}
+            and pair == (1, 3)
+            and thoughts[a]["kind"] == 1
+            and thoughts[b]["kind"] == 1
+        )
+    ):
+        kind, left, right = "hierarchy", "children_ids", "parents_ids"
+    elif value["meaning"] == 1 and pair in {(3, -1), (3, 3), (3, 5), (3, 7)}:
+        kind, left, right = "related", "jump_ids", "jump_ids"
+    else:
+        unsupported_shape(
+            profile_version,
+            "relationship",
+            "An included relationship tuple is not qualified",
+        )
+    if profile_version in {"4", "5"} and (
+        kind == "hierarchy"
+        and not (roles == (1, 1) or roles in {(1, 2), (1, 4)} and pair == (1, -1))
+        or kind == "related"
+        and not (
+            roles == (1, 1)
+            or roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
+            and pair == (3, -1)
+        )
+    ):
+        unsupported_shape(
+            profile_version,
+            "relationship",
+            "Unqualified navigation endpoint roles",
+        )
+    return kind, left, right
+
+
+def _bind_edge(graphs, expected_graphs, key, a, b, left, right):
+    if b not in graphs[a][0][left] or a not in graphs[b][0][right]:
+        refuse("Relationship endpoints do not agree with graph adjacency")
+    if any(key not in graphs[node][0]["link_ids"] for node in (a, b)):
+        refuse("A relationship is missing from its endpoint graph")
+    expected_graphs[a][left].add(b)
+    expected_graphs[b][right].add(a)
+    expected_graphs[a]["link_ids"].add(key)
+    expected_graphs[b]["link_ids"].add(key)
+
+
+def _validate_link_name(value):
+    for name in ("name", "cleanedUpName"):
+        if (
+            name in value
+            and value[name] is not None
+            and not isinstance(value[name], str)
+        ):
+            refuse("An authored relationship value is malformed")
+
+
+def _validate_link_metadata(value):
+    if value["color"] is not None and (
+        not isinstance(value["color"], str)
+        or not re.fullmatch(r"#[0-9a-fA-F]{6}", value["color"])
+    ):
+        refuse("A relationship colour is not qualified")
+    if value["thickness"] is not None and (
+        type(value["thickness"]) is not int
+        or not -2147483648 <= value["thickness"] <= 2147483647
+    ):
+        refuse("A relationship thickness is malformed")
+    source_date(value["creationDateTime"])
+    source_date(value["modificationDateTime"])
+
+
+def _validate_observed_graphs(
+    thoughts, graphs, links, expected_graphs, providers_by_item, excluded
 ):
-    result, assignments = [], []
-    excluded, providers_by_item = set(excluded), {}
-    expected_graphs = {
-        key: {
-            name: set()
-            for name in (
-                "parents_ids",
-                "children_ids",
-                "jump_ids",
-                "tag_ids",
-                "type_ids",
-                "link_ids",
-            )
-        }
-        for key in thoughts
-    }
-    for key, value in sorted(links.items()):
-        subject_name = endpoint_description(value, thoughts)
-        try:
-            if (
-                not LINK_FIELDS - {"cleanedUpName"} <= value.keys()
-                or value.keys() - LINK_FIELDS
-            ):
-                refuse(
-                    "An included relationship declaration is incomplete or unsupported"
-                )
-            for name in ("kind", "relation", "direction", "meaning"):
-                if type(value[name]) is not int:
-                    refuse("A relationship scalar is not qualified")
-            a, b = value["thoughtIdA"], value["thoughtIdB"]
-            if a == b and not (
-                profile_version in {"4", "5"}
-                and value["meaning"] == 3
-                and thoughts[a]["kind"] == 2
-            ):
-                refuse("An included relationship meaning is not qualified")
-            if profile_version in {"3", "4", "5"} and value["typeId"] is not None:
-                uuid(value["typeId"])
-            if value["kind"] != 1 or value["typeId"] is not None:
-                unsupported_shape(
-                    profile_version,
-                    "relationship",
-                    "An included relationship meaning is not qualified",
-                )
-            pair = value["relation"], value["direction"]
-            roles = thoughts[a]["kind"], thoughts[b]["kind"]
-            if (
-                value["meaning"] == 2
-                and pair == (1, -1)
-                or profile_version in {"4", "5"}
-                and value["meaning"] == 3
-                and pair == (1, -1)
-            ):
-                if roles != ((2, 2) if value["meaning"] == 3 else (2, 1)):
-                    refuse(
-                        "A type assignment requires an inventoried definition and ordinary member"
-                    )
-                kind, left, right = "classification", "children_ids", "type_ids"
-                assignments.append(
-                    ClassificationAssignment(
-                        relationship_key=key,
-                        definition_key=a,
-                        item_key=b,
-                        evidence=tuple(
-                            dict.fromkeys(
-                                ("link:" + key, "thought:" + a, "thought:" + b)
-                            )
-                        ),
-                    )
-                )
-                providers_by_item.setdefault(b, []).append(a)
-                if value["meaning"] == 3 or a in graphs[b][0]["parents_ids"]:
-                    expected_graphs[b]["parents_ids"].add(a)
-            elif (
-                value["meaning"] == 5
-                and pair == (1, -1)
-                or profile_version in {"4", "5"}
-                and value["meaning"] == 7
-                and pair == (1, -1)
-            ):
-                if thoughts[a]["kind"] != 4:
-                    refuse("A tag association requires an inventoried source tag")
-                if profile_version in {"4", "5"} and roles not in (
-                    {(4, 4)} if value["meaning"] == 7 else {(4, 1), (4, 2)}
-                ):
-                    unsupported_shape(
-                        profile_version, "relationship", "Unqualified tag endpoints"
-                    )
-                kind, left, right = "tag", "children_ids", "tag_ids"
-                if value["meaning"] == 7:
-                    expected_graphs[b]["parents_ids"].add(a)
-            elif value["meaning"] == 1 and (
-                pair in {(1, -1), (1, 1)}
-                or (
-                    profile_version in {"3", "4", "5"}
-                    and pair == (1, 3)
-                    and thoughts[a]["kind"] == 1
-                    and thoughts[b]["kind"] == 1
-                )
-            ):
-                kind, left, right = "hierarchy", "children_ids", "parents_ids"
-            elif value["meaning"] == 1 and pair in {(3, -1), (3, 3), (3, 5), (3, 7)}:
-                kind, left, right = "related", "jump_ids", "jump_ids"
-            else:
-                unsupported_shape(
-                    profile_version,
-                    "relationship",
-                    "An included relationship tuple is not qualified",
-                )
-            if profile_version in {"4", "5"} and (
-                kind == "hierarchy"
-                and not (
-                    roles == (1, 1) or roles in {(1, 2), (1, 4)} and pair == (1, -1)
-                )
-                or kind == "related"
-                and not (
-                    roles == (1, 1)
-                    or roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
-                    and pair == (3, -1)
-                )
-            ):
-                unsupported_shape(
-                    profile_version,
-                    "relationship",
-                    "Unqualified navigation endpoint roles",
-                )
-            if b not in graphs[a][0][left] or a not in graphs[b][0][right]:
-                refuse("Relationship endpoints do not agree with graph adjacency")
-            if any(key not in graphs[node][0]["link_ids"] for node in (a, b)):
-                refuse("A relationship is missing from its endpoint graph")
-            expected_graphs[a][left].add(b)
-            expected_graphs[b][right].add(a)
-            expected_graphs[a]["link_ids"].add(key)
-            expected_graphs[b]["link_ids"].add(key)
-            for name in ("name", "cleanedUpName"):
-                if (
-                    name in value
-                    and value[name] is not None
-                    and not isinstance(value[name], str)
-                ):
-                    refuse("An authored relationship value is malformed")
-            if isinstance(value.get("name"), str) and value["name"].strip():
-                subject_name = value["name"]
-            if value["color"] is not None and (
-                not isinstance(value["color"], str)
-                or not re.fullmatch(r"#[0-9a-fA-F]{6}", value["color"])
-            ):
-                refuse("A relationship colour is not qualified")
-            if value["thickness"] is not None and (
-                type(value["thickness"]) is not int
-                or not -2147483648 <= value["thickness"] <= 2147483647
-            ):
-                refuse("A relationship thickness is malformed")
-            source_date(value["creationDateTime"])
-            source_date(value["modificationDateTime"])
-            result.append(
-                Relationship(
-                    key=key, kind=kind, item_a=a, item_b=b, evidence=("link:" + key,)
-                )
-            )
-        except MigrationRefused as error:
-            error = with_subject(error, "relationship", subject_name)
-            raise with_subject(
-                error, "relationship", endpoint_description(value, thoughts)
-            ) from None
     for key, value in thoughts.items():
         try:
             for name, expected_ids in expected_graphs[key].items():
@@ -250,6 +215,70 @@ def normalize_relationships(
                 refuse("Type field, graph type and assignment links disagree")
         except MigrationRefused as error:
             raise with_subject(error, "item", value["name"]) from None
+
+
+def normalize_relationships(
+    links, graphs, thoughts, excluded=(), *, profile_version="1"
+):
+    result, assignments = [], []
+    excluded, providers_by_item = set(excluded), {}
+    expected_graphs = {
+        key: {
+            name: set()
+            for name in (
+                "parents_ids",
+                "children_ids",
+                "jump_ids",
+                "tag_ids",
+                "type_ids",
+                "link_ids",
+            )
+        }
+        for key in thoughts
+    }
+    for key, value in sorted(links.items()):
+        subject_name = endpoint_description(value, thoughts)
+        try:
+            a, b = _validate_link_declaration(value, thoughts, profile_version)
+            kind, left, right = _relationship_shape(
+                value, thoughts, a, b, profile_version
+            )
+            if kind == "classification":
+                assignments.append(
+                    ClassificationAssignment(
+                        relationship_key=key,
+                        definition_key=a,
+                        item_key=b,
+                        evidence=tuple(
+                            dict.fromkeys(
+                                ("link:" + key, "thought:" + a, "thought:" + b)
+                            )
+                        ),
+                    )
+                )
+                providers_by_item.setdefault(b, []).append(a)
+                if value["meaning"] == 3 or a in graphs[b][0]["parents_ids"]:
+                    expected_graphs[b]["parents_ids"].add(a)
+            elif kind == "tag" and value["meaning"] == 7:
+                expected_graphs[b]["parents_ids"].add(a)
+            _bind_edge(graphs, expected_graphs, key, a, b, left, right)
+            _validate_link_name(value)
+            if isinstance(value.get("name"), str) and value["name"].strip():
+                subject_name = value["name"]
+            _validate_link_metadata(value)
+            result.append(
+                Relationship(
+                    key=key, kind=kind, item_a=a, item_b=b, evidence=("link:" + key,)
+                )
+            )
+        except MigrationRefused as error:
+            error = with_subject(error, "relationship", subject_name)
+            raise with_subject(
+                error, "relationship", endpoint_description(value, thoughts)
+            ) from None
+    _validate_observed_graphs(
+        thoughts, graphs, links, expected_graphs, providers_by_item, excluded
+    )
     if profile_version in {"4", "5"}:
         cycle = directed_cycle((r.item_a, r.item_b) for r in result if r.kind == "tag")
         if cycle:

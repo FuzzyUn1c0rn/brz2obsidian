@@ -134,7 +134,7 @@ def validate_bmp(raw, *, cancel=None):
         refuse("Required icon bytes do not match the bounded BMP qualification")
 
 
-def _frames(data):
+def _icon_directory(data):
     reserved, kind, count = struct.unpack_from("<HHH", data)
     if (reserved, kind) != (0, 1) or not 1 <= count <= 16:
         raise ValueError
@@ -146,6 +146,11 @@ def _frames(data):
     ]
     if sum((entry[0] or 256) * (entry[1] or 256) for entry in entries) > 1_048_576:
         raise ValueError
+    return entries, directory_end
+
+
+def _frames(data):
+    entries, directory_end = _icon_directory(data)
     frames, dimensions = [], set()
     for w, h, colors, reserved, planes, bits, size, offset in entries:
         width, height = w or 256, h or 256

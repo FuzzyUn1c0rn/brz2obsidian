@@ -229,37 +229,38 @@ class CaptureReadView:
             self.failed = True
             raise
 
+    def _open_verified_stream(self, asset_id):
+        if self.stream is not None:
+            refuse("Concurrent captured payload reads are unsupported")
+        key = dict(self.pins.bindings).get(asset_id)
+        if key is None:
+            refuse("The requested captured payload is unknown or unavailable")
+        if (
+            ordinary(self.pins.directory / "payload", directory=True)
+            != self.pins.payload_owner
+        ):
+            refuse("The captured payload directory changed")
+        path = self.pins.directory / key
+        owner = ordinary(path)
+        raw = path.open("rb")
+        try:
+            opened = os.fstat(raw.fileno())
+            if (
+                ordinary(path) != owner
+                or (opened.st_dev, opened.st_ino) != owner
+                or not stat.S_ISREG(opened.st_mode)
+            ):
+                refuse("The selected captured payload changed while opening")
+        except BaseException:
+            raw.close()
+            raise
+        return VerifiedStream(raw, self, path, owner, dict(self.pins.files)[key])
+
     @contextmanager
     def open_payload(self, asset_id):
         self.check()
         try:
-            if self.stream is not None:
-                refuse("Concurrent captured payload reads are unsupported")
-            key = dict(self.pins.bindings).get(asset_id)
-            if key is None:
-                refuse("The requested captured payload is unknown or unavailable")
-            if (
-                ordinary(self.pins.directory / "payload", directory=True)
-                != self.pins.payload_owner
-            ):
-                refuse("The captured payload directory changed")
-            path = self.pins.directory / key
-            owner = ordinary(path)
-            raw = path.open("rb")
-            try:
-                opened = os.fstat(raw.fileno())
-                if (
-                    ordinary(path) != owner
-                    or (opened.st_dev, opened.st_ino) != owner
-                    or not stat.S_ISREG(opened.st_mode)
-                ):
-                    refuse("The selected captured payload changed while opening")
-            except BaseException:
-                raw.close()
-                raise
-            self.stream = stream = VerifiedStream(
-                raw, self, path, owner, dict(self.pins.files)[key]
-            )
+            self.stream = stream = self._open_verified_stream(asset_id)
             self.session._streams.append(stream)
         except OSError, ValueError, KeyError, TypeError:
             self.failed = True

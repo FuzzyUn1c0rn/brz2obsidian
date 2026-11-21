@@ -100,24 +100,7 @@ def collection(value, brain_id):
     }
 
 
-def thought(value, brain_id, expected_id=None):
-    if (
-        not isinstance(value, dict)
-        or not THOUGHT_REQUIRED <= value.keys()
-        or value.keys() - THOUGHT_FIELDS
-    ):
-        refuse("An authoritative thought has an unsupported declaration")
-    key = uuid(value["id"])
-    if expected_id is not None and key != expected_id or value["brainId"] != brain_id:
-        refuse("An authoritative thought has foreign or conflicting ownership")
-    if type(value["acType"]) is not int or value["acType"] != 0:
-        refuse("Encountered private or unqualified access cannot be imported")
-    if type(value["kind"]) is not int or value["kind"] not in {1, 2, 4, 5}:
-        refuse("An authoritative thought role is not qualified")
-    if value["forgottenDateTime"] is not None:
-        source_date(value["forgottenDateTime"])
-    if value["kind"] == 5 or value["forgottenDateTime"] is not None:
-        return value
+def _validate_included_metadata(value):
     if not isinstance(value["name"], str):
         refuse("An included thought requires an authored title")
     for name in ("label", "cleanedUpName"):
@@ -152,6 +135,27 @@ def thought(value, brain_id, expected_id=None):
             or not re.fullmatch(r"#[0-9a-fA-F]{6}", value[name])
         ):
             refuse("An appearance declaration is not qualified")
+
+
+def thought(value, brain_id, expected_id=None):
+    if (
+        not isinstance(value, dict)
+        or not THOUGHT_REQUIRED <= value.keys()
+        or value.keys() - THOUGHT_FIELDS
+    ):
+        refuse("An authoritative thought has an unsupported declaration")
+    key = uuid(value["id"])
+    if expected_id is not None and key != expected_id or value["brainId"] != brain_id:
+        refuse("An authoritative thought has foreign or conflicting ownership")
+    if type(value["acType"]) is not int or value["acType"] != 0:
+        refuse("Encountered private or unqualified access cannot be imported")
+    if type(value["kind"]) is not int or value["kind"] not in {1, 2, 4, 5}:
+        refuse("An authoritative thought role is not qualified")
+    if value["forgottenDateTime"] is not None:
+        source_date(value["forgottenDateTime"])
+    if value["kind"] == 5 or value["forgottenDateTime"] is not None:
+        return value
+    _validate_included_metadata(value)
     return value
 
 
