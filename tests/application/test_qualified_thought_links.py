@@ -16,7 +16,9 @@ QUALIFIED = f"brain://api.thebrain.com/{BRAIN_TOKEN}/{TARGET_TOKEN}"
 def test_current_brz_qualified_reference_inspects_and_publishes_exact_evidence(
     tmp_path,
 ):
-    authored = f"Before café\r\n[Authored **label**]({QUALIFIED}/Other-name) after.\r\n"
+    prefix = "> - Before café\r\n>   - Nested\r\n>\t\t"
+    phrase = f"[Authored **label**]({QUALIFIED}/Other-name)"
+    authored = f"{prefix}{phrase} after `*kept*`.\r\n"
     source = graph_archive(
         tmp_path / "source.brz",
         {1: "Home", 2: "Target"},
@@ -32,17 +34,17 @@ def test_current_brz_qualified_reference_inspects_and_publishes_exact_evidence(
     assert result.receipt.verified
     body = (vault / "Home — Home.md").read_bytes()
     assert (
-        "Before café\r\n[[Notes/Target.md|Authored label]] after.\r\n".encode() in body
-    )
+        "> - Before café\r\n>   - Nested\r\n>\t\t"
+        "[[Notes/Target.md|Authored label]] after `*kept*`.\r\n"
+    ).encode() in body
     assert next(vault.rglob("*.original")).read_bytes() == authored.encode()
     record = json.loads((vault / "migration-record.json").read_bytes())
     document = next(d for row in record["item_targets"] for d in row["documents"])
     reference = document["references"][0]
     assert reference["target"] == identity(2)
     assert reference["source_target"] == QUALIFIED + "/Other-name"
-    assert reference["expected_original"] == (
-        f"[Authored **label**]({QUALIFIED}/Other-name)"
-    )
+    assert reference["expected_original"] == phrase
+    assert (reference["start"], reference["end"]) == (34, 34 + len(phrase))
 
 
 def test_foreign_included_identity_collision_publishes_exact_external_span(tmp_path):

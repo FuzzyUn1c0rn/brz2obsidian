@@ -248,8 +248,26 @@ def bind_note_references(
     return document.model_copy(update={"references": tuple(bound)})
 
 
+class _BlockSlice(str):
+    """A source slice with any leading tab padding emitted by getLines."""
+
+    def __new__(cls, value, span):
+        result = super().__new__(cls, value)
+        result.span = span
+        result.padding = ""
+        return result
+
+    def __radd__(self, padding):
+        if not isinstance(padding, str) or self.padding or padding.strip(" "):
+            _refuse_unmapped_block()
+        self.padding = padding
+        return padding + str(self)
+
+
 class _MappedText(str):
     """Parser input whose slices retain exact original character provenance."""
+
+    _block_slices = None
 
     def __new__(cls, value, offsets):
         result = super().__new__(cls, value)
@@ -258,11 +276,13 @@ class _MappedText(str):
 
     def __getitem__(self, index):
         value = super().__getitem__(index)
-        return (
-            _MappedText(value, self.offsets[index])
-            if isinstance(index, slice)
-            else value
-        )
+        if not isinstance(index, slice):
+            return value
+        if self._block_slices is None:
+            return _MappedText(value, self.offsets[index])
+        fragment = _BlockSlice(value, index)
+        self._block_slices.append(fragment)
+        return fragment
 
     def strip(self, chars=None):
         left = len(self) - len(super().lstrip(chars))
@@ -270,31 +290,49 @@ class _MappedText(str):
         return self[left : max(left, right)]
 
 
+def _refuse_unmapped_block():
+    _refuse("unsupported_feature", "Markdown block provenance cannot be established")
+
+
 class _MappedBlock(StateBlock):
+    """Map the ordered source slices and partial-tab padding in getLines output."""
+
     def getLines(self, begin, end, indent, keepLastLF):
-        parts, offsets = [], []
-        for line in range(begin, end):
-            first = line_start = self.bMarks[line]
-            last = self.eMarks[line] + (1 if line + 1 < end or keepLastLF else 0)
-            width = 0
-            while first < last and width < indent:
-                char = self.src[first]
-                if char in " \t":
-                    width += 4 - (width + self.bsCount[line]) % 4 if char == "\t" else 1
-                elif first - line_start < self.tShift[line]:
-                    width += 1
-                else:
-                    break
-                first += 1
-            padding = max(0, width - indent)
-            parts.append(" " * padding + self.src[first:last])
-            offsets.extend([self.src.offsets[first - 1]] * padding)
-            offsets.extend(self.src.offsets[first:last])
-        value = "".join(parts)
-        if value != super().getLines(begin, end, indent, keepLastLF):
-            _refuse(
-                "unsupported_feature", "Markdown block provenance cannot be established"
-            )
+        source = self.src
+        if not isinstance(source, _MappedText) or source._block_slices is not None:
+            _refuse_unmapped_block()
+        fragments = []
+        source._block_slices = fragments
+        try:
+            value = super().getLines(begin, end, indent, keepLastLF)
+        finally:
+            source._block_slices = None
+
+        if not isinstance(value, str) or len(fragments) != max(0, end - begin):
+            _refuse_unmapped_block()
+        offsets = []
+        cursor = previous_stop = 0
+        for fragment in fragments:
+            start, stop, step = fragment.span.indices(len(source))
+            padding = fragment.padding
+            if step != 1 or not previous_stop <= start <= stop:
+                _refuse_unmapped_block()
+            if padding:
+                if (
+                    not start
+                    or source[start - 1] != "\t"
+                    or not value.startswith(padding, cursor)
+                ):
+                    _refuse_unmapped_block()
+                offsets.extend([source.offsets[start - 1]] * len(padding))
+                cursor += len(padding)
+            if not value.startswith(fragment, cursor):
+                _refuse_unmapped_block()
+            offsets.extend(source.offsets[start:stop])
+            cursor += len(fragment)
+            previous_stop = stop
+        if cursor != len(value):
+            _refuse_unmapped_block()
         return _MappedText(value, offsets)
 
 
@@ -311,6 +349,13 @@ def _mapped_blocks(text, parser, env):
     if normalized:
         state = _MappedBlock(normalized, parser, env, tokens)
         parser.block.tokenize(state, state.line, state.lineMax)
+    if any(
+        token.type == "inline"
+        and token.content
+        and not isinstance(token.content, _MappedText)
+        for token in tokens
+    ):
+        _refuse_unmapped_block()
     return tokens
 
 
