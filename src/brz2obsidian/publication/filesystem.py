@@ -248,6 +248,176 @@ def _verify_retry_staging(staging, destination, identity, expected, payloads):
     _fresh(destination)
 
 
+def _publication_manifest(artifacts, payloads, destination):
+    if (
+        artifacts.source_identity != payloads.source_identity
+        or payloads.source_identity != payloads.snapshot.identity
+    ):
+        raise MigrationRefused(
+            (
+                _issue(
+                    "source_changed",
+                    "Artifacts are bound to a different source session",
+                ),
+            )
+        )
+    payloads.verify_consistency()
+    manifest = artifacts.manifest
+    actual_paths = tuple(
+        file.relative_path for file in artifacts.generated_files
+    ) + tuple(copy.relative_path for copy in artifacts.copies)
+    assigned_paths = manifest + artifacts.reserved_paths
+    normalized = {
+        unicodedata.normalize("NFC", path).casefold() for path in assigned_paths
+    }
+    if manifest != actual_paths or len(normalized) != len(assigned_paths):
+        raise MigrationRefused(
+            (_issue("unsafe_target_path", "Manifest paths are missing or collide"),)
+        )
+    for path in assigned_paths:
+        parts = PurePosixPath(path)
+        if (
+            parts.is_absolute()
+            or not parts.parts
+            or ".." in parts.parts
+            or "\\" in path
+            or ":" in path
+            or parts.as_posix() != path
+            or any(not _windows_component(part) for part in parts.parts)
+            or any(
+                "/".join(
+                    unicodedata.normalize("NFC", part).casefold()
+                    for part in parts.parts[:i]
+                )
+                in normalized
+                for i in range(1, len(parts.parts))
+            )
+        ):
+            raise MigrationRefused(
+                (_issue("unsafe_target_path", "Target path is unsafe"),)
+            )
+        if len(str(destination / path).encode("utf-16-le")) // 2 > 240:
+            raise MigrationRefused(
+                (
+                    _issue(
+                        "target_path_too_long",
+                        "Target exceeds the 240-unit absolute-path limit",
+                    ),
+                )
+            )
+    support_paths = tuple(a.relative_path for a in artifacts.support_artifacts)
+    if (
+        len(set(support_paths)) != len(support_paths)
+        or not set(support_paths)
+        <= {f.relative_path for f in artifacts.generated_files}
+        or artifacts.counts.planned_support_files != len(support_paths)
+    ):
+        raise MigrationRefused(
+            (
+                _issue(
+                    "invalid_source",
+                    "Support artifact obligations are inconsistent",
+                ),
+            )
+        )
+    return manifest
+
+
+def _write_staged_artifacts(artifacts, payloads, staging):
+    expected = {}
+    for artifact in artifacts.generated_files:
+        path = staging / artifact.relative_path
+        _safe_ancestors(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _safe_ancestors(path)
+        with path.open("xb") as target:
+            target.write(artifact.content)
+        expected[artifact.relative_path] = (len(artifact.content), artifact.sha256)
+    read_view = (
+        payloads.payload_read_view()
+        if isinstance(payloads, PayloadReadViews)
+        else nullcontext(payloads)
+    )
+    with read_view as reader:
+        for copy in artifacts.copies:
+            path = staging / copy.relative_path
+            _safe_ancestors(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with reader.open_payload(copy.asset_id) as source:
+                _safe_ancestors(path)
+                with path.open("xb") as target:
+                    shutil.copyfileobj(source, target, 1024 * 1024)
+            expected[copy.relative_path] = (
+                copy.expected_length,
+                copy.expected_sha256,
+            )
+    return expected
+
+
+def _verify_staged_artifacts(staging, manifest, expected):
+    _safe_ancestors(staging)
+    actual = _staged_files(staging)
+    if actual != set(manifest):
+        raise MigrationFailed(
+            (
+                _issue(
+                    "payload_integrity_failure",
+                    "Staged files differ from the complete manifest",
+                ),
+            )
+        )
+    verified = []
+    for relative_path in manifest:
+        path = staging / relative_path
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        length = path.stat().st_size
+        if (length, digest) != expected[relative_path]:
+            raise MigrationFailed(
+                (
+                    _issue(
+                        "payload_integrity_failure",
+                        "Staged content failed length/hash verification",
+                    ),
+                )
+            )
+        verified.append(
+            VerifiedFile(relative_path=relative_path, length=length, sha256=digest)
+        )
+    return verified
+
+
+def _commit_staging(staging, destination, owned_identity, expected, payloads):
+    _fresh(destination)
+    try:
+        if destination.exists():
+            destination.rmdir()
+    except OSError:
+        _fresh(destination)
+        raise
+    # Remove an initially empty destination once only. A caller-created
+    # destination during a delay must remain protected by native rename.
+    delays = (0.01, 0.02, 0.04, 0.08, 0.16)
+    for attempt in range(len(delays) + 1):
+        try:
+            # Native Windows rename refuses any existing destination.
+            staging.rename(destination)
+            break
+        except OSError as error:
+            _fresh(destination)
+            if not (
+                sys.platform == "win32"
+                and isinstance(error, PermissionError)
+                and getattr(error, "winerror", None) == 5
+                and attempt < len(delays)
+            ):
+                raise
+            time.sleep(delays[attempt])
+            _verify_retry_staging(
+                staging, destination, owned_identity, expected, payloads
+            )
+
+
 def publish(
     artifacts: RenderedVault, payloads: SourceSession, destination: object
 ) -> Receipt:
@@ -256,140 +426,16 @@ def publish(
     owned_identity = None
     try:
         _fresh(destination)
-        if (
-            artifacts.source_identity != payloads.source_identity
-            or payloads.source_identity != payloads.snapshot.identity
-        ):
-            raise MigrationRefused(
-                (
-                    _issue(
-                        "source_changed",
-                        "Artifacts are bound to a different source session",
-                    ),
-                )
-            )
-        payloads.verify_consistency()
-        manifest = artifacts.manifest
-        actual_paths = tuple(
-            file.relative_path for file in artifacts.generated_files
-        ) + tuple(copy.relative_path for copy in artifacts.copies)
-        assigned_paths = manifest + artifacts.reserved_paths
-        normalized = {
-            unicodedata.normalize("NFC", path).casefold() for path in assigned_paths
-        }
-        if manifest != actual_paths or len(normalized) != len(assigned_paths):
-            raise MigrationRefused(
-                (_issue("unsafe_target_path", "Manifest paths are missing or collide"),)
-            )
-        for path in assigned_paths:
-            parts = PurePosixPath(path)
-            if (
-                parts.is_absolute()
-                or not parts.parts
-                or ".." in parts.parts
-                or "\\" in path
-                or ":" in path
-                or parts.as_posix() != path
-                or any(not _windows_component(part) for part in parts.parts)
-                or any(
-                    "/".join(
-                        unicodedata.normalize("NFC", part).casefold()
-                        for part in parts.parts[:i]
-                    )
-                    in normalized
-                    for i in range(1, len(parts.parts))
-                )
-            ):
-                raise MigrationRefused(
-                    (_issue("unsafe_target_path", "Target path is unsafe"),)
-                )
-            if len(str(destination / path).encode("utf-16-le")) // 2 > 240:
-                raise MigrationRefused(
-                    (
-                        _issue(
-                            "target_path_too_long",
-                            "Target exceeds the 240-unit absolute-path limit",
-                        ),
-                    )
-                )
-        support_paths = tuple(a.relative_path for a in artifacts.support_artifacts)
-        if (
-            len(set(support_paths)) != len(support_paths)
-            or not set(support_paths)
-            <= {f.relative_path for f in artifacts.generated_files}
-            or artifacts.counts.planned_support_files != len(support_paths)
-        ):
-            raise MigrationRefused(
-                (
-                    _issue(
-                        "invalid_source",
-                        "Support artifact obligations are inconsistent",
-                    ),
-                )
-            )
+        manifest = _publication_manifest(artifacts, payloads, destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(
             tempfile.mkdtemp(prefix=".brz2obsidian-", dir=destination.parent)
         ).absolute()
         _safe_ancestors(staging)
         owned_identity = (staging.stat().st_dev, staging.stat().st_ino)
-        expected = {}
-        for artifact in artifacts.generated_files:
-            path = staging / artifact.relative_path
-            _safe_ancestors(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            _safe_ancestors(path)
-            with path.open("xb") as target:
-                target.write(artifact.content)
-            expected[artifact.relative_path] = (len(artifact.content), artifact.sha256)
-        read_view = (
-            payloads.payload_read_view()
-            if isinstance(payloads, PayloadReadViews)
-            else nullcontext(payloads)
-        )
-        with read_view as reader:
-            for copy in artifacts.copies:
-                path = staging / copy.relative_path
-                _safe_ancestors(path)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with reader.open_payload(copy.asset_id) as source:
-                    _safe_ancestors(path)
-                    with path.open("xb") as target:
-                        shutil.copyfileobj(source, target, 1024 * 1024)
-                expected[copy.relative_path] = (
-                    copy.expected_length,
-                    copy.expected_sha256,
-                )
+        expected = _write_staged_artifacts(artifacts, payloads, staging)
         payloads.verify_consistency()
-        _safe_ancestors(staging)
-        actual = _staged_files(staging)
-        if actual != set(manifest):
-            raise MigrationFailed(
-                (
-                    _issue(
-                        "payload_integrity_failure",
-                        "Staged files differ from the complete manifest",
-                    ),
-                )
-            )
-        verified = []
-        for relative_path in manifest:
-            path = staging / relative_path
-            with path.open("rb") as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
-            length = path.stat().st_size
-            if (length, digest) != expected[relative_path]:
-                raise MigrationFailed(
-                    (
-                        _issue(
-                            "payload_integrity_failure",
-                            "Staged content failed length/hash verification",
-                        ),
-                    )
-                )
-            verified.append(
-                VerifiedFile(relative_path=relative_path, length=length, sha256=digest)
-            )
+        verified = _verify_staged_artifacts(staging, manifest, expected)
         counts = artifacts.counts.model_copy(
             update={
                 "actual_notes": artifacts.counts.planned_notes,
@@ -415,34 +461,7 @@ def publish(
                     ),
                 )
             )
-        _fresh(destination)
-        try:
-            if destination.exists():
-                destination.rmdir()
-        except OSError:
-            _fresh(destination)
-            raise
-        # Remove an initially empty destination once only. A caller-created
-        # destination during a delay must remain protected by native rename.
-        delays = (0.01, 0.02, 0.04, 0.08, 0.16)
-        for attempt in range(len(delays) + 1):
-            try:
-                # Native Windows rename refuses any existing destination.
-                staging.rename(destination)
-                break
-            except OSError as error:
-                _fresh(destination)
-                if not (
-                    sys.platform == "win32"
-                    and isinstance(error, PermissionError)
-                    and getattr(error, "winerror", None) == 5
-                    and attempt < len(delays)
-                ):
-                    raise
-                time.sleep(delays[attempt])
-                _verify_retry_staging(
-                    staging, destination, owned_identity, expected, payloads
-                )
+        _commit_staging(staging, destination, owned_identity, expected, payloads)
         staging = None
         return receipt
     except (MigrationFailed, MigrationRefused) as error:

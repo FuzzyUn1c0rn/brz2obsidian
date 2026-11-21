@@ -55,6 +55,55 @@ def read_checkpoint_payload(
     )
 
 
+def _select_pages(manifest, role, requests):
+    rows = {row.path: row for row in getattr(manifest, role)}
+    selected = []
+    for request in requests:
+        row = rows.get(request.path)
+        if row is None:
+            return "path_unavailable", ()
+        if request.offset > row.size or (
+            request.limit == 0 and request.offset < row.size
+        ):
+            return "invalid_range", ()
+        selected.append((request, row, _Page(request.offset, request.limit)))
+    return None, selected
+
+
+def _current_page_locator(root, git, locator):
+    _, _, raw, _ = observe_file(
+        root, root / ".brz2obsidian/locator.json", prefix_limit=OUTPUT_BUDGET + 1
+    )
+    current = CheckpointLocator.model_validate_json(raw)
+    association = locator.association
+    if (
+        current != locator
+        or verify_directory(root) != association.vault_anchor
+        or verify_directory(root / ".git") != association.git_anchor
+        or git.call("rev-parse", "--verify", association.ref).decode().strip()
+        != locator.commit
+    ):
+        return None
+    return current
+
+
+def _payload_result(role, code, *, chunks=(), current=None):
+    return CheckpointPayloadRead(
+        schema_id="brz2obsidian.checkpoint-payload-read",
+        schema_version=1,
+        status="available" if code == "verified" else "refused",
+        code=code,
+        locator=current,
+        role=role if role in _ROLES else "source",
+        chunks=chunks,
+        message=(
+            "Retained byte pages verified against the current checkpoint."
+            if code == "verified"
+            else "Retained byte pages unavailable: " + code.replace("_", " ") + "."
+        ),
+    )
+
+
 def _read_checkpoint_payload(
     vault,
     *,
@@ -75,22 +124,6 @@ def _read_checkpoint_payload(
     read conveys bytes, never review, publication or mutation authority.
     """
 
-    def result(code, *, chunks=(), current=None):
-        return CheckpointPayloadRead(
-            schema_id="brz2obsidian.checkpoint-payload-read",
-            schema_version=1,
-            status="available" if code == "verified" else "refused",
-            code=code,
-            locator=current,
-            role=role if role in _ROLES else "source",
-            chunks=chunks,
-            message=(
-                "Retained byte pages verified against the current checkpoint."
-                if code == "verified"
-                else "Retained byte pages unavailable: " + code.replace("_", " ") + "."
-            ),
-        )
-
     try:
         if (
             role not in _ROLES
@@ -99,7 +132,7 @@ def _read_checkpoint_payload(
             or type(requests) is not tuple
             or not 0 < len(requests) <= OUTPUT_BUDGET // 128
         ):
-            return result("invalid_request")
+            return _payload_result(role, "invalid_request")
         locator = CheckpointLocator.model_validate(locator)
         requests = tuple(
             CheckpointPayloadRequest.model_validate(row) for row in requests
@@ -110,9 +143,9 @@ def _read_checkpoint_payload(
             > OUTPUT_BUDGET
             or sum(row.limit for row in requests) > byte_limit
         ):
-            return result("invalid_request")
+            return _payload_result(role, "invalid_request")
         if sum(row.limit for row in requests) > available_memory() // 4:
-            return result("insufficient_memory")
+            return _payload_result(role, "insufficient_memory")
         root = Path(vault).absolute()
         observed = _read_history()
         checkpoint = observed.checkpoint
@@ -121,20 +154,12 @@ def _read_checkpoint_payload(
             or checkpoint is None
             or checkpoint.status != "valid"
         ):
-            return result("history_unavailable")
+            return _payload_result(role, "history_unavailable")
         if checkpoint.locator != locator:
-            return result("stale_locator")
-        rows = {row.path: row for row in getattr(checkpoint.manifest, role)}
-        selected = []
-        for request in requests:
-            row = rows.get(request.path)
-            if row is None:
-                return result("path_unavailable")
-            if request.offset > row.size or (
-                request.limit == 0 and request.offset < row.size
-            ):
-                return result("invalid_range")
-            selected.append((request, row, _Page(request.offset, request.limit)))
+            return _payload_result(role, "stale_locator")
+        refusal, selected = _select_pages(checkpoint.manifest, role, requests)
+        if refusal is not None:
+            return _payload_result(role, refusal)
         git = _Git(root, git_executable)
         verify_blobs(
             [*git.prefix, "cat-file", "--batch"],
@@ -144,19 +169,9 @@ def _read_checkpoint_payload(
             ),
             timeout=120,
         )
-        _, _, raw, _ = observe_file(
-            root, root / ".brz2obsidian/locator.json", prefix_limit=OUTPUT_BUDGET + 1
-        )
-        current = CheckpointLocator.model_validate_json(raw)
-        association = locator.association
-        if (
-            current != locator
-            or verify_directory(root) != association.vault_anchor
-            or verify_directory(root / ".git") != association.git_anchor
-            or git.call("rev-parse", "--verify", association.ref).decode().strip()
-            != locator.commit
-        ):
-            return result("stale_locator")
+        current = _current_page_locator(root, git, locator)
+        if current is None:
+            return _payload_result(role, "stale_locator")
         if _guard is not None:
             _guard()
         chunks = tuple(
@@ -178,6 +193,6 @@ def _read_checkpoint_payload(
             )
             for request, row, sink in selected
         )
-        return result("verified", chunks=chunks, current=current)
+        return _payload_result(role, "verified", chunks=chunks, current=current)
     except OSError, ValueError, TypeError, OverflowError, MemoryError:
-        return result("payload_unavailable")
+        return _payload_result(role, "payload_unavailable")

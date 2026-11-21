@@ -404,10 +404,147 @@ def validate_claims(
         )
 
 
+class _CleanupContinuationEvidence:
+    def __init__(self, observation):
+        self.observation = observation
+        self.origins = {}
+        self.snapshots = {}
+
+    def _lineage(self, association, role, origin_commit):
+        from brz2obsidian.application.vault_update_contracts import VaultRecoveryIntent
+
+        observation = self.observation
+        if observation is None:
+            raise OSError("Cleanup continuation has no native retained finish graph")
+        result_prepared_commit = None
+        if role.boundary == "result":
+            result_authorities = tuple(
+                (graph, intent)
+                for graph in observation.graphs
+                for intent_commit, intent in graph.authorities
+                if intent_commit == role.operation_intent_commit
+                and isinstance(intent, VaultRecoveryIntent)
+                and intent.direction == "finish"
+                and intent.association_id == association.association_id
+            )
+            if len(result_authorities) != 1:
+                raise OSError("Cleanup continuation RESULT has no unique finish intent")
+            result_graph, result_intent = result_authorities[0]
+            if (
+                role.previous != result_intent.prepared_commit
+                or origin_commit not in (None, result_graph.origin_intent_commit)
+                or role.recovery_direction not in (None, "finish")
+            ):
+                raise OSError("Cleanup continuation RESULT has changed native lineage")
+            origin_commit = result_graph.origin_intent_commit
+            result_prepared_commit = result_intent.prepared_commit
+        elif role.boundary != "prepared" or role.recovery_direction != "finish":
+            raise OSError("Cleanup continuation is not a native finish preparation")
+        if origin_commit is None:
+            raise OSError("Cleanup continuation has no native retained finish origin")
+        return origin_commit, result_prepared_commit
+
+    def _origin(self, origin_commit):
+        observation = self.observation
+        if origin_commit not in self.origins:
+            graphs = tuple(
+                graph
+                for graph in observation.graphs
+                if graph.origin_intent_commit == origin_commit
+            )
+            if len(graphs) != 1:
+                raise OSError("Cleanup continuation origin is not unique")
+            graph = graphs[0]
+            origin = graph.authorities[-1][1]
+            original_loaded = observation.owned[origin.prepared_commit][1]
+            if original_loaded is None:
+                raise OSError("Cleanup continuation origin lacks its canonical review")
+            expected = removal_continuation_bindings(
+                original_loaded.saved.plan,
+                origin,
+                origin_commit,
+                effects=original_loaded.historical_effects,
+            )
+            self.origins[origin_commit] = (
+                graph,
+                origin,
+                original_loaded,
+                expected,
+            )
+        return self.origins[origin_commit]
+
+    def _before_snapshot(self, graph, origin_commit, snapshot_commit):
+        from brz2obsidian.application.vault_update_contracts import VaultRecoveryIntent
+
+        observation = self.observation
+        snapshot_key = origin_commit, snapshot_commit
+        if snapshot_key not in self.snapshots:
+            retained_snapshot = observation.owned.get(snapshot_commit)
+            if (
+                retained_snapshot is None
+                and snapshot_commit
+                == observation.unpublished_prepared
+                == observation.checkpoint.locator.commit
+            ):
+                retained_snapshot = (
+                    observation.checkpoint.manifest,
+                    observation.checkpoint.review,
+                )
+            if retained_snapshot is None:
+                raise OSError("Cleanup continuation has no native retained snapshot")
+            snapshot, snapshot_loaded = retained_snapshot
+            if (
+                snapshot_loaded is None
+                or snapshot.boundary != "prepared"
+                or snapshot.recovery_origin_intent_commit != origin_commit
+                or snapshot.recovery_direction != "finish"
+                or snapshot.vault != snapshot.preimage
+            ):
+                raise OSError("Cleanup continuation has no retained before snapshot")
+            matched = any(
+                isinstance(intent, VaultRecoveryIntent)
+                and intent.prepared_commit == snapshot_commit
+                and intent.before == snapshot.preimage
+                and intent.direction == "finish"
+                for _, intent in graph.authorities
+            )
+            pending = (
+                snapshot_commit
+                == observation.unpublished_prepared
+                == observation.checkpoint.locator.commit
+                and graph is observation.graph
+                and graph.receipt is None
+                and snapshot.recovery_previous_operation_commit == graph.commit
+            )
+            if not matched and not pending:
+                raise OSError("Cleanup continuation preparation is orphaned")
+            self.snapshots[snapshot_key] = snapshot.preimage
+        return self.snapshots[snapshot_key]
+
+    def validate(self, association, role, commit, origin_commit, claims):
+        origin_commit, result_prepared_commit = self._lineage(
+            association, role, origin_commit
+        )
+        graph, origin, original_loaded, expected = self._origin(origin_commit)
+        before = self._before_snapshot(
+            graph, origin_commit, result_prepared_commit or commit
+        )
+        validate_removal_continuations(
+            claims,
+            origin=origin,
+            original=original_loaded.saved.plan,
+            origin_commit=origin_commit,
+            before=before,
+            direction="finish",
+            effects=original_loaded.historical_effects,
+            expected=expected,
+        )
+        return origin_commit
+
+
 def validate_history_claims(git, *, association, roles, demands, observation=None):
     from brz2obsidian.application.vault_update_contracts import (
         VaultOperationIntent,
-        VaultRecoveryIntent,
     )
 
     from .vault_apply import _read_record
@@ -415,133 +552,12 @@ def validate_history_claims(git, *, association, roles, demands, observation=Non
     by_commit = {role.commit: role for role in roles}
     claims_by_commit = {commit: claims for commit, _, claims, _ in demands}
     origins, bound = {}, []
-    continuation_origins = {}
-    continuation_snapshots = {}
+    continuation = _CleanupContinuationEvidence(observation)
     for commit, origin_commit, claims, missing in demands:
         role = by_commit[commit]
         if any(claim.continuation is not None for claim in claims):
-            if observation is None:
-                raise OSError(
-                    "Cleanup continuation has no native retained finish graph"
-                )
-            result_prepared_commit = None
-            if role.boundary == "result":
-                result_authorities = tuple(
-                    (graph, intent)
-                    for graph in observation.graphs
-                    for intent_commit, intent in graph.authorities
-                    if intent_commit == role.operation_intent_commit
-                    and isinstance(intent, VaultRecoveryIntent)
-                    and intent.direction == "finish"
-                    and intent.association_id == association.association_id
-                )
-                if len(result_authorities) != 1:
-                    raise OSError(
-                        "Cleanup continuation RESULT has no unique finish intent"
-                    )
-                result_graph, result_intent = result_authorities[0]
-                if (
-                    role.previous != result_intent.prepared_commit
-                    or origin_commit not in (None, result_graph.origin_intent_commit)
-                    or role.recovery_direction not in (None, "finish")
-                ):
-                    raise OSError(
-                        "Cleanup continuation RESULT has changed native lineage"
-                    )
-                origin_commit = result_graph.origin_intent_commit
-                result_prepared_commit = result_intent.prepared_commit
-            elif role.boundary != "prepared" or role.recovery_direction != "finish":
-                raise OSError("Cleanup continuation is not a native finish preparation")
-            if origin_commit is None:
-                raise OSError(
-                    "Cleanup continuation has no native retained finish origin"
-                )
-            if origin_commit not in continuation_origins:
-                graphs = tuple(
-                    graph
-                    for graph in observation.graphs
-                    if graph.origin_intent_commit == origin_commit
-                )
-                if len(graphs) != 1:
-                    raise OSError("Cleanup continuation origin is not unique")
-                graph = graphs[0]
-                origin = graph.authorities[-1][1]
-                original_loaded = observation.owned[origin.prepared_commit][1]
-                if original_loaded is None:
-                    raise OSError(
-                        "Cleanup continuation origin lacks its canonical review"
-                    )
-                expected = removal_continuation_bindings(
-                    original_loaded.saved.plan,
-                    origin,
-                    origin_commit,
-                    effects=original_loaded.historical_effects,
-                )
-                continuation_origins[origin_commit] = (
-                    graph,
-                    origin,
-                    original_loaded,
-                    expected,
-                )
-            graph, origin, original_loaded, expected = continuation_origins[
-                origin_commit
-            ]
-            snapshot_commit = result_prepared_commit or commit
-            snapshot_key = origin_commit, snapshot_commit
-            if snapshot_key not in continuation_snapshots:
-                retained_snapshot = observation.owned.get(snapshot_commit)
-                if (
-                    retained_snapshot is None
-                    and snapshot_commit
-                    == observation.unpublished_prepared
-                    == observation.checkpoint.locator.commit
-                ):
-                    retained_snapshot = (
-                        observation.checkpoint.manifest,
-                        observation.checkpoint.review,
-                    )
-                if retained_snapshot is None:
-                    raise OSError(
-                        "Cleanup continuation has no native retained snapshot"
-                    )
-                snapshot, snapshot_loaded = retained_snapshot
-                if (
-                    snapshot_loaded is None
-                    or snapshot.boundary != "prepared"
-                    or snapshot.recovery_origin_intent_commit != origin_commit
-                    or snapshot.recovery_direction != "finish"
-                    or snapshot.vault != snapshot.preimage
-                ):
-                    raise OSError(
-                        "Cleanup continuation has no retained before snapshot"
-                    )
-                matched = any(
-                    isinstance(intent, VaultRecoveryIntent)
-                    and intent.prepared_commit == snapshot_commit
-                    and intent.before == snapshot.preimage
-                    and intent.direction == "finish"
-                    for _, intent in graph.authorities
-                )
-                pending = (
-                    snapshot_commit
-                    == observation.unpublished_prepared
-                    == observation.checkpoint.locator.commit
-                    and graph is observation.graph
-                    and graph.receipt is None
-                    and snapshot.recovery_previous_operation_commit == graph.commit
-                )
-                if not matched and not pending:
-                    raise OSError("Cleanup continuation preparation is orphaned")
-                continuation_snapshots[snapshot_key] = snapshot.preimage
-            validate_removal_continuations(
-                claims,
-                origin=origin,
-                original=original_loaded.saved.plan,
-                origin_commit=origin_commit,
-                before=continuation_snapshots[snapshot_key],
-                direction="finish",
-                effects=original_loaded.historical_effects,
-                expected=expected,
+            origin_commit = continuation.validate(
+                association, role, commit, origin_commit, claims
             )
         cutoff, origin_claims = role.previous, ()
         if origin_commit is not None:
@@ -768,6 +784,98 @@ def _published_origins(
     return tuple(qualified)
 
 
+def _ownership_mapping(git, manifest, paths, mappings):
+    if (
+        manifest.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
+        or manifest.identity.settings_digest != hashlib.sha256(b"{}").hexdigest()
+    ):
+        # An unqualified old format cannot establish an origin. It also
+        # cannot hide a later independently qualified current publication.
+        mapping, source, entries = None, None, {}
+    else:
+        mapping = next(
+            (row for row in manifest.source if row.path == "migration-record.json"),
+            None,
+        )
+        key = mapping, manifest.identity
+        if key not in mappings:
+            mapping, source, entries = _mapping(git, manifest)
+            # Retain only normalized requested association facts, never
+            # the record bytes or full parsed historical asset inventory.
+            mappings[key] = (
+                source,
+                {path: item for path, item in entries.items() if path in paths},
+            )
+        source, entries = mappings[key]
+    return mapping, source, entries
+
+
+def _terminal_attachment_disposition(
+    association, role, manifest, authorities, completed, observation, owners
+):
+    bound = authorities.get(manifest.operation_intent_commit)
+    if bound is None:
+        raise OSError("Attachment RESULT has no validated native authority")
+    graph, authority = bound
+    if (
+        authority.association_id != association.association_id
+        or manifest.generation != authority.generation + 1
+        or manifest.previous != authority.prepared_commit
+        or manifest.preimage != authority.before
+        or manifest.proposed != authority.proposed
+        or manifest.vault != authority.proposed
+    ):
+        raise OSError("Attachment disposition differs from current native proof")
+    if role.commit not in completed:
+        # An exact content-complete intermediate RESULT may remain in
+        # ancestry after recovery. Without its receipt it changes no
+        # effective ownership; the eventual terminal disposition does.
+        return owners, None
+    if (
+        completed[role.commit] is not graph
+        or graph.receipt.intent_commit != manifest.operation_intent_commit
+    ):
+        raise OSError("Attachment terminal RESULT has a different receipt")
+    original = graph.authorities[-1][1]
+    prepared, loaded = observation.owned[original.prepared_commit]
+    if loaded is None:
+        raise OSError("Attachment disposition has no canonical original plan")
+    owners = {
+        owner.source_path: owner
+        for owner in interpret_attachment_disposition(
+            tuple(owners.values()),
+            original=original,
+            final=graph.intent,
+            receipt=graph.receipt,
+            plan=loaded.saved.plan,
+        )
+    }
+    return owners, (graph, prepared, loaded)
+
+
+def _seed_local_attachment_owners(
+    association, role, manifest, mapping, source, entries, paths, owners
+):
+    selected = paths & entries.keys()
+    if (
+        manifest.generation == 1
+        and manifest.boundary == "local"
+        and manifest.review_object is None
+        and mapping is not None
+        and next((row for row in manifest.vault if row.path == mapping.path), None)
+        == mapping
+    ):
+        generated = {row.path: row for row in manifest.source}
+        actual = {row.path: row for row in manifest.vault}
+        for path in selected:
+            row = generated.get(path)
+            if row is None or actual.get(path) != row:
+                continue
+            owners[path] = _owner(
+                association, role, source, mapping, entries[path], row
+            )
+
+
 def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None):
     from .vault_apply import _OperationObservation
 
@@ -809,110 +917,33 @@ def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None
             if observation is not None and role.commit in observation.owned
             else _manifest(git, association, role)
         )
-        if (
-            manifest.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
-            or manifest.identity.settings_digest != hashlib.sha256(b"{}").hexdigest()
-        ):
-            # An unqualified old format cannot establish an origin. It also
-            # cannot hide a later independently qualified current publication.
-            mapping, source, entries = None, None, {}
-        else:
-            mapping = next(
-                (row for row in manifest.source if row.path == "migration-record.json"),
-                None,
-            )
-            key = mapping, manifest.identity
-            if key not in mappings:
-                mapping, source, entries = _mapping(git, manifest)
-                # Retain only normalized requested association facts, never
-                # the record bytes or full parsed historical asset inventory.
-                mappings[key] = (
-                    source,
-                    {path: item for path, item in entries.items() if path in paths},
-                )
-            source, entries = mappings[key]
-        selected = paths & entries.keys()
-        if (
-            manifest.generation == 1
-            and manifest.boundary == "local"
-            and manifest.review_object is None
-            and mapping is not None
-            and next((row for row in manifest.vault if row.path == mapping.path), None)
-            == mapping
-        ):
-            generated = {row.path: row for row in manifest.source}
-            actual = {row.path: row for row in manifest.vault}
-            for path in selected:
-                row = generated.get(path)
-                if row is None or actual.get(path) != row:
-                    continue
-                owners[path] = _owner(
-                    association, role, source, mapping, entries[path], row
-                )
+        mapping, source, entries = _ownership_mapping(git, manifest, paths, mappings)
+        _seed_local_attachment_owners(
+            association, role, manifest, mapping, source, entries, paths, owners
+        )
         if role.boundary == "result":
-            bound = authorities.get(manifest.operation_intent_commit)
-            if bound is None:
-                raise OSError("Attachment RESULT has no validated native authority")
-            graph, authority = bound
-            if (
-                authority.association_id != association.association_id
-                or manifest.generation != authority.generation + 1
-                or manifest.previous != authority.prepared_commit
-                or manifest.preimage != authority.before
-                or manifest.proposed != authority.proposed
-                or manifest.vault != authority.proposed
-            ):
-                raise OSError(
-                    "Attachment disposition differs from current native proof"
-                )
-            if role.commit in completed:
-                if (
-                    completed[role.commit] is not graph
-                    or graph.receipt.intent_commit != manifest.operation_intent_commit
+            owners, terminal = _terminal_attachment_disposition(
+                association, role, manifest, authorities, completed, observation, owners
+            )
+            if terminal is not None and mapping is not None:
+                graph, prepared, loaded = terminal
+                for row in _published_origins(
+                    graph,
+                    prepared,
+                    loaded,
+                    manifest,
+                    entries,
+                    paths,
+                    roles,
+                    observation,
                 ):
-                    raise OSError("Attachment terminal RESULT has a different receipt")
-                original = graph.authorities[-1][1]
-                prepared, loaded = observation.owned[original.prepared_commit]
-                if loaded is None:
-                    raise OSError(
-                        "Attachment disposition has no canonical original plan"
-                    )
-                owners = {
-                    owner.source_path: owner
-                    for owner in interpret_attachment_disposition(
-                        tuple(owners.values()),
-                        original=original,
-                        final=graph.intent,
-                        receipt=graph.receipt,
-                        plan=loaded.saved.plan,
-                    )
-                }
-                if mapping is not None:
-                    for row in _published_origins(
-                        graph,
-                        prepared,
-                        loaded,
-                        manifest,
-                        entries,
-                        paths,
-                        roles,
-                        observation,
+                    if (
+                        row.path not in owners
+                        or owners[row.path].identity.item_id != entries[row.path]
                     ):
-                        if (
-                            row.path not in owners
-                            or owners[row.path].identity.item_id != entries[row.path]
-                        ):
-                            owners[row.path] = _owner(
-                                association,
-                                role,
-                                source,
-                                mapping,
-                                entries[row.path],
-                                row,
-                            )
-            # An exact content-complete intermediate RESULT may remain in
-            # ancestry after recovery. Without its receipt it changes no
-            # effective ownership; the eventual terminal disposition does.
+                        owners[row.path] = _owner(
+                            association, role, source, mapping, entries[row.path], row
+                        )
         requested = requests.get(role.generation)
         if requested is not None:
             snapshots[role.generation] = {

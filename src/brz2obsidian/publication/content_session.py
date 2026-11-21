@@ -280,8 +280,6 @@ class ContentSession:
 
     def _prepare_retained(self, available, references, ledger, scope):
         """Mint records only after real Git has streamed and verified every file."""
-        from .git_payload import verify_blobs
-
         self._require_private_scope(scope, ledger)
         source = self._observation
         if type(source) is not _RetainedReviewRead:
@@ -289,6 +287,46 @@ class ContentSession:
         payload_bytes = sum(available[sha][1] for sha in references)
         self._budget(payload_bytes, (1 << 63) - 1)
         source.budget_spool(payload_bytes, self._spooled_bytes)
+
+        backings = self._spool_retained(source, available, references, ledger)
+        records = {}
+        for sha in sorted(references):
+            oid, size = available[sha]
+            reference = ImmutableContentReference(
+                content_id=self._namespace + ":" + uuid4().hex,
+                sha256=sha,
+                size=size,
+            )
+            roles = tuple(
+                (role, row.path)
+                for role in (
+                    "source",
+                    "vault",
+                    "preimage",
+                    "proposed",
+                    "review_content",
+                )
+                for row in getattr(source.manifest, role)
+                if row.object_id == oid
+            )
+            origin = (
+                "retained_git_review",
+                source.manifest.association_id,
+                source.commit,
+                roles,
+                oid,
+            )
+            record = _PreparedRegistration(
+                self, reference, backings[sha], "100644", origin
+            )
+            self._prepared[reference.content_id] = record
+            if type(record.backing) is _MemoryBacking:
+                self._spooled_bytes += size
+            records[sha] = record
+        return records
+
+    def _spool_retained(self, source, available, references, ledger):
+        from .git_payload import verify_blobs
 
         class Sink:
             def __init__(self, output):
@@ -330,41 +368,7 @@ class ContentSession:
                     else:
                         output.flush()
                         os.fsync(output.fileno())
-        records = {}
-        for sha in sorted(references):
-            oid, size = available[sha]
-            reference = ImmutableContentReference(
-                content_id=self._namespace + ":" + uuid4().hex,
-                sha256=sha,
-                size=size,
-            )
-            roles = tuple(
-                (role, row.path)
-                for role in (
-                    "source",
-                    "vault",
-                    "preimage",
-                    "proposed",
-                    "review_content",
-                )
-                for row in getattr(source.manifest, role)
-                if row.object_id == oid
-            )
-            origin = (
-                "retained_git_review",
-                source.manifest.association_id,
-                source.commit,
-                roles,
-                oid,
-            )
-            record = _PreparedRegistration(
-                self, reference, backings[sha], "100644", origin
-            )
-            self._prepared[reference.content_id] = record
-            if type(record.backing) is _MemoryBacking:
-                self._spooled_bytes += size
-            records[sha] = record
-        return records
+        return backings
 
     def _retained_semantic_bytes(self, registration, ledger, scope):
         if type(self._observation) is not _RetainedReviewRead:
@@ -1196,52 +1200,7 @@ class _DecodedImport:
                 pass
         backing = self.path
         if self.prepare:
-            if self.created is not None and self.size != self.created.size:
-                raise OSError("Created output differs from its recipe size")
-            origin = (
-                ("CREATED", self.created, self.occurrence)
-                if self.created is not None
-                else ("untrusted_review_input", self.record, self.occurrence)
-            )
-            previous = self.session._prepared_digests.get(digest)
-            if previous is not None:
-                self.session._check_prepared(previous, self.scope)
-                if previous.reference.size != self.size:
-                    raise OSError("Prepared digest has contradictory sizes")
-                with (
-                    closing(
-                        self.session._read_owned(
-                            previous.backing,
-                            previous.reference,
-                            self.ledger,
-                            self.scope,
-                        )
-                    ) as left,
-                    closing(
-                        self.session._read_owned(
-                            backing,
-                            reference,
-                            self.ledger,
-                            self.scope,
-                        )
-                    ) as right,
-                ):
-                    for a, b in zip_longest(left, right):
-                        if a != b:
-                            raise OSError("Prepared digest has unequal exact bytes")
-                backing = previous.backing
-            else:
-                backing = self.session._seal_small_backing(
-                    backing, reference, self.ledger, self.scope
-                )
-            record = _PreparedRegistration(
-                self.session, reference, backing, "100644", origin
-            )
-            if reference.content_id in self.session._prepared:
-                raise OSError("Prepared registration identity was already used")
-            self.session._prepared[reference.content_id] = record
-            self.session._prepared_digests[digest] = record
-            return record
+            return self._finish_prepared(reference, backing)
         previous = self.session._digests.get(digest)
         if previous is not None:
             prior, prior_backing = previous
@@ -1271,6 +1230,55 @@ class _DecodedImport:
         )
         self.session._digests[digest] = reference, backing
         return reference
+
+    def _finish_prepared(self, reference, backing):
+        digest = reference.sha256
+        if self.created is not None and self.size != self.created.size:
+            raise OSError("Created output differs from its recipe size")
+        origin = (
+            ("CREATED", self.created, self.occurrence)
+            if self.created is not None
+            else ("untrusted_review_input", self.record, self.occurrence)
+        )
+        previous = self.session._prepared_digests.get(digest)
+        if previous is not None:
+            self.session._check_prepared(previous, self.scope)
+            if previous.reference.size != self.size:
+                raise OSError("Prepared digest has contradictory sizes")
+            with (
+                closing(
+                    self.session._read_owned(
+                        previous.backing,
+                        previous.reference,
+                        self.ledger,
+                        self.scope,
+                    )
+                ) as left,
+                closing(
+                    self.session._read_owned(
+                        backing,
+                        reference,
+                        self.ledger,
+                        self.scope,
+                    )
+                ) as right,
+            ):
+                for a, b in zip_longest(left, right):
+                    if a != b:
+                        raise OSError("Prepared digest has unequal exact bytes")
+            backing = previous.backing
+        else:
+            backing = self.session._seal_small_backing(
+                backing, reference, self.ledger, self.scope
+            )
+        record = _PreparedRegistration(
+            self.session, reference, backing, "100644", origin
+        )
+        if reference.content_id in self.session._prepared:
+            raise OSError("Prepared registration identity was already used")
+        self.session._prepared[reference.content_id] = record
+        self.session._prepared_digests[digest] = record
+        return record
 
     def abort(self):
         self.finished = True
