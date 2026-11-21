@@ -1229,6 +1229,7 @@ def test_fresh_process_policy_view_never_allocates_inside_the_vault():
     )
     args = [
         sys.executable,
+        "-B",
         str(script),
         str(root),
         str(Path(__file__).resolve().parents[2] / "src"),

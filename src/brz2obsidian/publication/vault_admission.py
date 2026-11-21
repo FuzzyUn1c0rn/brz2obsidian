@@ -105,7 +105,7 @@ def _scratch_candidates():
         yield from map(Path, ("/tmp", "/var/tmp", "/usr/tmp"))
     try:
         yield Path.cwd()
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         yield Path(".")
 
 
