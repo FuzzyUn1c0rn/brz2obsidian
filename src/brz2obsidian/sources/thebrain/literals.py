@@ -234,6 +234,68 @@ def qualify_declaration_blocks(text):
     _declaration_parser().parse(text)
 
 
+def _literal_blocks(text, parser):
+    chars, offsets = [], []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        chars.append("\n" if char == "\r" else "\ufffd" if char == "\0" else char)
+        offsets.append(index)
+        index += 2 if text[index : index + 2] == "\r\n" else 1
+    normalized = _MappedText("".join(chars), offsets)
+    env, tokens = {}, []
+    if normalized:
+        state = _MappedBlock(normalized, parser, env, tokens)
+        parser.block.tokenize(state, state.line, state.lineMax)
+    return tokens, env
+
+
+def _literal_hits(text, allow_literal_tokens):
+    parser = _declaration_parser()
+    hits = []
+
+    def collect(state, silent, hits=hits):
+        begin = state.pos
+        success = html_inline(state, silent)
+        if (
+            success
+            and not silent
+            and _literal(
+                state.tokens[-1].content, allow_literal_tokens=allow_literal_tokens
+            )
+        ):
+            hits.append(
+                (state.src.offsets[begin], state.src.offsets[state.pos - 1] + 1)
+            )
+        return success
+
+    parser.inline.ruler.at("html_inline", collect)
+    tokens, env = _literal_blocks(text, parser)
+    for block in tokens:
+        if block.type == "html_block":
+            pattern = (
+                _CURRENT_TOKEN if allow_literal_tokens else r"<[A-Za-z][A-Za-z0-9-]*>"
+            )
+            match = re.match(r"[ \t]*(" + pattern + ")", block.content)
+            if match and _literal(match[1], allow_literal_tokens=allow_literal_tokens):
+                if not isinstance(block.content, _MappedText):
+                    _refuse(
+                        "unsupported_feature",
+                        "Markdown HTML provenance cannot be established",
+                    )
+                hits.append(
+                    (
+                        block.content.offsets[match.start(1)],
+                        block.content.offsets[match.end(1) - 1] + 1,
+                    )
+                )
+            else:
+                _literal(block.content, allow_literal_tokens=allow_literal_tokens)
+        elif block.type == "inline":
+            parser.inline.parse(block.content, parser, env, [])
+    return hits
+
+
 def adapt_literals(text, *, allow_literal_tokens=False):
     """Expose codepoint edits from scoped source into explicitly adapted text.
 
@@ -244,63 +306,7 @@ def adapt_literals(text, *, allow_literal_tokens=False):
     origins = list(range(len(text)))
     edits = {}
     while True:
-        parser = _declaration_parser()
-        hits = []
-
-        def collect(state, silent, hits=hits):
-            begin = state.pos
-            success = html_inline(state, silent)
-            if (
-                success
-                and not silent
-                and _literal(
-                    state.tokens[-1].content, allow_literal_tokens=allow_literal_tokens
-                )
-            ):
-                hits.append(
-                    (state.src.offsets[begin], state.src.offsets[state.pos - 1] + 1)
-                )
-            return success
-
-        parser.inline.ruler.at("html_inline", collect)
-        chars, offsets = [], []
-        index = 0
-        while index < len(text):
-            char = text[index]
-            chars.append("\n" if char == "\r" else "\ufffd" if char == "\0" else char)
-            offsets.append(index)
-            index += 2 if text[index : index + 2] == "\r\n" else 1
-        normalized = _MappedText("".join(chars), offsets)
-        env, tokens = {}, []
-        if normalized:
-            state = _MappedBlock(normalized, parser, env, tokens)
-            parser.block.tokenize(state, state.line, state.lineMax)
-        for block in tokens:
-            if block.type == "html_block":
-                pattern = (
-                    _CURRENT_TOKEN
-                    if allow_literal_tokens
-                    else r"<[A-Za-z][A-Za-z0-9-]*>"
-                )
-                match = re.match(r"[ \t]*(" + pattern + ")", block.content)
-                if match and _literal(
-                    match[1], allow_literal_tokens=allow_literal_tokens
-                ):
-                    if not isinstance(block.content, _MappedText):
-                        _refuse(
-                            "unsupported_feature",
-                            "Markdown HTML provenance cannot be established",
-                        )
-                    hits.append(
-                        (
-                            block.content.offsets[match.start(1)],
-                            block.content.offsets[match.end(1) - 1] + 1,
-                        )
-                    )
-                else:
-                    _literal(block.content, allow_literal_tokens=allow_literal_tokens)
-            elif block.type == "inline":
-                parser.inline.parse(block.content, parser, env, [])
+        hits = _literal_hits(text, allow_literal_tokens)
         if not hits:
             break
         for begin, end in sorted(set(hits), reverse=True):

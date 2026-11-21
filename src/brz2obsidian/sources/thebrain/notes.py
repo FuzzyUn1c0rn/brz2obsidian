@@ -410,177 +410,215 @@ def trace_inline_literal_ranges(text):
     return tuple(code), tuple(comments)
 
 
-def trace_note_references(
-    text: str, excluded=(), *, allow_qualified=False
-) -> tuple[ReferenceSpan, ...]:
-    """Trace parser-recognized active links into exact original text spans.
+def _reference_display_text(value, display_parser):
+    children = []
+    display_parser.inline.parse(value, display_parser, {}, children)
+    return "".join(
+        "\\<"
+        if t.type == "text_special" and t.markup == "\\<"
+        else t.content
+        if t.type in {"text", "text_special", "code_inline"}
+        else "\n"
+        if t.type in {"softbreak", "hardbreak"}
+        else ""
+        for t in children
+    )
 
-    Carry character provenance through normalization and block indentation;
-    never reconstruct a document from parsed tokens.
-    """
-    parser = MarkdownIt("commonmark", {"store_labels": True})
-    display_parser = MarkdownIt("commonmark")
-    hits = []
 
-    def display_text(value):
-        children = []
-        display_parser.inline.parse(value, display_parser, {}, children)
-        return "".join(
-            "\\<"
-            if t.type == "text_special" and t.markup == "\\<"
-            else t.content
-            if t.type in {"text", "text_special", "code_inline"}
-            else "\n"
-            if t.type in {"softbreak", "hardbreak"}
-            else ""
-            for t in children
+def _reference_destination(state, kind, begin, silent):
+    destination = parsed = None
+    label_end = -1
+    if kind in {"item", "image"} and not silent:
+        label_end = state.md.helpers.parseLinkLabel(
+            state, begin + (1 if kind == "image" else 0), kind == "item"
+        )
+    if (
+        kind in {"item", "image"}
+        and not silent
+        and label_end >= 0
+        and state.src[label_end + 1 : label_end + 2] == "("
+    ):
+        pos = label_end + 2
+        while pos < state.posMax and state.src[pos] in " \t\n":
+            pos += 1
+        parsed = state.md.helpers.parseLinkDestination(state.src, pos, state.posMax)
+        if parsed.ok:
+            destination = (pos, parsed.pos)
+    return label_end, destination, parsed
+
+
+def _check_qualified_destination(
+    text, state, parts, destination, parsed, allow_qualified
+):
+    if (
+        allow_qualified
+        and destination
+        and parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}
+    ):
+        # Check the parsed Markdown destination before URL
+        # normalization can repair malformed percent data.
+        _qualified_identities(parsed.str)
+        raw_destination = text[
+            state.src.offsets[destination[0]] : state.src.offsets[destination[1] - 1]
+            + 1
+        ]
+        if any(ord(c) < 32 or ord(c) == 127 for c in raw_destination):
+            _refuse(
+                "invalid_reference",
+                "Control character in qualified thought destination",
+            )
+
+
+def _references_omitted_subject(parts, excluded):
+    removed_subject = False
+    if parts.scheme == "brain" and re.fullmatch(r"[A-Za-z0-9_-]{22}", parts.netloc):
+        raw = base64.urlsafe_b64decode(parts.netloc + "==")
+        removed_subject = str(UUID(bytes_le=raw)) in excluded
+        if removed_subject and (
+            base64.urlsafe_b64encode(raw).decode().rstrip("=") != parts.netloc
+            or not parts.path.startswith("/")
+            or parts.query
+            or parts.fragment
+        ):
+            _refuse(
+                "invalid_reference",
+                "Invalid compact thought reference",
+            )
+    return removed_subject
+
+
+def _check_reference_form(token, kind, target, new, removed_subject):
+    if "label" in token.meta:
+        _refuse(
+            "unsupported_feature",
+            "Reference-style source-local references are unsupported",
+        )
+    if kind == "autolink":
+        _refuse(
+            "unsupported_feature",
+            "Source-local autolinks are unsupported",
+        )
+    if not removed_subject and not (
+        (kind == "item" and urlsplit(target).scheme.casefold() == "brain")
+        or (kind == "image" and target.startswith(".data/md-images/"))
+    ):
+        _refuse(
+            "unsupported_feature",
+            "Local reference form is outside reviewed inline thought/image coverage",
+        )
+    if not removed_subject and kind == "item" and any(t.type == "image" for t in new):
+        _refuse(
+            "unsupported_feature",
+            "An image-wrapped thought link is an unsupported rich-content form",
         )
 
-    def instrument(rule, kind):
-        def run(state, silent):
-            begin, count = state.pos, len(state.tokens)
-            destination = None
-            label_end = -1
-            if kind in {"item", "image"} and not silent:
-                label_end = state.md.helpers.parseLinkLabel(
-                    state, begin + (1 if kind == "image" else 0), kind == "item"
-                )
-            if (
-                kind in {"item", "image"}
-                and not silent
-                and label_end >= 0
-                and state.src[label_end + 1 : label_end + 2] == "("
-            ):
-                pos = label_end + 2
-                while pos < state.posMax and state.src[pos] in " \t\n":
-                    pos += 1
-                parsed = state.md.helpers.parseLinkDestination(
-                    state.src, pos, state.posMax
-                )
-                if parsed.ok:
-                    destination = (pos, parsed.pos)
-            success = rule(state, silent)
-            if success and not silent:
-                new = state.tokens[count:]
-                token = next(
-                    (
-                        t
-                        for t in new
-                        if t.type == ("image" if kind == "image" else "link_open")
-                    ),
-                    None,
-                )
-                if token:
-                    target = token.attrGet("src" if kind == "image" else "href")
-                    if target and _local(target):
-                        removed_subject = False
-                        parts = urlsplit(target)
-                        if (
-                            allow_qualified
-                            and destination
-                            and parts.netloc.casefold()
-                            in {"api.thebrain.com", "api.bra.in"}
-                        ):
-                            # Check the parsed Markdown destination before URL
-                            # normalization can repair malformed percent data.
-                            _qualified_identities(parsed.str)
-                            raw_destination = text[
-                                state.src.offsets[destination[0]] : state.src.offsets[
-                                    destination[1] - 1
-                                ]
-                                + 1
-                            ]
-                            if any(
-                                ord(c) < 32 or ord(c) == 127 for c in raw_destination
-                            ):
-                                _refuse(
-                                    "invalid_reference",
-                                    "Control character in qualified thought destination",
-                                )
-                        if parts.scheme == "brain" and re.fullmatch(
-                            r"[A-Za-z0-9_-]{22}", parts.netloc
-                        ):
-                            raw = base64.urlsafe_b64decode(parts.netloc + "==")
-                            removed_subject = str(UUID(bytes_le=raw)) in excluded
-                            if removed_subject and (
-                                base64.urlsafe_b64encode(raw).decode().rstrip("=")
-                                != parts.netloc
-                                or not parts.path.startswith("/")
-                                or parts.query
-                                or parts.fragment
-                            ):
-                                _refuse(
-                                    "invalid_reference",
-                                    "Invalid compact thought reference",
-                                )
-                        if "label" in token.meta:
-                            _refuse(
-                                "unsupported_feature",
-                                "Reference-style source-local references are unsupported",
-                            )
-                        if kind == "autolink":
-                            _refuse(
-                                "unsupported_feature",
-                                "Source-local autolinks are unsupported",
-                            )
-                        if not removed_subject and not (
-                            (
-                                kind == "item"
-                                and urlsplit(target).scheme.casefold() == "brain"
-                            )
-                            or (
-                                kind == "image"
-                                and target.startswith(".data/md-images/")
-                            )
-                        ):
-                            _refuse(
-                                "unsupported_feature",
-                                "Local reference form is outside reviewed inline thought/image coverage",
-                            )
-                        if (
-                            not removed_subject
-                            and kind == "item"
-                            and any(t.type == "image" for t in new)
-                        ):
-                            _refuse(
-                                "unsupported_feature",
-                                "An image-wrapped thought link is an unsupported rich-content form",
-                            )
-                        if removed_subject:
-                            hits[:] = [
-                                hit
-                                for hit in hits
-                                if not (
-                                    hit[0] is state.src
-                                    and begin <= hit[1]
-                                    and hit[2] <= state.pos
-                                )
-                            ]
-                        display = display_text(
-                            state.src[begin + (2 if kind == "image" else 1) : label_end]
-                        )
-                        hits.append(
-                            (
-                                state.src,
-                                begin,
-                                state.pos,
-                                "item" if removed_subject else kind,
-                                target,
-                                display,
-                                destination if kind == "image" else None,
-                            )
-                        )
-            return success
 
-        return run
+def _record_reference_hit(
+    state,
+    begin,
+    kind,
+    target,
+    label_end,
+    destination,
+    removed_subject,
+    display_parser,
+    hits,
+):
+    if removed_subject:
+        hits[:] = [
+            hit
+            for hit in hits
+            if not (hit[0] is state.src and begin <= hit[1] and hit[2] <= state.pos)
+        ]
+    display = _reference_display_text(
+        state.src[begin + (2 if kind == "image" else 1) : label_end],
+        display_parser,
+    )
+    hits.append(
+        (
+            state.src,
+            begin,
+            state.pos,
+            "item" if removed_subject else kind,
+            target,
+            display,
+            destination if kind == "image" else None,
+        )
+    )
 
-    parser.inline.ruler.at("link", instrument(link, "item"))
-    parser.inline.ruler.at("image", instrument(image, "image"))
-    parser.inline.ruler.at("autolink", instrument(autolink, "autolink"))
-    env = {}
-    tokens = _mapped_blocks(text, parser, env)
+
+def _reference_rule(rule, kind, text, excluded, allow_qualified, display_parser, hits):
+    def run(state, silent):
+        begin, count = state.pos, len(state.tokens)
+        label_end, destination, parsed = _reference_destination(
+            state, kind, begin, silent
+        )
+        success = rule(state, silent)
+        if success and not silent:
+            new = state.tokens[count:]
+            token = next(
+                (
+                    t
+                    for t in new
+                    if t.type == ("image" if kind == "image" else "link_open")
+                ),
+                None,
+            )
+            if token:
+                target = token.attrGet("src" if kind == "image" else "href")
+                if target and _local(target):
+                    parts = urlsplit(target)
+                    _check_qualified_destination(
+                        text, state, parts, destination, parsed, allow_qualified
+                    )
+                    removed_subject = _references_omitted_subject(parts, excluded)
+                    _check_reference_form(token, kind, target, new, removed_subject)
+                    _record_reference_hit(
+                        state,
+                        begin,
+                        kind,
+                        target,
+                        label_end,
+                        destination,
+                        removed_subject,
+                        display_parser,
+                        hits,
+                    )
+        return success
+
+    return run
+
+
+def _reference_span(
+    text, digest, source, begin, end, kind, target, display, destination
+):
+    if not isinstance(source, _MappedText) or not 0 <= begin < end <= len(source):
+        _refuse(
+            "unsupported_feature",
+            "Markdown reference provenance cannot be established",
+        )
+    start, stop = source.offsets[begin], source.offsets[end - 1] + 1
+    original = text[start:stop]
+    if original.replace("\r\n", "\n").replace("\r", "\n") != source[begin:end]:
+        _refuse(
+            "unsupported_feature",
+            "Markdown reference crosses transformed block syntax; exact adaptation is unsupported",
+        )
+    return ReferenceSpan(
+        start=start,
+        end=stop,
+        expected_original=original,
+        kind=kind,
+        target=target,
+        display_text=str(display),
+        document_digest=digest,
+        destination_start=source.offsets[destination[0]] if destination else None,
+        destination_end=source.offsets[destination[1] - 1] + 1 if destination else None,
+    )
+
+
+def _trace_reference_blocks(text, parser, tokens, env, hits, digest):
     result = []
-    digest = sha256(text.encode("utf-8")).hexdigest()
 
     def check_html(token):
         if token.type in {"html_inline", "html_block"}:
@@ -596,37 +634,49 @@ def trace_note_references(
         for child in children:
             check_html(child)
         for source, begin, end, kind, target, display, destination in hits:
-            if not isinstance(source, _MappedText) or not 0 <= begin < end <= len(
-                source
-            ):
-                _refuse(
-                    "unsupported_feature",
-                    "Markdown reference provenance cannot be established",
-                )
-            start, stop = source.offsets[begin], source.offsets[end - 1] + 1
-            original = text[start:stop]
-            if original.replace("\r\n", "\n").replace("\r", "\n") != source[begin:end]:
-                _refuse(
-                    "unsupported_feature",
-                    "Markdown reference crosses transformed block syntax; exact adaptation is unsupported",
-                )
             result.append(
-                ReferenceSpan(
-                    start=start,
-                    end=stop,
-                    expected_original=original,
-                    kind=kind,
-                    target=target,
-                    display_text=str(display),
-                    document_digest=digest,
-                    destination_start=source.offsets[destination[0]]
-                    if destination
-                    else None,
-                    destination_end=source.offsets[destination[1] - 1] + 1
-                    if destination
-                    else None,
+                _reference_span(
+                    text, digest, source, begin, end, kind, target, display, destination
                 )
             )
+    return result
+
+
+def trace_note_references(
+    text: str, excluded=(), *, allow_qualified=False
+) -> tuple[ReferenceSpan, ...]:
+    """Trace parser-recognized active links into exact original text spans.
+
+    Carry character provenance through normalization and block indentation;
+    never reconstruct a document from parsed tokens.
+    """
+    parser = MarkdownIt("commonmark", {"store_labels": True})
+    display_parser = MarkdownIt("commonmark")
+    hits = []
+
+    parser.inline.ruler.at(
+        "link",
+        _reference_rule(
+            link, "item", text, excluded, allow_qualified, display_parser, hits
+        ),
+    )
+    parser.inline.ruler.at(
+        "image",
+        _reference_rule(
+            image, "image", text, excluded, allow_qualified, display_parser, hits
+        ),
+    )
+    parser.inline.ruler.at(
+        "autolink",
+        _reference_rule(
+            autolink, "autolink", text, excluded, allow_qualified, display_parser, hits
+        ),
+    )
+    env = {}
+    tokens = _mapped_blocks(text, parser, env)
+    digest = sha256(text.encode("utf-8")).hexdigest()
+
+    result = _trace_reference_blocks(text, parser, tokens, env, hits, digest)
     result.sort(key=lambda span: span.start)
     if any(a.end > b.start for a, b in pairwise(result)):
         _refuse(

@@ -57,6 +57,22 @@ _TABLE_CODE_LINK = re.compile(
 )
 
 
+def _cell_code_end(row, index, source_offset, code_ranges):
+    end = index + 1
+    while end < len(row) and row[end] == "`":
+        end += 1
+    owned = next(
+        (finish for begin, finish in code_ranges if begin == source_offset + index),
+        None,
+    )
+    if owned is not None:
+        # A span crossing rows cannot become a faithful native cell.
+        if owned - source_offset > len(row) - 1:
+            return None
+        end = owned - source_offset
+    return end
+
+
 def _cells(row, source_offset, code_ranges, literal_ranges, *, legacy=False):
     """Only parser-owned code or escapes shelter an authored cell's pipes."""
     source_offset += len(row) - len(row.lstrip())
@@ -77,22 +93,9 @@ def _cells(row, source_offset, code_ranges, literal_ranges, *, legacy=False):
             index += 2
             continue
         if row[index] == "`":
-            end = index + 1
-            while end < len(row) and row[end] == "`":
-                end += 1
-            owned = next(
-                (
-                    finish
-                    for begin, finish in code_ranges
-                    if begin == source_offset + index
-                ),
-                None,
-            )
-            if owned is not None:
-                # A span crossing rows cannot become a faithful native cell.
-                if owned - source_offset > len(row) - 1:
-                    return None
-                end = owned - source_offset
+            end = _cell_code_end(row, index, source_offset, code_ranges)
+            if end is None:
+                return None
             index = end
             continue
         if row[index] == "|":
@@ -244,33 +247,7 @@ def _native_table_row(
     return row
 
 
-def adapt_note(
-    text,
-    *,
-    allow_literal_tokens=False,
-    preserve_table_colors=False,
-    legacy_tables=False,
-    previous_tables=False,
-    compact_tables=False,
-    legacy_table_boundaries=False,
-    preserve_table_warnings=False,
-    _provenance=None,
-):
-    """Return scoped adapted text, source-neutral exact edits and loss facts.
-
-    Parser block ownership protects code, comments and literal examples. All
-    references are traced after adaptation, so their offsets bind final text.
-    """
-    blank_cell = "" if compact_tables or previous_tables or legacy_tables else " "
-    separate_tables = not (
-        legacy_table_boundaries or legacy_tables or previous_tables or compact_tables
-    )
-    warn_tables = preserve_table_warnings or not separate_tables
-    original = text
-    text, literal_edits = adapt_literals(
-        text, allow_literal_tokens=allow_literal_tokens
-    )
-    literal_text = text
+def _split_insert_lines(text, _provenance):
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
     if lines and not lines[-1]:
         lines.pop()
@@ -283,6 +260,10 @@ def adapt_note(
             CopiedText(line, range(offset, offset + len(line)))
             for line, offset in zip(lines, offsets, strict=True)
         ]
+    return lines, offsets
+
+
+def _insert_tokens(text, _provenance):
     if _provenance is None:
         tokens = MarkdownIt("commonmark").parse(text)
     else:
@@ -292,6 +273,10 @@ def adapt_note(
             if token.type == "inline":
                 token.children = []
                 parser.inline.parse(token.content, parser, env, token.children)
+    return tokens
+
+
+def _insert_blocks(tokens):
     active, protected, quoted, headings = set(), set(), set(), []
     paragraph_lines = set()
     for index, token in enumerate(tokens):
@@ -320,501 +305,10 @@ def adapt_note(
                 )
             )
     active -= protected
-    inline_code, inline_comments = trace_inline_literal_ranges(text)
-    inline_literals = inline_code + inline_comments
-    edits, losses = [], []
+    return active, quoted, headings, paragraph_lines
 
-    def literal_owned(line, start, end):
-        begin, finish = offsets[line] + start, offsets[line] + end
-        return any(left < finish and begin < right for left, right in inline_literals)
 
-    def replace(line, before, after):
-        begin = offsets[line] + max(0, lines[line].find(before))
-        edits.append((begin, begin + len(before), after))
-
-    def loss(feature, declaration, change):
-        losses.append(
-            {"feature": feature, "declaration": declaration, "change": change}
-        )
-
-    # Callouts are containers: a sibling start needs an empty line at its
-    # parent's quote depth. A deeper start remains inside its parent.
-    seen = {}
-    for line in range(len(lines)):
-        raw = lines[line].rstrip("\r\n")
-        if line not in quoted:
-            seen.clear()
-        prefix = re.match(r" {0,3}(?:> ?)*", raw)[0]
-        content_start = (
-            len(prefix) + len(raw[len(prefix) :]) - len(raw[len(prefix) :].lstrip())
-        )
-        if content_start < len(raw) and literal_owned(
-            line, content_start, content_start + 1
-        ):
-            continue
-        if re.fullmatch(r" {0,3}(?:> ?)+\s*", raw):
-            for prior in list(seen):
-                if prior > raw.count(">"):
-                    del seen[prior]
-        if line not in active:
-            if not raw.strip():
-                seen.clear()
-            continue
-        match = _CALLOUT.fullmatch(raw)
-        declaration = re.match(r" {0,3}(?:> ?)+(\[!)", raw)
-        if declaration and literal_owned(
-            line, declaration.start(1), declaration.end(1)
-        ):
-            continue
-        if not match:
-            quote = re.match(r" {0,3}(?:> ?)+", raw)
-            if quote and any(prior > quote[0].count(">") for prior in seen):
-                replace(line, raw, quote[0] + "\n" + raw)
-                for prior in list(seen):
-                    if prior > quote[0].count(">"):
-                        del seen[prior]
-            if re.match(r" {0,3}(?:> ?)+\[![A-Za-z]", raw):
-                loss(
-                    "callout",
-                    raw,
-                    "Malformed callout declaration retained as source text; use [!type] with an optional folding flag and title.",
-                )
-            if not raw.strip():
-                seen.clear()
-            continue
-        prefix, kind, metadata, fold, title = match.groups()
-        if _provenance is not None:
-            prefix = raw[slice(*match.span(1))]
-            title = raw[slice(*match.span(5))]
-        kind = kind.lower()
-        if kind not in CALLOUTS:
-            loss(
-                "callout",
-                raw,
-                "Unsupported callout type retained as source text; change it to a supported native type.",
-            )
-            continue
-        depth = prefix.count(">")
-        if depth in seen:
-            separator = "\n" if depth == 1 else "> " * (depth - 1) + "\n"
-        else:
-            separator = ""
-        for prior in list(seen):
-            if prior > depth:
-                del seen[prior]
-        seen[depth] = line
-        after = raw
-        if metadata:
-            emoji = metadata.removeprefix("|icon:")
-            supported = (
-                metadata.startswith("|icon:")
-                and emoji
-                and not any(
-                    c.isspace() or c in "|:[]\\`<>" or c.isascii() for c in emoji
-                )
-            )
-            if supported:
-                label = title.strip() or kind.title()
-                after = prefix + f"[!{kind}]{fold} {emoji} " + label
-                change = "Emoji is visible in the title; Obsidian's native icon remains. Edit the title to adjust this fallback."
-            else:
-                # Preserve ambiguous metadata visibly without activating it.
-                safe = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", metadata)
-                after = (
-                    prefix
-                    + f"[!{kind}]{fold} "
-                    + (title.strip() or kind.title())
-                    + f" — {safe}"
-                )
-                change = "Unsupported or ambiguous icon metadata is retained visibly in the title; replace it with a title emoji or remove it manually."
-            loss("callout_icon", metadata, change)
-        if separator or after != raw:
-            replace(line, raw, separator + after)
-
-    declared_tables = set()
-    for line in sorted(active):
-        raw = lines[line].rstrip("\r\n")
-        if ":(table=" not in raw:
-            continue
-        declarations = [
-            candidate.start()
-            for candidate in re.finditer(re.escape(":(table="), raw)
-            if not literal_owned(line, candidate.start(), candidate.end())
-            and (
-                len(raw[: candidate.start()])
-                - len(raw[: candidate.start()].rstrip("\\"))
-            )
-            % 2
-            == 0
-        ]
-        if not declarations:
-            continue
-        style_match = (
-            _STYLE_TABLE.search(raw) if not (legacy_tables or previous_tables) else None
-        )
-        if style_match:
-            declarations = [
-                start
-                for start in declarations
-                if not style_match.start() < start < style_match.end()
-            ]
-        widths_match = _TABLE.search(raw)
-        colors_match = None if preserve_table_colors else _COLOR_TABLE.search(raw)
-        match = style_match or widths_match or colors_match
-        if match and match.start() not in declarations:
-            match = None
-        cells = (
-            _cells(
-                raw[: match.start()],
-                offsets[line],
-                inline_code,
-                inline_literals,
-                legacy=legacy_tables,
-            )
-            if match
-            else None
-        )
-        declaration = raw[declarations[0] :]
-        rows = []
-        cursor = line + 1
-        while (
-            cursor < len(lines)
-            and cursor in active
-            and lines[cursor].lstrip().startswith("|")
-        ):
-            row = lines[cursor].rstrip("\r\n")
-            rows.append(
-                _cells(
-                    row,
-                    offsets[cursor],
-                    inline_code,
-                    inline_literals,
-                    legacy=legacy_tables,
-                )
-            )
-            cursor += 1
-        declared_tables.update(range(line, cursor))
-        imported = bool(
-            style_match
-            and raw[: style_match.start()].strip() == "||"
-            and len(rows) == 1
-            and rows[0] is not None
-            and len(rows[0]) == 2
-        )
-        if imported:
-            cells = ["", ""]
-        separator_present = bool(
-            cells
-            and rows
-            and rows[0] is not None
-            and len(rows[0]) == len(cells)
-            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[0])
-        )
-        widths = widths_match[1].split(",") if widths_match else []
-        valid = bool(
-            cells
-            and len(cells) >= 1
-            and (
-                style_match
-                or colors_match
-                or widths_match
-                and len(widths) == len(cells) + 1
-                and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
-                and widths_match[2] == "default"
-            )
-            and len(declarations) == 1
-            and rows
-            and (
-                style_match
-                and separator_present
-                or all(r is not None and len(r) == len(cells) for r in rows)
-            )
-        )
-        if not valid:
-            loss(
-                "table",
-                declaration,
-                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
-            )
-            continue
-        header = (
-            _native_code_pipes(
-                raw[: match.start()], offsets[line], inline_code, legacy=True
-            )
-            if legacy_tables
-            else _native_table_row(
-                raw[: match.start()],
-                offsets[line],
-                inline_code,
-                inline_literals,
-                previous_tables=previous_tables,
-            )
-        )
-        if (
-            imported
-            or not (legacy_tables or previous_tables or compact_tables)
-            and all(not cell.strip() for cell in cells)
-        ):
-            header = "|" + "|".join(blank_cell for _ in cells) + "|"
-        separator_row = "|" + "|".join("---" for _ in cells) + "|"
-        if separator_present:
-            replacement = header
-        elif (
-            legacy_tables or previous_tables or all(not cell.strip() for cell in cells)
-        ):
-            replacement = header + "\n" + separator_row
-        else:
-            replacement = (
-                "|"
-                + "|".join(blank_cell for _ in cells)
-                + "|\n"
-                + separator_row
-                + "\n"
-                + header
-            )
-        if separate_tables and line and lines[line - 1].strip():
-            replacement = "\n" + replacement
-        replace(line, raw, replacement)
-        for row_line in range(line + 1, cursor):
-            row = lines[row_line].rstrip("\r\n")
-            native_row = (
-                _native_code_pipes(row, offsets[row_line], inline_code, legacy=True)
-                if legacy_tables
-                else _native_table_row(
-                    row,
-                    offsets[row_line],
-                    inline_code,
-                    inline_literals,
-                    previous_tables=previous_tables,
-                )
-            )
-            if (
-                separate_tables
-                and row_line == cursor - 1
-                and cursor < len(lines)
-                and lines[cursor].strip()
-            ):
-                native_row += "\n"
-            if row != native_row:
-                replace(row_line, row, native_row)
-        if warn_tables:
-            change = (
-                "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
-                if colors_match
-                else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
-            )
-            if style_match:
-                change = "Source table styling is omitted; the editable table uses native Markdown layout."
-            if not (legacy_tables or previous_tables or separator_present) and any(
-                cell.strip() for cell in cells
-            ):
-                change += " Blank native headings preserve every source row as data."
-            loss("table", declaration, change)
-
-    line = 0
-    while not legacy_tables and line < len(lines):
-        start = line
-        rows = []
-        while (
-            line < len(lines)
-            and line in active
-            and line in paragraph_lines
-            and line not in declared_tables
-            and lines[line].lstrip().startswith("|")
-        ):
-            rows.append(
-                _cells(
-                    lines[line].rstrip("\r\n"),
-                    offsets[line],
-                    inline_code,
-                    inline_literals,
-                )
-            )
-            line += 1
-        if len(rows) < 2 or rows[0] is None:
-            line = max(line, start + 1)
-            continue
-        imported = (
-            len(rows) == 2
-            and lines[start].strip() == "||"
-            and rows[1] is not None
-            and len(rows[1]) == 2
-        )
-        empty_header = not previous_tables and all(not cell.strip() for cell in rows[0])
-        width = len(rows[1] if imported else rows[0])
-        separator = (
-            not imported
-            and rows[1] is not None
-            and len(rows[1]) == width
-            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[1])
-        )
-        if not separator and (
-            width < 2
-            or any(row is None or len(row) != width for row in rows[int(imported) :])
-        ):
-            loss(
-                "table",
-                lines[start].rstrip("\r\n"),
-                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with matching columns and a header separator.",
-            )
-            continue
-        empty_row = "|" + "|".join(blank_cell for _ in range(width)) + "|"
-        header = empty_row + "\n|" + "|".join("---" for _ in range(width)) + "|"
-        for row_line in range(start, line):
-            raw = lines[row_line].rstrip("\r\n")
-            native = _native_table_row(
-                raw,
-                offsets[row_line],
-                inline_code,
-                inline_literals,
-                previous_tables=previous_tables,
-            )
-            if row_line == start:
-                if empty_header and separator and not compact_tables:
-                    native = empty_row
-                elif imported or empty_header and not separator:
-                    native = header
-                elif not separator:
-                    native = header + "\n" + native
-                if start and lines[start - 1].strip():
-                    native = "\n" + native
-            if row_line == line - 1 and line < len(lines) and lines[line].strip():
-                native += "\n"
-            if native != raw:
-                replace(row_line, raw, native)
-        if warn_tables and not separator:
-            loss(
-                "table",
-                lines[start].rstrip("\r\n"),
-                "The empty source header is expanded to the two-column data width; both data cells are preserved."
-                if imported
-                else "No column headings were declared; blank native headings preserve every source row as data.",
-            )
-
-    marker_prefixes = {
-        line: match[1]
-        for line in sorted(active)
-        if (
-            match := re.fullmatch(
-                r"( {0,3}(?:> ?)*)\[/toc/\]\s*", lines[line].rstrip("\r\n")
-            )
-        )
-        and not literal_owned(line, match.start() + len(match[1]), match.end())
-    }
-    markers = list(marker_prefixes)
-    excluded = set()
-    for marker in markers:
-        preceding = [h for h in headings if h[0] < marker]
-        if preceding:
-            last = preceding[-1]
-            if not any(lines[i].strip() for i in range(last[1], marker)):
-                excluded.add(last[0])
-    if markers:
-        selected = [h for h in headings if h[0] not in excluded]
-        identifiers, authored_identifiers = {}, {}
-        selected_lines = {h[0] if h[4] else h[1] - 2 for h in selected}
-        occurrences = {}
-        for line in sorted(active):
-            match = re.search(
-                r"(?:^| )\^([A-Za-z0-9-]+)\s*$", lines[line].rstrip("\r\n")
-            )
-            if match and not literal_owned(line, match.start(1) - 1, match.end(1)):
-                occurrences.setdefault(match[1], []).append(line)
-        retained = set()
-        for number, (line, end, level, _title, atx, authored, _math) in enumerate(
-            selected, 1
-        ):
-            anchor_line = line if atx else end - 2
-            raw = lines[anchor_line].rstrip("\r\n")
-            existing = re.search(r" \^([A-Za-z0-9-]+)\s*$", raw)
-            if existing:
-                authored_identifiers[line] = existing[1]
-            keep_existing = bool(
-                existing
-                and existing[1] not in retained
-                and all(p in selected_lines for p in occurrences[existing[1]])
-            )
-            if keep_existing:
-                identifiers[line] = existing[1]
-                retained.add(existing[1])
-            else:
-                identifier = f"brz-toc-heading-{number}"
-                while re.search(rf"\^{re.escape(identifier)}\b", text):
-                    identifier += "-generated"
-                identifiers[line] = identifier
-                if existing:
-                    loss(
-                        "table_of_contents",
-                        "^" + existing[1],
-                        "A duplicate authored block ID was replaced with a distinct ToC destination; update authored links to this heading if needed.",
-                    )
-            if not atx and end - line > 2:
-                before = "".join(lines[line:end]).rstrip("\r\n")
-                prefix = re.match(r" {0,3}(?:> ?)*", lines[line])[0]
-                content = authored
-                if _provenance is not None:
-                    content = CopiedText(authored, authored.offsets)
-                if existing:
-                    suffix = re.search(
-                        rf"(?:^| )\^{re.escape(existing[1])}\s*$", content
-                    )
-                    content = content[: suffix.start()] if suffix else content
-                replace(
-                    line,
-                    before,
-                    prefix
-                    + "#" * level
-                    + " "
-                    + (
-                        copied_join(" ", content.splitlines())
-                        if _provenance is not None
-                        else " ".join(content.splitlines())
-                    )
-                    + " ^"
-                    + identifiers[line],
-                )
-            elif not keep_existing:
-                closing = re.search(r"[ \t]+#+[ \t]*$", raw) if atx else None
-                base = raw[: closing.start()] if closing else raw
-                if existing:
-                    base = base[: existing.start()]
-                replace(anchor_line, raw, base + " ^" + identifiers[line])
-        entries, hierarchy = [], []
-        for line, _end, level, title, _atx, _authored, mathematics in selected:
-            while hierarchy and hierarchy[-1] >= level:
-                hierarchy.pop()
-            if line in authored_identifiers:
-                title = re.sub(
-                    rf"(?:^| )\^{re.escape(authored_identifiers[line])}\s*$", "", title
-                )
-            title = title.strip() or "Heading"
-            label = _toc_label(title, mathematics)
-            entries.append(
-                "  " * len(hierarchy) + f"- [{label}](#^{identifiers[line]})"
-            )
-            hierarchy.append(level)
-        for marker in markers:
-            replace(
-                marker,
-                "[/toc/]",
-                ("\n" + marker_prefixes[marker]).join(entries)
-                or "No authored headings.",
-            )
-    for line in sorted(active):
-        raw = lines[line].strip()
-        if (
-            re.fullmatch(r"\[/toc[^\]]*\]", raw)
-            and raw != "[/toc/]"
-            and not literal_owned(
-                line, lines[line].find(raw), lines[line].find(raw) + len("[/toc")
-            )
-        ):
-            loss(
-                "table_of_contents",
-                raw,
-                "Unsupported ToC declaration retained; use a standalone [/toc/] marker and reconvert, or author links manually.",
-            )
-
+def _finish_insert_edits(original, literal_edits, edits):
     source_edits = [
         (
             source_position(begin, literal_edits),
@@ -853,6 +347,10 @@ def adapt_note(
     text = original
     for edit in reversed(result):
         text = text[: edit.start] + edit.after + text[edit.end :]
+    return text, result
+
+
+def _bind_insert_provenance(text, _provenance, literal_text, edits):
     if _provenance is not None:
         mapped = CopiedText(literal_text, range(len(literal_text)))
         for begin, end, after in sorted(edits, key=lambda e: e[0], reverse=True):
@@ -865,7 +363,693 @@ def adapt_note(
                 "Insert origin mapping differs from exact adaptation",
             )
         _provenance.update(origins=mapped.origins, literal_text=literal_text)
-    return text, tuple(result), tuple(losses)
+
+
+class _NoteInserts:
+    def __init__(
+        self,
+        text,
+        provenance,
+        preserve_table_colors,
+        legacy_tables,
+        previous_tables,
+        compact_tables,
+        legacy_table_boundaries,
+        preserve_table_warnings,
+    ):
+        self.text = text
+        self._provenance = provenance
+        self.preserve_table_colors = preserve_table_colors
+        self.legacy_tables = legacy_tables
+        self.previous_tables = previous_tables
+        self.compact_tables = compact_tables
+        self.blank_cell = (
+            "" if compact_tables or previous_tables or legacy_tables else " "
+        )
+        self.separate_tables = not (
+            legacy_table_boundaries
+            or legacy_tables
+            or previous_tables
+            or compact_tables
+        )
+        self.warn_tables = preserve_table_warnings or not self.separate_tables
+        self.lines, self.offsets = _split_insert_lines(text, provenance)
+        tokens = _insert_tokens(text, provenance)
+        self.active, self.quoted, self.headings, self.paragraph_lines = _insert_blocks(
+            tokens
+        )
+        self.inline_code, inline_comments = trace_inline_literal_ranges(text)
+        self.inline_literals = self.inline_code + inline_comments
+        self.edits, self.losses = [], []
+        self.declared_tables = set()
+
+    def literal_owned(self, line, start, end):
+        begin, finish = self.offsets[line] + start, self.offsets[line] + end
+        return any(
+            left < finish and begin < right for left, right in self.inline_literals
+        )
+
+    def replace(self, line, before, after):
+        begin = self.offsets[line] + max(0, self.lines[line].find(before))
+        self.edits.append((begin, begin + len(before), after))
+
+    def loss(self, feature, declaration, change):
+        self.losses.append(
+            {"feature": feature, "declaration": declaration, "change": change}
+        )
+
+    def adapt_callouts(self):
+        # Callouts are containers: a sibling start needs an empty line at its
+        # parent's quote depth. A deeper start remains inside its parent.
+        seen = {}
+        for line in range(len(self.lines)):
+            self._adapt_callout_line(line, seen)
+
+    def _adapt_callout_line(self, line, seen):
+        raw = self.lines[line].rstrip("\r\n")
+        if line not in self.quoted:
+            seen.clear()
+        prefix = re.match(r" {0,3}(?:> ?)*", raw)[0]
+        content_start = (
+            len(prefix) + len(raw[len(prefix) :]) - len(raw[len(prefix) :].lstrip())
+        )
+        if content_start < len(raw) and self.literal_owned(
+            line, content_start, content_start + 1
+        ):
+            return
+        if re.fullmatch(r" {0,3}(?:> ?)+\s*", raw):
+            for prior in list(seen):
+                if prior > raw.count(">"):
+                    del seen[prior]
+        if line not in self.active:
+            if not raw.strip():
+                seen.clear()
+            return
+        match = _CALLOUT.fullmatch(raw)
+        declaration = re.match(r" {0,3}(?:> ?)+(\[!)", raw)
+        if declaration and self.literal_owned(
+            line, declaration.start(1), declaration.end(1)
+        ):
+            return
+        if not match:
+            self._plain_callout_line(line, raw, seen)
+            return
+        self._apply_callout(line, raw, match, seen)
+
+    def _plain_callout_line(self, line, raw, seen):
+        quote = re.match(r" {0,3}(?:> ?)+", raw)
+        if quote and any(prior > quote[0].count(">") for prior in seen):
+            self.replace(line, raw, quote[0] + "\n" + raw)
+            for prior in list(seen):
+                if prior > quote[0].count(">"):
+                    del seen[prior]
+        if re.match(r" {0,3}(?:> ?)+\[![A-Za-z]", raw):
+            self.loss(
+                "callout",
+                raw,
+                "Malformed callout declaration retained as source text; use [!type] with an optional folding flag and title.",
+            )
+        if not raw.strip():
+            seen.clear()
+
+    def _apply_callout(self, line, raw, match, seen):
+        prefix, kind, metadata, fold, title = match.groups()
+        if self._provenance is not None:
+            prefix = raw[slice(*match.span(1))]
+            title = raw[slice(*match.span(5))]
+        kind = kind.lower()
+        if kind not in CALLOUTS:
+            self.loss(
+                "callout",
+                raw,
+                "Unsupported callout type retained as source text; change it to a supported native type.",
+            )
+            return
+        depth = prefix.count(">")
+        if depth in seen:
+            separator = "\n" if depth == 1 else "> " * (depth - 1) + "\n"
+        else:
+            separator = ""
+        for prior in list(seen):
+            if prior > depth:
+                del seen[prior]
+        seen[depth] = line
+        after = raw
+        if metadata:
+            after = self._callout_title(prefix, kind, metadata, fold, title)
+        if separator or after != raw:
+            self.replace(line, raw, separator + after)
+
+    def _callout_title(self, prefix, kind, metadata, fold, title):
+        emoji = metadata.removeprefix("|icon:")
+        supported = (
+            metadata.startswith("|icon:")
+            and emoji
+            and not any(c.isspace() or c in "|:[]\\`<>" or c.isascii() for c in emoji)
+        )
+        if supported:
+            label = title.strip() or kind.title()
+            after = prefix + f"[!{kind}]{fold} {emoji} " + label
+            change = "Emoji is visible in the title; Obsidian's native icon remains. Edit the title to adjust this fallback."
+        else:
+            # Preserve ambiguous metadata visibly without activating it.
+            safe = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", metadata)
+            after = (
+                prefix
+                + f"[!{kind}]{fold} "
+                + (title.strip() or kind.title())
+                + f" — {safe}"
+            )
+            change = "Unsupported or ambiguous icon metadata is retained visibly in the title; replace it with a title emoji or remove it manually."
+        self.loss("callout_icon", metadata, change)
+        return after
+
+    def adapt_declared_tables(self):
+        for line in sorted(self.active):
+            self._adapt_declared_table(line)
+
+    def _adapt_declared_table(self, line):
+        raw = self.lines[line].rstrip("\r\n")
+        if ":(table=" not in raw:
+            return
+        declarations = [
+            candidate.start()
+            for candidate in re.finditer(re.escape(":(table="), raw)
+            if not self.literal_owned(line, candidate.start(), candidate.end())
+            and (
+                len(raw[: candidate.start()])
+                - len(raw[: candidate.start()].rstrip("\\"))
+            )
+            % 2
+            == 0
+        ]
+        if not declarations:
+            return
+        style_match = (
+            _STYLE_TABLE.search(raw)
+            if not (self.legacy_tables or self.previous_tables)
+            else None
+        )
+        if style_match:
+            declarations = [
+                start
+                for start in declarations
+                if not style_match.start() < start < style_match.end()
+            ]
+        widths_match = _TABLE.search(raw)
+        colors_match = None if self.preserve_table_colors else _COLOR_TABLE.search(raw)
+        match = style_match or widths_match or colors_match
+        if match and match.start() not in declarations:
+            match = None
+        cells = (
+            _cells(
+                raw[: match.start()],
+                self.offsets[line],
+                self.inline_code,
+                self.inline_literals,
+                legacy=self.legacy_tables,
+            )
+            if match
+            else None
+        )
+        declaration = raw[declarations[0] :]
+        rows, cursor = self._declared_rows(line)
+        self.declared_tables.update(range(line, cursor))
+        imported = bool(
+            style_match
+            and raw[: style_match.start()].strip() == "||"
+            and len(rows) == 1
+            and rows[0] is not None
+            and len(rows[0]) == 2
+        )
+        if imported:
+            cells = ["", ""]
+        separator_present = bool(
+            cells
+            and rows
+            and rows[0] is not None
+            and len(rows[0]) == len(cells)
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[0])
+        )
+        widths = widths_match[1].split(",") if widths_match else []
+        valid = bool(
+            cells
+            and len(cells) >= 1
+            and (
+                style_match
+                or colors_match
+                or widths_match
+                and len(widths) == len(cells) + 1
+                and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
+                and widths_match[2] == "default"
+            )
+            and len(declarations) == 1
+            and rows
+            and (
+                style_match
+                and separator_present
+                or all(r is not None and len(r) == len(cells) for r in rows)
+            )
+        )
+        if not valid:
+            self.loss(
+                "table",
+                declaration,
+                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
+            )
+            return
+        self._render_declared_table(
+            line, cursor, raw, match, cells, imported, separator_present
+        )
+        self._warn_declared_table(
+            style_match, colors_match, separator_present, cells, declaration
+        )
+
+    def _declared_rows(self, line):
+        rows = []
+        cursor = line + 1
+        while (
+            cursor < len(self.lines)
+            and cursor in self.active
+            and self.lines[cursor].lstrip().startswith("|")
+        ):
+            row = self.lines[cursor].rstrip("\r\n")
+            rows.append(
+                _cells(
+                    row,
+                    self.offsets[cursor],
+                    self.inline_code,
+                    self.inline_literals,
+                    legacy=self.legacy_tables,
+                )
+            )
+            cursor += 1
+        return rows, cursor
+
+    def _render_declared_table(
+        self, line, cursor, raw, match, cells, imported, separator_present
+    ):
+        header = (
+            _native_code_pipes(
+                raw[: match.start()], self.offsets[line], self.inline_code, legacy=True
+            )
+            if self.legacy_tables
+            else _native_table_row(
+                raw[: match.start()],
+                self.offsets[line],
+                self.inline_code,
+                self.inline_literals,
+                previous_tables=self.previous_tables,
+            )
+        )
+        if (
+            imported
+            or not (self.legacy_tables or self.previous_tables or self.compact_tables)
+            and all(not cell.strip() for cell in cells)
+        ):
+            header = "|" + "|".join(self.blank_cell for _ in cells) + "|"
+        separator_row = "|" + "|".join("---" for _ in cells) + "|"
+        if separator_present:
+            replacement = header
+        elif (
+            self.legacy_tables
+            or self.previous_tables
+            or all(not cell.strip() for cell in cells)
+        ):
+            replacement = header + "\n" + separator_row
+        else:
+            replacement = (
+                "|"
+                + "|".join(self.blank_cell for _ in cells)
+                + "|\n"
+                + separator_row
+                + "\n"
+                + header
+            )
+        if self.separate_tables and line and self.lines[line - 1].strip():
+            replacement = "\n" + replacement
+        self.replace(line, raw, replacement)
+        self._render_declared_rows(line, cursor)
+
+    def _render_declared_rows(self, line, cursor):
+        for row_line in range(line + 1, cursor):
+            row = self.lines[row_line].rstrip("\r\n")
+            native_row = (
+                _native_code_pipes(
+                    row, self.offsets[row_line], self.inline_code, legacy=True
+                )
+                if self.legacy_tables
+                else _native_table_row(
+                    row,
+                    self.offsets[row_line],
+                    self.inline_code,
+                    self.inline_literals,
+                    previous_tables=self.previous_tables,
+                )
+            )
+            if (
+                self.separate_tables
+                and row_line == cursor - 1
+                and cursor < len(self.lines)
+                and self.lines[cursor].strip()
+            ):
+                native_row += "\n"
+            if row != native_row:
+                self.replace(row_line, row, native_row)
+
+    def _warn_declared_table(
+        self, style_match, colors_match, separator_present, cells, declaration
+    ):
+        if self.warn_tables:
+            change = (
+                "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
+                if colors_match
+                else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
+            )
+            if style_match:
+                change = "Source table styling is omitted; the editable table uses native Markdown layout."
+            if not (
+                self.legacy_tables or self.previous_tables or separator_present
+            ) and any(cell.strip() for cell in cells):
+                change += " Blank native headings preserve every source row as data."
+            self.loss("table", declaration, change)
+
+    def adapt_plain_tables(self):
+        line = 0
+        while not self.legacy_tables and line < len(self.lines):
+            start = line
+            rows, line = self._plain_rows(line)
+            if len(rows) < 2 or rows[0] is None:
+                line = max(line, start + 1)
+                continue
+            self._adapt_plain_table(start, line, rows)
+
+    def _plain_rows(self, line):
+        rows = []
+        while (
+            line < len(self.lines)
+            and line in self.active
+            and line in self.paragraph_lines
+            and line not in self.declared_tables
+            and self.lines[line].lstrip().startswith("|")
+        ):
+            rows.append(
+                _cells(
+                    self.lines[line].rstrip("\r\n"),
+                    self.offsets[line],
+                    self.inline_code,
+                    self.inline_literals,
+                )
+            )
+            line += 1
+        return rows, line
+
+    def _adapt_plain_table(self, start, line, rows):
+        imported = (
+            len(rows) == 2
+            and self.lines[start].strip() == "||"
+            and rows[1] is not None
+            and len(rows[1]) == 2
+        )
+        empty_header = not self.previous_tables and all(
+            not cell.strip() for cell in rows[0]
+        )
+        width = len(rows[1] if imported else rows[0])
+        separator = (
+            not imported
+            and rows[1] is not None
+            and len(rows[1]) == width
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[1])
+        )
+        if not separator and (
+            width < 2
+            or any(row is None or len(row) != width for row in rows[int(imported) :])
+        ):
+            self.loss(
+                "table",
+                self.lines[start].rstrip("\r\n"),
+                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with matching columns and a header separator.",
+            )
+            return
+        self._render_plain_table(start, line, imported, empty_header, width, separator)
+        if self.warn_tables and not separator:
+            self.loss(
+                "table",
+                self.lines[start].rstrip("\r\n"),
+                "The empty source header is expanded to the two-column data width; both data cells are preserved."
+                if imported
+                else "No column headings were declared; blank native headings preserve every source row as data.",
+            )
+
+    def _render_plain_table(
+        self, start, line, imported, empty_header, width, separator
+    ):
+        empty_row = "|" + "|".join(self.blank_cell for _ in range(width)) + "|"
+        header = empty_row + "\n|" + "|".join("---" for _ in range(width)) + "|"
+        for row_line in range(start, line):
+            raw = self.lines[row_line].rstrip("\r\n")
+            native = _native_table_row(
+                raw,
+                self.offsets[row_line],
+                self.inline_code,
+                self.inline_literals,
+                previous_tables=self.previous_tables,
+            )
+            if row_line == start:
+                native = self._plain_header(
+                    start, native, empty_header, separator, imported, empty_row, header
+                )
+            if (
+                row_line == line - 1
+                and line < len(self.lines)
+                and self.lines[line].strip()
+            ):
+                native += "\n"
+            if native != raw:
+                self.replace(row_line, raw, native)
+
+    def _plain_header(
+        self, start, native, empty_header, separator, imported, empty_row, header
+    ):
+        if empty_header and separator and not self.compact_tables:
+            native = empty_row
+        elif imported or empty_header and not separator:
+            native = header
+        elif not separator:
+            native = header + "\n" + native
+        if start and self.lines[start - 1].strip():
+            native = "\n" + native
+        return native
+
+    def _toc_markers(self):
+        marker_prefixes = {
+            line: match[1]
+            for line in sorted(self.active)
+            if (
+                match := re.fullmatch(
+                    r"( {0,3}(?:> ?)*)\[/toc/\]\s*", self.lines[line].rstrip("\r\n")
+                )
+            )
+            and not self.literal_owned(line, match.start() + len(match[1]), match.end())
+        }
+        markers = list(marker_prefixes)
+        excluded = set()
+        for marker in markers:
+            preceding = [h for h in self.headings if h[0] < marker]
+            if preceding:
+                last = preceding[-1]
+                if not any(self.lines[i].strip() for i in range(last[1], marker)):
+                    excluded.add(last[0])
+        return marker_prefixes, markers, excluded
+
+    def _block_id_occurrences(self):
+        occurrences = {}
+        for line in sorted(self.active):
+            match = re.search(
+                r"(?:^| )\^([A-Za-z0-9-]+)\s*$", self.lines[line].rstrip("\r\n")
+            )
+            if match and not self.literal_owned(line, match.start(1) - 1, match.end(1)):
+                occurrences.setdefault(match[1], []).append(line)
+        return occurrences
+
+    def _toc_heading_ids(self, selected):
+        identifiers, authored_identifiers = {}, {}
+        selected_lines = {h[0] if h[4] else h[1] - 2 for h in selected}
+        occurrences = self._block_id_occurrences()
+        retained = set()
+        for number, (line, end, level, _title, atx, authored, _math) in enumerate(
+            selected, 1
+        ):
+            anchor_line = line if atx else end - 2
+            raw = self.lines[anchor_line].rstrip("\r\n")
+            existing = re.search(r" \^([A-Za-z0-9-]+)\s*$", raw)
+            if existing:
+                authored_identifiers[line] = existing[1]
+            keep_existing = bool(
+                existing
+                and existing[1] not in retained
+                and all(p in selected_lines for p in occurrences[existing[1]])
+            )
+            if keep_existing:
+                identifiers[line] = existing[1]
+                retained.add(existing[1])
+            else:
+                identifier = f"brz-toc-heading-{number}"
+                while re.search(rf"\^{re.escape(identifier)}\b", self.text):
+                    identifier += "-generated"
+                identifiers[line] = identifier
+                if existing:
+                    self.loss(
+                        "table_of_contents",
+                        "^" + existing[1],
+                        "A duplicate authored block ID was replaced with a distinct ToC destination; update authored links to this heading if needed.",
+                    )
+            self._set_heading_id(
+                line,
+                end,
+                level,
+                atx,
+                authored,
+                existing,
+                keep_existing,
+                raw,
+                anchor_line,
+                identifiers[line],
+            )
+        return identifiers, authored_identifiers
+
+    def _set_heading_id(
+        self,
+        line,
+        end,
+        level,
+        atx,
+        authored,
+        existing,
+        keep_existing,
+        raw,
+        anchor_line,
+        identifier,
+    ):
+        if not atx and end - line > 2:
+            before = "".join(self.lines[line:end]).rstrip("\r\n")
+            prefix = re.match(r" {0,3}(?:> ?)*", self.lines[line])[0]
+            content = authored
+            if self._provenance is not None:
+                content = CopiedText(authored, authored.offsets)
+            if existing:
+                suffix = re.search(rf"(?:^| )\^{re.escape(existing[1])}\s*$", content)
+                content = content[: suffix.start()] if suffix else content
+            self.replace(
+                line,
+                before,
+                prefix
+                + "#" * level
+                + " "
+                + (
+                    copied_join(" ", content.splitlines())
+                    if self._provenance is not None
+                    else " ".join(content.splitlines())
+                )
+                + " ^"
+                + identifier,
+            )
+        elif not keep_existing:
+            closing = re.search(r"[ \t]+#+[ \t]*$", raw) if atx else None
+            base = raw[: closing.start()] if closing else raw
+            if existing:
+                base = base[: existing.start()]
+            self.replace(anchor_line, raw, base + " ^" + identifier)
+
+    def _toc_entries(self, selected, identifiers, authored_identifiers):
+        entries, hierarchy = [], []
+        for line, _end, level, title, _atx, _authored, mathematics in selected:
+            while hierarchy and hierarchy[-1] >= level:
+                hierarchy.pop()
+            if line in authored_identifiers:
+                title = re.sub(
+                    rf"(?:^| )\^{re.escape(authored_identifiers[line])}\s*$", "", title
+                )
+            title = title.strip() or "Heading"
+            label = _toc_label(title, mathematics)
+            entries.append(
+                "  " * len(hierarchy) + f"- [{label}](#^{identifiers[line]})"
+            )
+            hierarchy.append(level)
+        return entries
+
+    def adapt_toc(self):
+        marker_prefixes, markers, excluded = self._toc_markers()
+        if markers:
+            selected = [h for h in self.headings if h[0] not in excluded]
+            identifiers, authored_identifiers = self._toc_heading_ids(selected)
+            entries = self._toc_entries(selected, identifiers, authored_identifiers)
+            for marker in markers:
+                self.replace(
+                    marker,
+                    "[/toc/]",
+                    ("\n" + marker_prefixes[marker]).join(entries)
+                    or "No authored headings.",
+                )
+        self._warn_malformed_toc()
+
+    def _warn_malformed_toc(self):
+        for line in sorted(self.active):
+            raw = self.lines[line].strip()
+            if (
+                re.fullmatch(r"\[/toc[^\]]*\]", raw)
+                and raw != "[/toc/]"
+                and not self.literal_owned(
+                    line,
+                    self.lines[line].find(raw),
+                    self.lines[line].find(raw) + len("[/toc"),
+                )
+            ):
+                self.loss(
+                    "table_of_contents",
+                    raw,
+                    "Unsupported ToC declaration retained; use a standalone [/toc/] marker and reconvert, or author links manually.",
+                )
+
+
+def adapt_note(
+    text,
+    *,
+    allow_literal_tokens=False,
+    preserve_table_colors=False,
+    legacy_tables=False,
+    previous_tables=False,
+    compact_tables=False,
+    legacy_table_boundaries=False,
+    preserve_table_warnings=False,
+    _provenance=None,
+):
+    """Return scoped adapted text, source-neutral exact edits and loss facts.
+
+    Parser block ownership protects code, comments and literal examples. All
+    references are traced after adaptation, so their offsets bind final text.
+    """
+    original = text
+    text, literal_edits = adapt_literals(
+        text, allow_literal_tokens=allow_literal_tokens
+    )
+    inserts = _NoteInserts(
+        text,
+        _provenance,
+        preserve_table_colors,
+        legacy_tables,
+        previous_tables,
+        compact_tables,
+        legacy_table_boundaries,
+        preserve_table_warnings,
+    )
+    inserts.adapt_callouts()
+    inserts.adapt_declared_tables()
+    inserts.adapt_plain_tables()
+    inserts.adapt_toc()
+    text, result = _finish_insert_edits(original, literal_edits, inserts.edits)
+    _bind_insert_provenance(text, _provenance, inserts.text, inserts.edits)
+    return text, tuple(result), tuple(inserts.losses)
 
 
 def bind_table_context(text, references):

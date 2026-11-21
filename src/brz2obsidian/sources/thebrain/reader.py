@@ -223,8 +223,7 @@ class BrzSession:
                 self.source_stream.close()
             raise
 
-    def _read(self):
-        source_hash = self.initial_hash
+    def _member_names(self):
         names = self.archive.namelist()
         folded = [unicodedata.normalize("NFC", name).casefold() for name in names]
         if len(set(folded)) != len(folded):
@@ -242,6 +241,9 @@ class BrzSession:
                 or (info.external_attr >> 16) & 0o170000 == 0o120000
             ):
                 _refuse("invalid_source", "Unsafe, encrypted or symlink archive member")
+        return names
+
+    def _verify_archive_bytes(self):
         for info in self.archive.infolist():
             try:
                 with self.archive.open(info) as stream:
@@ -261,6 +263,8 @@ class BrzSession:
                         "Invalid BRZ compressed data",
                     )
                 raise
+
+    def _read_scoped_records(self, names):
         if not set(ROOT_FILES).issubset(names):
             _refuse("invalid_source", "Missing required root record collections")
         records, evidence, accounting = {}, [], []
@@ -326,6 +330,9 @@ class BrzSession:
                 for name in ROOT_FILES
                 for index, _ in enumerate(records[name])
             ]
+        return records, evidence, accounting, original_relationships, dropped_members
+
+    def _reviewed_metadata(self, records):
         meta = records["meta.json"][0]
         if (
             type(meta.get("ExchangeFormatVersion")) is not int
@@ -348,7 +355,9 @@ class BrzSession:
                     "unsupported_feature",
                     f"The reviewed profile does not implement nonempty {name}",
                 )
-        thought_records = records["thoughts.json"]
+        return meta, brain_id
+
+    def _validate_live_identities(self, records):
         live_id_list = [
             record.get("Id")
             for name in ("thoughts.json", "links.json", "attachments.json")
@@ -359,54 +368,63 @@ class BrzSession:
             _refuse("invalid_source", "Duplicate live identities across source records")
         if any(record.get("Id") in live_ids for record in records["tombstones.json"]):
             _refuse("invalid_source", "A live identity also occurs in deleted history")
-        thoughts = {}
-        for index, record in enumerate(thought_records):
+
+    def _validate_thought(self, record, index, thoughts, brain_id):
+        key = _uuid(record["Id"])
+        validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
+        if "TagIds" in record and type(record["TagIds"]) is not list:
+            _refuse("invalid_source", "TagIds must be an array", (key,))
+        if record.get("Aliases"):
+            _refuse(
+                "unsupported_feature",
+                "Thought aliases are outside reviewed content coverage",
+                (key,),
+            )
+        if key in thoughts or record.get("BrainId") != brain_id:
+            _refuse(
+                "invalid_source",
+                "Duplicate thought or foreign collection ownership",
+            )
+        if (
+            type(record.get("Kind")) is not int
+            or record["Kind"] not in {1, 2, 4, 5}
+            or type(record.get("ACType", 0)) is not int
+            or record.get("ACType", 0) != 0
+            or record.get("TagIds")
+            or record.get("ThoughtTypeId")
+        ):
+            _refuse(
+                "unsupported_feature",
+                "Only reviewed ordinary, type, tag and system roles are supported",
+            )
+        if type(record.get("Name")) is not str or (
+            record.get("Label") is not None and type(record["Label"]) is not str
+        ):
+            _refuse("invalid_source", "Thought title/label is invalid")
+        if record.get("Label"):
             try:
-                key = _uuid(record["Id"])
-                validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
-                if "TagIds" in record and type(record["TagIds"]) is not list:
-                    _refuse("invalid_source", "TagIds must be an array", (key,))
-                if record.get("Aliases"):
-                    _refuse(
-                        "unsupported_feature",
-                        "Thought aliases are outside reviewed content coverage",
-                        (key,),
-                    )
-                if key in thoughts or record.get("BrainId") != brain_id:
-                    _refuse(
-                        "invalid_source",
-                        "Duplicate thought or foreign collection ownership",
-                    )
-                if (
-                    type(record.get("Kind")) is not int
-                    or record["Kind"] not in {1, 2, 4, 5}
-                    or type(record.get("ACType", 0)) is not int
-                    or record.get("ACType", 0) != 0
-                    or record.get("TagIds")
-                    or record.get("ThoughtTypeId")
-                ):
-                    _refuse(
-                        "unsupported_feature",
-                        "Only reviewed ordinary, type, tag and system roles are supported",
-                    )
-                if type(record.get("Name")) is not str or (
-                    record.get("Label") is not None and type(record["Label"]) is not str
-                ):
-                    _refuse("invalid_source", "Thought title/label is invalid")
-                if record.get("Label"):
-                    try:
-                        qualify_declaration_blocks(record["Label"])
-                    except MigrationRefused:
-                        _refuse(
-                            "unsupported_feature",
-                            "Thought label contains an unsupported HTML declaration block",
-                            (key,),
-                            evidence=(f"thoughts.json:{index}.Label",),
-                            guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
-                        )
+                qualify_declaration_blocks(record["Label"])
+            except MigrationRefused:
+                _refuse(
+                    "unsupported_feature",
+                    "Thought label contains an unsupported HTML declaration block",
+                    (key,),
+                    evidence=(f"thoughts.json:{index}.Label",),
+                    guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
+                )
+        return key
+
+    def _read_thoughts(self, records, brain_id):
+        thoughts = {}
+        for index, record in enumerate(records["thoughts.json"]):
+            try:
+                key = self._validate_thought(record, index, thoughts, brain_id)
                 thoughts[key] = record
             except MigrationRefused as error:
                 raise with_subject(error, "item", record.get("Name")) from None
+        return thoughts
+
+    def _entry_thought(self, records, brain_id, thoughts):
         setting_id = str(uuid5(UUID(brain_id), "20"))
         setting_keys = set()
         for record in records["settings.json"]:
@@ -436,7 +454,9 @@ class BrzSession:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
         if entry not in thoughts or thoughts[entry]["Kind"] != 1:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
+        return entry
 
+    def _attachment_diagnostics(self, records, thoughts):
         def attachment_refuse(code, message, affected=(), **details):
             try:
                 _refuse(code, message, affected, **details)
@@ -456,6 +476,56 @@ class BrzSession:
                             error, "item", thoughts[owner]["Name"]
                         ) from None
                 raise
+
+        return attachment_refuse
+
+    def _relationship_private(self, value):
+        # Validated scope supplies identity authority; malformed raw scalars
+        # still refuse, without disclosing nested excluded spellings.
+        if isinstance(value, str):
+            return contains_omitted_identity(value, self.scope_tokens, diagnostic=True)
+        if isinstance(value, dict):
+            return any(
+                self._relationship_private(key) or self._relationship_private(entry)
+                for key, entry in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(self._relationship_private(entry) for entry in value)
+        return False
+
+    def _read_relationships(self, records, thoughts, brain_id, original_relationships):
+        def relationship_refuse(code, message, affected=(), **details):
+            try:
+                _refuse(code, message, affected, **details)
+            except MigrationRefused as error:
+                name = " \u2014 ".join(
+                    thoughts[key]["Name"] for key in affected if key in thoughts
+                )
+                raise with_subject(error, "relationship", name) from None
+
+        return decode_relationships(
+            records["links.json"],
+            thoughts,
+            brain_id,
+            relationship_refuse,
+            _uuid,
+            private_record=lambda record: self._relationship_private(
+                original_relationships.get(record.get("Id"), record)
+            ),
+        )
+
+    def _read(self):
+        source_hash = self.initial_hash
+        names = self._member_names()
+        self._verify_archive_bytes()
+        records, evidence, accounting, original_relationships, dropped_members = (
+            self._read_scoped_records(names)
+        )
+        meta, brain_id = self._reviewed_metadata(records)
+        self._validate_live_identities(records)
+        thoughts = self._read_thoughts(records, brain_id)
+        entry = self._entry_thought(records, brain_id, thoughts)
+        attachment_refuse = self._attachment_diagnostics(records, thoughts)
 
         (
             assets,
@@ -520,40 +590,8 @@ class BrzSession:
             snapshot_digest=snapshot_digest,
         )
 
-        def relationship_private(value):
-            # Validated scope supplies identity authority; malformed raw scalars
-            # still refuse, without disclosing nested excluded spellings.
-            if isinstance(value, str):
-                return contains_omitted_identity(
-                    value, self.scope_tokens, diagnostic=True
-                )
-            if isinstance(value, dict):
-                return any(
-                    relationship_private(key) or relationship_private(entry)
-                    for key, entry in value.items()
-                )
-            if isinstance(value, (list, tuple)):
-                return any(relationship_private(entry) for entry in value)
-            return False
-
-        def relationship_refuse(code, message, affected=(), **details):
-            try:
-                _refuse(code, message, affected, **details)
-            except MigrationRefused as error:
-                name = " \u2014 ".join(
-                    thoughts[key]["Name"] for key in affected if key in thoughts
-                )
-                raise with_subject(error, "relationship", name) from None
-
-        relationships = decode_relationships(
-            records["links.json"],
-            thoughts,
-            brain_id,
-            relationship_refuse,
-            _uuid,
-            private_record=lambda record: relationship_private(
-                original_relationships.get(record.get("Id"), record)
-            ),
+        relationships = self._read_relationships(
+            records, thoughts, brain_id, original_relationships
         )
         assignments = decode_classifications(
             thoughts, relationships, attachment_refuse, _uuid

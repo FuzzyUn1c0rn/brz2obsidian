@@ -33,6 +33,41 @@ def relationship_problem(record, index, refuse, uuid, code, message, *, private=
     )
 
 
+def _relationship_kind(signature, roles):
+    kind = None
+    if (
+        signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 3), (1, 1, 1, 7)}
+        and roles == (1, 1)
+        or signature == (1, 1, 1, -1)
+        and roles in {(1, 2), (1, 4)}
+    ):
+        kind = "hierarchy"
+    elif (
+        signature in {(1, 3, 1, -1), (1, 3, 1, 3), (1, 3, 1, 5), (1, 3, 1, 7)}
+        and roles == (1, 1)
+        or signature == (1, 3, 1, -1)
+        and roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
+    ):
+        kind = "related"
+    elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:
+        kind = "system"
+    elif (
+        signature == (1, 1, 2, -1)
+        and roles == (2, 1)
+        or signature == (1, 1, 3, -1)
+        and roles == (2, 2)
+    ):
+        kind = "classification"
+    elif (
+        signature == (1, 1, 5, -1)
+        and roles in {(4, 1), (4, 2)}
+        or signature == (1, 1, 7, -1)
+        and roles == (4, 4)
+    ):
+        kind = "tag"
+    return kind
+
+
 def decode_relationships(
     records, thoughts, brain_id, refuse, uuid, *, private_record=None
 ):
@@ -76,37 +111,7 @@ def decode_relationships(
             )
         signature = tuple(record[field] for field in fields)
         roles = thoughts[a]["Kind"], thoughts[b]["Kind"]
-        kind = None
-        if (
-            signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 3), (1, 1, 1, 7)}
-            and roles == (1, 1)
-            or signature == (1, 1, 1, -1)
-            and roles in {(1, 2), (1, 4)}
-        ):
-            kind = "hierarchy"
-        elif (
-            signature in {(1, 3, 1, -1), (1, 3, 1, 3), (1, 3, 1, 5), (1, 3, 1, 7)}
-            and roles == (1, 1)
-            or signature == (1, 3, 1, -1)
-            and roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
-        ):
-            kind = "related"
-        elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:
-            kind = "system"
-        elif (
-            signature == (1, 1, 2, -1)
-            and roles == (2, 1)
-            or signature == (1, 1, 3, -1)
-            and roles == (2, 2)
-        ):
-            kind = "classification"
-        elif (
-            signature == (1, 1, 5, -1)
-            and roles in {(4, 1), (4, 2)}
-            or signature == (1, 1, 7, -1)
-            and roles == (4, 4)
-        ):
-            kind = "tag"
+        kind = _relationship_kind(signature, roles)
         if kind is None:
             problem(
                 "unsupported_feature",
