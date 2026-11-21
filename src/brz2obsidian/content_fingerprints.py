@@ -5,6 +5,7 @@ positions; they neither locate storage nor establish availability.
 """
 
 from dataclasses import dataclass
+from itertools import chain, repeat
 from types import UnionType
 from typing import Annotated, ForwardRef, Literal, Union, get_args, get_origin
 
@@ -34,7 +35,16 @@ def _content_branches(annotation, metadata):
     """Recognize only the source-pinned owned callable tagged declaration."""
     if not _CONTENT_DISPATCH_PINNED:
         return None
-    annotation, discriminator = _content_discriminator(annotation, metadata)
+    annotation_metadata = ()
+    if get_origin(annotation) is Annotated:
+        arguments = get_args(annotation)
+        annotation, annotation_metadata = arguments[0], arguments[1:]
+    discriminator = None
+    for rule in chain(metadata, annotation_metadata):
+        if type(rule) is Discriminator:
+            if discriminator is not None:
+                return None
+            discriminator = rule
     if (
         discriminator is None
         or discriminator.discriminator is not _content_kind
@@ -47,42 +57,21 @@ def _content_branches(annotation, metadata):
     branches = get_args(annotation)
     if len(branches) != 2:
         return None
-    if not _tag_matches(branches[0], InlineExactContent, "inline"):
-        return None
-    if not _tag_matches(branches[1], OpaqueContent, "opaque"):
-        return None
+    for branch, model, name in (
+        (branches[0], InlineExactContent, "inline"),
+        (branches[1], OpaqueContent, "opaque"),
+    ):
+        arguments = get_args(branch)
+        if (
+            get_origin(branch) is not Annotated
+            or len(arguments) != 2
+            or arguments[0] is not model
+            or type(arguments[1]) is not Tag
+            or type(arguments[1].tag) is not str
+            or arguments[1].tag != name
+        ):
+            return None
     return branches
-
-
-def _content_discriminator(annotation, metadata):
-    discriminator = None
-    for rule in metadata:
-        if type(rule) is Discriminator:
-            if discriminator is not None:
-                return annotation, None
-            discriminator = rule
-    if get_origin(annotation) is Annotated:
-        arguments = get_args(annotation)
-        for rule in arguments[1:]:
-            if type(rule) is Discriminator:
-                if discriminator is not None:
-                    return annotation, None
-                discriminator = rule
-        annotation = arguments[0]
-    return annotation, discriminator
-
-
-def _tag_matches(branch, model, name):
-    if get_origin(branch) is not Annotated:
-        return False
-    arguments = get_args(branch)
-    return (
-        len(arguments) == 2
-        and arguments[0] is model
-        and type(arguments[1]) is Tag
-        and type(arguments[1].tag) is str
-        and arguments[1].tag == name
-    )
 
 
 # Closed source-audited predicate inventories. Collection/raw work is additional
@@ -268,9 +257,13 @@ class _ModelInventory:
     def mapping(self, count):
         self.charge(steps=count, temporary=256 + 64 * count)
 
-    def error(self, depth):
+    @staticmethod
+    def _error_workspace(depth):
         # Code/context header, input reference and a bounded location tuple.
-        self.charge(temporary=256 + 16 * depth, steps=1)
+        return 256 + 16 * depth
+
+    def error(self, depth):
+        self.charge(temporary=self._error_workspace(depth), steps=1)
 
     @staticmethod
     def field(value, name, default=None):
@@ -630,23 +623,55 @@ class _ModelInventory:
             self.raw_work += 4 * size + 1
 
     def walk(self, annotation, item, depth, *, metadata=()):
-        if not self._begin_walk(annotation, item, depth, metadata):
+        if depth > self.depth_limit:
+            raise ModelBudgetError(self.nodes, self.steps)
+        self.charge(nodes=1, steps=1)
+        if (
+            self.validate
+            and (branches := _content_branches(annotation, metadata)) is not None
+        ):
+            self._tagged_content(branches, item, depth)
+            return
+        if self.validate and annotation is type(None) and item is not None:
+            # A None leaf checks the existing input, not its descendants.
+            # Keep a conservative input-alias and error/location allowance.
+            self.charge(temporary=16)
+            self.error(depth)
             return
         origin = get_origin(annotation)
-        if origin is Annotated:
-            self.walk(get_args(annotation)[0], item, depth + 1)
-            return
-        if origin in (Union, UnionType) or type(annotation) is tuple:
-            alternatives = (
-                annotation if type(annotation) is tuple else get_args(annotation)
+        alternatives = (
+            get_args(annotation)[:1]
+            if origin is Annotated
+            else annotation
+            if type(annotation) is tuple
+            else get_args(annotation)
+            if origin in (Union, UnionType)
+            else None
+        )
+        selected = (
+            annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
+            else type(item)
+            if annotation is None and isinstance(item, BaseModel)
+            else None
+        )
+        if alternatives is not None or selected is not None:
+            fields = (
+                resolved_contract_fields(selected)
+                if selected is not None
+                and selected.__module__ == "brz2obsidian.contracts"
+                else selected.model_fields
+                if selected is not None
+                else None
             )
-            for alternative in alternatives:
+            children = (
+                self._model_children(selected, item, fields, depth)
+                if alternatives is None
+                else zip(alternatives, repeat(item), repeat(()))
+            )
+            for child_type, child, child_metadata in children:
                 # Separate attempted graphs/errors; never merge equal field names.
-                self.walk(alternative, item, depth + 1)
-            return
-        selected = self._walk_model_type(annotation, item)
-        if selected is not None:
-            self._walk_model(selected, item, depth)
+                self.walk(child_type, child, depth + 1, metadata=child_metadata)
             return
         if type(item) is dict:
             self.charge(retained=256 + 64 * len(item))
@@ -671,65 +696,15 @@ class _ModelInventory:
                 )
                 self.walk(child_type, child, depth + 1)
             return
-        self._walk_leaf(item, depth)
+        retained, temporary, steps = self._leaf_cost(item, depth)
+        self.charge(retained=retained, temporary=temporary, steps=steps)
+        self.text += len(item) if type(item) is bytes else 0
 
-    def _begin_walk(self, annotation, item, depth, metadata):
-        if depth > self.depth_limit:
-            raise ModelBudgetError(self.nodes, self.steps)
-        self.charge(nodes=1, steps=1)
-        if self.validate:
-            branches = _content_branches(annotation, metadata)
-            if branches is not None:
-                self._tagged_content(branches, item, depth)
-                return False
-        if self.validate and annotation is type(None) and item is not None:
-            # A None leaf checks the existing input, not its descendants.
-            # Keep a conservative input-alias and error/location allowance.
-            self.charge(temporary=16)
-            self.error(depth)
-            return False
-        return True
-
-    @staticmethod
-    def _walk_model_type(annotation, item):
-        selected = (
-            annotation
-            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
-            else None
-        )
-        if selected is None and isinstance(item, BaseModel) and annotation is None:
-            selected = type(item)
-        return selected
-
-    def _walk_extra_fields(self, selected, item, fields, depth):
-        for name, child in item.items():
-            self.charge(steps=1)
-            if name not in fields:
-                self.walk(None, name, depth + 1)
-                if (
-                    self.validate
-                    and selected.__module__ == "brz2obsidian.contracts"
-                    and selected.model_config.get("extra") == "forbid"
-                    and type(name) is str
-                ):
-                    # Pinned Python-input ExtraForbidden retains the
-                    # already owned input by reference, not a rebuilt
-                    # subtree. Keep key/location and error charges.
-                    self.charge(nodes=1, steps=1, temporary=16)
-                else:
-                    self.walk(None, child, depth + 1)
-                self.error(depth + 1)
-
-    def _walk_model(self, selected, item, depth):
-        fields = (
-            resolved_contract_fields(selected)
-            if selected.__module__ == "brz2obsidian.contracts"
-            else selected.model_fields
-        )
+    def _model_children(self, selected, item, fields, depth):
         if isinstance(item, selected) and type(item) is not selected:
             raise ValueError("Caller-defined model subclasses are not owned schemas")
         if type(item) is not dict and type(item) is not selected:
-            self.error(depth)
+            self.charge(temporary=self._error_workspace(depth), steps=1)
             return
         self.charge(
             nodes=1 if self.validate else 0,
@@ -741,40 +716,57 @@ class _ModelInventory:
             child = self.field(
                 item, name, None if field.is_required() else field.default
             )
-            self.walk(field.annotation, child, depth + 1, metadata=field.metadata)
+            yield field.annotation, child, field.metadata
             if self.validate:
-                self.error(depth + 1)
-                self.charge(steps=1 + len(field.metadata))
-                if type(child) is str and any(
-                    getattr(rule, "pattern", None) is not None
-                    for rule in field.metadata
-                ):
-                    self.charge(steps=len(child))
-                if name in ("path", "current_path", "source_path", "target_path"):
-                    self.path(child)
-                if name == "reviewed_assumptions" and type(child) in (tuple, list):
-                    self.mapping(len(child))
+                self._charge_field_validation(name, field, child, depth)
         if self.validate:
             self.validators(selected, item, depth)
-        if type(item) is dict:
-            self._walk_extra_fields(selected, item, fields, depth)
+        if type(item) is not dict:
+            return
+        for name, child in item.items():
+            self.charge(steps=1)
+            if name not in fields:
+                yield None, name, ()
+                if (
+                    self.validate
+                    and selected.__module__ == "brz2obsidian.contracts"
+                    and selected.model_config.get("extra") == "forbid"
+                    and type(name) is str
+                ):
+                    # Pinned Python-input ExtraForbidden retains the
+                    # already owned input by reference, not a rebuilt
+                    # subtree. Keep key/location and error charges.
+                    self.charge(nodes=1, steps=1, temporary=16)
+                else:
+                    yield None, child, ()
+                self.error(depth + 1)
 
-    def _walk_leaf(self, item, depth):
+    def _charge_field_validation(self, name, field, child, depth):
+        self.error(depth + 1)
+        self.charge(steps=1 + len(field.metadata))
+        if type(child) is str and any(
+            getattr(rule, "pattern", None) is not None for rule in field.metadata
+        ):
+            self.charge(steps=len(child))
+        if name in ("path", "current_path", "source_path", "target_path"):
+            self.path(child)
+        if name == "reviewed_assumptions" and type(child) in (tuple, list):
+            self.mapping(len(child))
+
+    def _leaf_cost(self, item, depth):
         if isinstance(item, BaseModel):
             # A failed ordinary-union alternative does not inspect attributes of
             # a model of another type, but its error/work remains accounted.
-            self.error(depth)
-        elif type(item) is str:
-            self.charge(retained=64 + 4 * len(item))
-        elif type(item) is bytes:
-            self.charge(retained=64)
-            self.text += len(item)
-        elif item is None or type(item) is bool:
-            self.charge(retained=16)
-        elif type(item) is int:
-            self.charge(retained=64 + (item.bit_length() + 7) // 8)
-        else:
-            raise ValueError("Unsupported prospective model value")
+            return 0, self._error_workspace(depth), 1
+        if type(item) is str:
+            return 64 + 4 * len(item), 0, 0
+        if type(item) is bytes:
+            return 64, 0, 0
+        if item is None or type(item) is bool:
+            return 16, 0, 0
+        if type(item) is int:
+            return 64 + (item.bit_length() + 7) // 8, 0, 0
+        raise ValueError("Unsupported prospective model value")
 
 
 def prospective_model(
