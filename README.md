@@ -808,6 +808,20 @@ and build a wheel using the same environment:
 .\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
+### Repository rules
+
+Run the focused lint, formatting, and architecture checks used by GitHub Actions
+from the checkout root.
+
+```powershell
+.\.venv\Scripts\python.exe tools/check.py rules
+```
+
+The command compares the Python comment baseline to the local `origin/main` ref.
+Fetch the target branch if that ref is stale, or pass `--base-ref <commit>` to
+check against the base commit of a specific pull request. The [runner contract](docs/testing.md#automated-check-runner)
+describes the selection and receipts.
+
 ### Snyk dependency scan
 
 After completing the Python 3.14+ environment setup above, run Snyk from the

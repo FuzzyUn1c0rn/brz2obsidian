@@ -1,0 +1,46 @@
+name: Repository rules
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-architecture:
+    name: Lint and architecture
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.14.10'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install the base environment
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps -e .
+      - name: Check repository rules
+        env:
+          REPOSITORY_RULES_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: .\.venv\Scripts\python.exe tools/check.py rules --environment base --base-ref $env:REPOSITORY_RULES_BASE
+      - name: Upload check evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: repository-rules-evidence
+          path: |
+            tmp/checks/*/*.json
+            tmp/checks/*/*.jsonl
+            tmp/checks/*/*.log
+            tmp/checks/*/*.bin
+          if-no-files-found: ignore

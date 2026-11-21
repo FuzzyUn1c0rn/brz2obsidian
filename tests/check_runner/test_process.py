@@ -31,7 +31,7 @@ def checkout(tmp_path):
     (root / "tests" / "test_selected.py").write_text(
         "import brz2obsidian\n\n\n"
         "def test_selected():\n"
-        "    assert brz2obsidian.VERSION == 'selected'\n",
+        '    assert brz2obsidian.VERSION == "selected"\n',
         encoding="utf-8",
     )
     (root / "pyproject.toml").write_text(
@@ -106,6 +106,114 @@ def pytest_requirement(scope="full", selectors=None, **extra):
         "require_gui": False,
         **extra,
     }
+
+
+def write_rules_manifest(
+    checkout,
+    selector="tests/test_selected.py::test_selected",
+    check_ids=("lint", "format"),
+):
+    manifest = checkout / ".github" / "repository-rules.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "base",
+                "checks": [
+                    pytest_requirement(scope="focused", selectors=[selector]),
+                    *({"id": check_id} for check_id in check_ids),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def repository_rules(checkout):
+    return command(
+        "rules",
+        "--checkout",
+        checkout,
+        "--python",
+        sys.executable,
+        "--base-ref",
+        "HEAD",
+    )
+
+
+@pytest.mark.parametrize(
+    ("selector", "check_ids", "diagnostic"),
+    [
+        ("tests", ("lint", "format"), "explicit pytest node ID"),
+        ("tests/test_selected.py", ("lint", "format"), "explicit pytest node ID"),
+        ("tests/test_selected.py::test_selected", ("format",), "pytest, lint, format"),
+    ],
+)
+def test_repository_rules_reject_broad_or_incomplete_selection_before_running(
+    checkout, selector, check_ids, diagnostic
+):
+    write_rules_manifest(checkout, selector, check_ids)
+    result = repository_rules(checkout)
+
+    assert result.returncode == 2
+    assert ".github/repository-rules.json" in result.stderr
+    assert diagnostic in result.stderr
+    assert not (checkout / "tmp" / "checks").exists()
+
+
+@pytest.mark.parametrize("change", ["add", "duplicate", "move", "delete"])
+def test_repository_rules_require_comment_baseline_to_only_shrink(checkout, change):
+    write_rules_manifest(checkout)
+    original = "src/brz2obsidian/__init__.py"
+    adjacent = "src/brz2obsidian/legacy.py"
+    code = 'VERSION = "selected"\n'
+    inherited = "# Existing note\n"
+    fresh = "# New note\n"
+    inherited_hash = hashlib.sha256(inherited.rstrip().encode()).hexdigest()
+    fresh_hash = hashlib.sha256(fresh.rstrip().encode()).hexdigest()
+    baseline = checkout / "tools" / "comment-baseline.json"
+    (checkout / original).write_text(inherited + code, encoding="utf-8")
+    baseline.write_text(json.dumps({original: [inherited_hash]}), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "base",
+        ],
+        cwd=checkout,
+        check=True,
+    )
+
+    candidate = {
+        "add": {original: [inherited_hash, fresh_hash]},
+        "duplicate": {original: [inherited_hash, inherited_hash]},
+        "move": {adjacent: [inherited_hash]},
+        "delete": {},
+    }[change]
+    comments = {"add": inherited + fresh, "duplicate": inherited * 2}.get(change, "")
+    (checkout / original).write_text(comments + code, encoding="utf-8")
+    if change == "move":
+        (checkout / adjacent).write_text(inherited + code, encoding="utf-8")
+    baseline.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = repository_rules(checkout)
+
+    if change == "delete":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "VALID:" in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "tools/comment-baseline.json" in result.stderr
+        assert "deletion-only" in result.stderr
+        assert (adjacent if change == "move" else original) in result.stderr
+        assert not (checkout / "tmp" / "checks").exists()
 
 
 def test_lint_rejects_new_comments_even_with_an_existing_comment_removed(checkout):

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "environment": "base",
+  "checks": [
+    {
+      "id": "pytest",
+      "scope": "focused",
+      "selectors": [
+        "tests/test_architecture.py::test_generic_imports_do_not_load_source_cli_or_publication_implementations",
+        "tests/application/test_alternate_source.py::test_reusable_modules_import_only_inward_packages_including_initializers",
+        "tests/application/test_ui_architecture.py::test_backend_and_worker_have_no_gui_import_routes",
+        "tests/local_acceptance/test_driver.py::test_expected_fact_oracle_has_only_reviewed_imports"
+      ],
+      "keyword": null,
+      "marker": null,
+      "require_gui": false
+    },
+    { "id": "lint" },
+    { "id": "format" }
+  ]
+}

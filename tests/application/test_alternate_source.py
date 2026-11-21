@@ -435,7 +435,108 @@ if int(sys.argv[4]):
 
 
 def test_reusable_modules_import_only_inward_packages_including_initializers():
-    root = Path(brz2obsidian.__file__).parent
+    assert_inward_imports(Path(brz2obsidian.__file__).parent)
+
+
+@pytest.mark.parametrize(
+    ("filename", "source", "line"),
+    [
+        ("wiring.py", "import brz2obsidian.sources.thebrain\n", 1),
+        (
+            "planner.py",
+            'import importlib as loader\nloader.import_module("brz2obsidian.sources.thebrain")\n',
+            2,
+        ),
+        (
+            "planner.py",
+            'from importlib import import_module as load\nload("..sources.thebrain", __package__)\n',
+            2,
+        ),
+        ("planner.py", '__import__("brz2obsidian.sources.thebrain")\n', 1),
+    ],
+)
+def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(
+    tmp_path, filename, source, line
+):
+    root = tmp_path / "brz2obsidian"
+    (root / "core").mkdir(parents=True)
+    for original in Path(brz2obsidian.__file__).parent.glob("*.py"):
+        (root / original.name).touch()
+    (root / "core" / filename).write_text(source, encoding="utf-8")
+
+    with pytest.raises(pytest.fail.Exception) as failure:
+        assert_inward_imports(root)
+
+    message = str(failure.value)
+    assert (
+        f"src/brz2obsidian/core/{filename}:{line}:1: ADR 0001 forbids "
+        "brz2obsidian.sources.thebrain"
+    ) in message
+    assert "outer adapter or composition module" in message
+
+
+def call_argument(call, position, keyword):
+    if position < len(call.args):
+        return call.args[position]
+    return next((arg.value for arg in call.keywords if arg.arg == keyword), None)
+
+
+def literal_imports(nodes, package):
+    module_aliases = set()
+    functions = {"__import__"}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    module_aliases.add(alias.asname or "importlib")
+                elif alias.name.startswith("importlib.") and alias.asname is None:
+                    module_aliases.add("importlib")
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "importlib"
+            and not node.level
+        ):
+            functions.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "import_module"
+            )
+
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if not (
+            isinstance(target, ast.Name)
+            and target.id in functions
+            or isinstance(target, ast.Attribute)
+            and target.attr == "import_module"
+            and isinstance(target.value, ast.Name)
+            and target.value.id in module_aliases
+        ):
+            continue
+        name = call_argument(node, 0, "name")
+        if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+            continue
+        imported = name.value
+        if imported.startswith("."):
+            relative_to = call_argument(node, 1, "package")
+            if isinstance(relative_to, ast.Name) and relative_to.id == "__package__":
+                anchor = package
+            elif isinstance(relative_to, ast.Constant) and isinstance(
+                relative_to.value, str
+            ):
+                anchor = relative_to.value
+            else:
+                continue
+            try:
+                imported = importlib.util.resolve_name(imported, anchor)
+            except ImportError:
+                continue
+        yield node, imported
+
+
+def assert_inward_imports(root):
     allowed = {
         "contracts": {"brz2obsidian", "brz2obsidian.contracts"},
         "diagnostics": {"brz2obsidian", "brz2obsidian.contracts"},
@@ -819,6 +920,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.obsidian",
         },
     }
+    violations = []
     for area, permitted in allowed.items():
         files = (
             [root / (area + ".py")]
@@ -834,19 +936,21 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             else sorted((root / area).rglob("*.py"))
         )
         for file in files:
-            if file.name == "wiring.py":
+            relative = file.relative_to(root)
+            if relative.as_posix() == "application/wiring.py":
                 continue
             file_permitted = permitted | application_additions.get(
-                file.relative_to(root).as_posix(), set()
+                relative.as_posix(), set()
             )
-            relative = file.relative_to(root).with_suffix("")
-            module = "brz2obsidian." + ".".join(relative.parts)
+            module = "brz2obsidian." + ".".join(relative.with_suffix("").parts)
             package = (
                 module.removesuffix(".__init__")
                 if file.name == "__init__.py"
                 else module.rsplit(".", 1)[0]
             )
-            for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
+            nodes = tuple(ast.walk(ast.parse(file.read_text(encoding="utf-8"))))
+            dynamic = dict(literal_imports(nodes, package))
+            for node in nodes:
                 if isinstance(node, ast.Import):
                     imports = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom):
@@ -863,15 +967,25 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
                     imports = ([] if node.module is None else [base]) + [
                         base + "." + alias.name for alias in node.names
                     ]
+                elif node in dynamic:
+                    imports = [dynamic[node]]
                 else:
                     continue
                 for imported in imports:
-                    if imported.startswith("brz2obsidian"):
-                        assert any(
+                    if (
+                        imported.startswith("brz2obsidian")
+                        and imported not in {"brz2obsidian", "brz2obsidian.__version__"}
+                        and not any(
                             imported == prefix or imported.startswith(prefix + ".")
                             for prefix in file_permitted
                             if prefix != "brz2obsidian"
-                        ) or imported in {"brz2obsidian", "brz2obsidian.__version__"}, (
-                            file,
-                            imported,
                         )
+                    ):
+                        violations.append(
+                            f"src/brz2obsidian/{relative.as_posix()}:{node.lineno}:{node.col_offset + 1}: "
+                            f"ADR 0001 forbids {imported} here. Use an inward contract or "
+                            "keep the dependency in an outer adapter or composition module."
+                        )
+                        break
+    if violations:
+        pytest.fail("\n".join(violations), pytrace=False)

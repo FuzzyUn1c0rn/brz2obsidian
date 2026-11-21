@@ -117,6 +117,14 @@ coverage command. Handoff regressions in `.agents/skills/implement-spec-enhanced
 separate focused selection. Invalid, zero-test or entirely skipped selections
 do not establish passing pytest coverage.
 
+The `rules` command runs the same focused architecture, lint and format checks
+as the GitHub Actions workflow. It checks `.github/repository-rules.json` before
+launching tools, requires explicit pytest node IDs and compares the candidate
+comment fingerprints by path and count with `--base-ref` (default `origin/main`).
+The workflow supplies the base commit from the GitHub event. Use `--python` to
+reuse a project interpreter from another worktree. The command validates the
+receipt automatically and reports the base commit it checked.
+
 The lint check runs Ruff and enforces the [Python comment ratchet](adr/0014-ratchet-python-comments.md)
 on tracked and unignored Python source, tests, and tools. When retiring existing
 comments, run `python -m tools.check_lint --prune-comments` from the repository
