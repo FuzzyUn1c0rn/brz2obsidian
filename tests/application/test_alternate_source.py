@@ -504,6 +504,46 @@ def inward_import_root(tmp_path):
             4,
             "brz2obsidian.sources.thebrain",
         ),
+        (
+            "planner.py",
+            (
+                "def run(callback):\n"
+                "    from importlib import import_module as load\n"
+                '    module = load("brz2obsidian.sources.thebrain")\n'
+                "    load = callback\n"
+                "    return load(module)\n"
+            ),
+            3,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run(callback):\n"
+                "    load = callback\n"
+                "    from importlib import import_module as load\n"
+                '    return load("brz2obsidian.sources.thebrain")\n'
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "import importlib as loader\n"
+                "class Registry:\n"
+                '    module = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    loader = None\n"
+            ),
+            3,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            '__import__("sources.thebrain", {"__package__": "brz2obsidian"}, level=1)\n',
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
     ],
 )
 def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(
@@ -539,6 +579,15 @@ def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(
             "from importlib import import_module as load\n\n"
             "def use_collaborator(callback):\n"
             "    load = callback\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "from importlib import import_module as load\n"
+            "def run(take_callback, callback):\n"
+            "    if take_callback:\n"
+            "        load = callback\n"
+            "    else:\n"
+            "        from importlib import import_module as load\n"
             '    return load("brz2obsidian.sources.thebrain")\n'
         ),
     ],

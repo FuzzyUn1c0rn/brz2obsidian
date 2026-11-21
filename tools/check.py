@@ -794,8 +794,10 @@ def check_comment_baseline(root, base_ref, candidate):
         stale = []
         for source, extra in additions.items():
             removed = inherited.get(source, Counter()) - original.get(source, Counter())
-            if extra & removed:
+            inherited_extra = extra & removed
+            if inherited_extra:
                 stale.append(source)
+                additions[source] -= inherited_extra
         if stale:
             print(
                 f"{path}: checkout is missing target branch changes from {base}. "
@@ -804,16 +806,17 @@ def check_comment_baseline(root, base_ref, candidate):
                 + "\nMerge or rebase onto the target branch and rerun the rules check.",
                 file=sys.stderr,
             )
-            return False
-
-    print(
-        f"{path}: deletion-only under ADR 0014. New fingerprints relative to {base}:\n"
-        + "\n".join(
-            f"{source} (+{extra.total()})" for source, extra in additions.items()
+    if any(additions.values()):
+        print(
+            f"{path}: deletion-only under ADR 0014. New fingerprints relative to {base}:\n"
+            + "\n".join(
+                f"{source} (+{extra.total()})"
+                for source, extra in additions.items()
+                if extra
+            )
+            + "\nRemove the new fingerprints and any corresponding new Python comments.",
+            file=sys.stderr,
         )
-        + "\nRemove the new fingerprints and any corresponding new Python comments.",
-        file=sys.stderr,
-    )
     return False
 
 

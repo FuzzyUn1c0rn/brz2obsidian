@@ -220,7 +220,10 @@ def test_repository_rules_require_comment_baseline_to_only_shrink(checkout, chan
         assert not (checkout / "tmp" / "checks").exists()
 
 
-def test_repository_rules_explain_inherited_fingerprints_removed_on_target(checkout):
+@pytest.mark.parametrize("also_added_comment", [False, True], ids=["stale", "mixed"])
+def test_repository_rules_explain_inherited_fingerprints_removed_on_target(
+    checkout, also_added_comment
+):
     write_rules_manifest(checkout)
     source = "src/brz2obsidian/__init__.py"
     code = 'VERSION = "selected"\n'
@@ -237,14 +240,31 @@ def test_repository_rules_explain_inherited_fingerprints_removed_on_target(check
     baseline.write_text("{}\n", encoding="utf-8")
     commit_checkout(checkout, "remove a grandfathered comment")
     subprocess.run(["git", "switch", "--detach", "target^"], cwd=checkout, check=True)
+    if also_added_comment:
+        added = "src/brz2obsidian/regression.py"
+        fresh = "# New note"
+        (checkout / added).write_text(f"{fresh}\n{code}", encoding="utf-8")
+        baseline.write_text(
+            json.dumps(
+                {
+                    source: [hashlib.sha256(note.encode()).hexdigest()],
+                    added: [hashlib.sha256(fresh.encode()).hexdigest()],
+                }
+            ),
+            encoding="utf-8",
+        )
 
     stale = repository_rules(checkout, "target")
 
     assert stale.returncode == 1, stale.stdout + stale.stderr
     assert "checkout is missing target branch changes" in stale.stderr
     assert "Merge or rebase onto the target branch" in stale.stderr
-    assert "Remove the new fingerprints" not in stale.stderr
     assert source in stale.stderr
+    if also_added_comment:
+        assert f"{added} (+1)" in stale.stderr
+        assert "Remove the new fingerprints" in stale.stderr
+        return
+    assert "Remove the new fingerprints" not in stale.stderr
 
     subprocess.run(["git", "merge", "--ff-only", "target"], cwd=checkout, check=True)
     updated = repository_rules(checkout, "target")
