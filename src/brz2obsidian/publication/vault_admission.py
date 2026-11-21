@@ -100,12 +100,12 @@ def _scratch_candidates():
     if os.name == "nt":
         yield Path(os.path.expanduser(r"~\AppData\Local\Temp"))
         yield Path(os.path.expandvars(r"%SYSTEMROOT%\Temp"))
-        yield from map(Path, (r"C:\TEMP", r"C:\TMP", r"\TEMP", r"\TMP"))
+        yield from map(Path, (r"c:\temp", r"c:\tmp", r"\temp", r"\tmp"))
     else:
         yield from map(Path, ("/tmp", "/var/tmp", "/usr/tmp"))
     try:
         yield Path.cwd()
-    except OSError:
+    except (AttributeError, OSError):
         yield Path(".")
 
 
