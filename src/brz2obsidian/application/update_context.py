@@ -60,6 +60,45 @@ class UpdateContext:
     def draft_pending(self):
         return self._edit is not None or bool(self._reference_drafts)
 
+    def _prepare_role(self, vault, source, kind, original_source, cancel):
+        if kind not in (
+            "source_update",
+            "onboarding",
+            "format_transition",
+            "attachment_cleanup",
+        ):
+            raise ValueError("Unsupported update role")
+
+        from .operations import Operations
+
+        if type(self._operations) is Operations:
+            return self._prepare_owned_role(
+                vault, source, kind, original_source, cancel
+            )
+        if kind == "attachment_cleanup":
+            return self._operations.prepare_attachment_cleanup(vault)
+        if kind == "onboarding":
+            return self._operations.prepare_onboarding(
+                vault, source, original_source=original_source
+            )
+        if kind == "format_transition":
+            return self._operations.prepare_format_transition(vault, source)
+        return self._operations.prepare_update(vault, source)
+
+    def _prepare_owned_role(self, vault, source, kind, original_source, cancel):
+        self._owner = self._operations._new_owned_preparation()
+        if kind == "source_update":
+            result = self._owner.prepare(vault, source, cancel=cancel)
+        elif kind == "onboarding":
+            result = self._owner.prepare(
+                vault, source, kind=kind, original_source=original_source, cancel=cancel
+            )
+        else:
+            result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
+        if result.preparation is None:
+            self._retire_owner()
+        return result
+
     def prepare(
         self,
         vault,
@@ -98,56 +137,7 @@ class UpdateContext:
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        if kind == "attachment_cleanup":
-            from .operations import Operations
-
-            if type(self._operations) is Operations:
-                self._owner = self._operations._new_owned_preparation()
-                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
-                if result.preparation is None:
-                    self._retire_owner()
-            else:
-                result = self._operations.prepare_attachment_cleanup(vault)
-        elif kind == "onboarding":
-            from .operations import Operations
-
-            if type(self._operations) is Operations:
-                self._owner = self._operations._new_owned_preparation()
-                result = self._owner.prepare(
-                    vault,
-                    source,
-                    kind=kind,
-                    original_source=original_source,
-                    cancel=cancel,
-                )
-                if result.preparation is None:
-                    self._retire_owner()
-            else:
-                result = self._operations.prepare_onboarding(
-                    vault, source, original_source=original_source
-                )
-        elif kind == "format_transition":
-            from .operations import Operations
-
-            if type(self._operations) is Operations:
-                self._owner = self._operations._new_owned_preparation()
-                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
-                if result.preparation is None:
-                    self._retire_owner()
-            else:
-                result = self._operations.prepare_format_transition(vault, source)
-        elif kind == "source_update":
-            from .operations import Operations
-
-            if type(self._operations) is Operations:
-                self._owner = self._operations._new_owned_preparation()
-                result = self._owner.prepare(vault, source, cancel=cancel)
-                if result.preparation is None:
-                    self._retire_owner()
-            else:
-                result = self._operations.prepare_update(vault, source)
-        else:
-            raise ValueError("Unsupported update role")
+        result = self._prepare_role(vault, source, kind, original_source, cancel)
         if result.preparation is not None:
             prepared = UpdatePreparation.model_validate(result.preparation)
             locator = prepared.locator
@@ -431,6 +421,33 @@ class UpdateContext:
             next_reference_offset=following,
         )
 
+    def _accept_choice(self, result, requirement_id):
+        if self._owner is not None:
+            self._owner._clear_readonly_initial()
+        if self._edit is not None:
+            self._edit.close()
+            self._edit = None
+        self._reference_drafts.pop(requirement_id, None)
+        self._preparation = UpdatePreparation.model_validate(result.preparation)
+        self._revision += 1
+        self._binding = self._binding.model_copy(
+            update={
+                "generation": self._preparation.review.proposal.generation,
+                "revision": self._revision,
+            }
+        )
+
+    def _edited_choice_content(self, edit_handle, requirement_id, assumptions_digest):
+        if self._edit is None:
+            raise EditFailure("edit_changed")
+        handle = self._checked_edit(edit_handle)
+        if (
+            handle.requirement_id != requirement_id
+            or handle.assumptions_digest != assumptions_digest
+        ):
+            raise EditFailure("edit_changed")
+        return self._edit.content()
+
     def choose(
         self,
         binding,
@@ -451,22 +468,16 @@ class UpdateContext:
             return UpdateContextResult(
                 status="refused", code="context_changed", kind=self._kind
             )
+        if self._edit is not None and choice != "edited":
+            return self._uncommitted_draft()
         edited = None
-        if self._edit is not None:
-            if choice != "edited":
-                return self._uncommitted_draft()
+        if choice == "edited":
             try:
-                handle = self._checked_edit(edit_handle)
-                if (
-                    handle.requirement_id != requirement_id
-                    or handle.assumptions_digest != assumptions_digest
-                ):
-                    raise EditFailure("edit_changed")
-                edited = self._edit.content()
+                edited = self._edited_choice_content(
+                    edit_handle, requirement_id, assumptions_digest
+                )
             except EditFailure as error:
                 return self._edit_refusal(str(error))
-        elif choice == "edited":
-            return self._edit_refusal("edit_changed")
         try:
             chooser = (
                 self._operations.resolve_update_choice
@@ -509,20 +520,7 @@ class UpdateContext:
             )
         self._remember(result)
         if result.code == "accepted" and result.preparation is not None:
-            if self._owner is not None:
-                self._owner._clear_readonly_initial()
-            if self._edit is not None:
-                self._edit.close()
-                self._edit = None
-            self._reference_drafts.pop(requirement_id, None)
-            self._preparation = UpdatePreparation.model_validate(result.preparation)
-            self._revision += 1
-            self._binding = self._binding.model_copy(
-                update={
-                    "generation": self._preparation.review.proposal.generation,
-                    "revision": self._revision,
-                }
-            )
+            self._accept_choice(result, requirement_id)
         return self._source_projection(
             UpdateContextResult(
                 status=result.status,
@@ -1072,19 +1070,51 @@ class UpdateContext:
         self._last_status = "unresolved"
         self._last_actions = ()
 
+    def _close_history(self, binding, choice):
+        if self.draft_pending and choice == "continue":
+            return self._uncommitted_draft(code="continue_review")
+        result = self._history.close(binding, choice=choice)
+        if result.code == "context_closed":
+            self._retire_review_resources()
+        self._remember(result)
+        return result
+
+    def _continue_source_review(self):
+        if self._edit is not None or self._reference_drafts:
+            return self._uncommitted_draft(code="continue_review")
+        return self._source_projection(
+            UpdateContextResult(
+                status="prepared_review"
+                if self._preparation is not None
+                else self._last_status,
+                code="continue_review",
+                kind=self._kind,
+                binding=self._binding,
+                ready=self._preparation.review.ready
+                if self._preparation is not None
+                else False,
+                unresolved=len(self._preparation.review.requirements)
+                if self._preparation is not None
+                else 0,
+                history_retained=self._last_history,
+                checkpoint_commit=self._last_checkpoint,
+                publication=self._last_publication,
+                operation=self._last_operation if self._preparation is None else None,
+                capture=self._last_capture,
+                next_actions=self._last_actions,
+            )
+        )
+
+    def _retire_review_resources(self):
+        if self._edit is not None:
+            self._edit.close()
+            self._edit = None
+        self._reference_drafts.clear()
+        self._retire_owner()
+
     def close(self, binding=None, *, choice):
         if self._kind == "history":
-            if self.draft_pending and choice == "continue":
-                return self._uncommitted_draft(code="continue_review")
-            result = self._history.close(binding, choice=choice)
-            if result.code == "context_closed":
-                if self._edit is not None:
-                    self._edit.close()
-                    self._edit = None
-                self._reference_drafts.clear()
-                self._retire_owner()
-            self._remember(result)
-            return result
+            return self._close_history(binding, choice)
         try:
             expected = (
                 UpdateContextBinding.model_validate(binding)
@@ -1096,43 +1126,14 @@ class UpdateContext:
         except ValueError, TypeError:
             return self._edit_refusal("context_changed")
         if choice == "continue":
-            if self._edit is not None or self._reference_drafts:
-                return self._uncommitted_draft(code="continue_review")
-            return self._source_projection(
-                UpdateContextResult(
-                    status="prepared_review"
-                    if self._preparation is not None
-                    else self._last_status,
-                    code="continue_review",
-                    kind=self._kind,
-                    binding=self._binding,
-                    ready=self._preparation.review.ready
-                    if self._preparation is not None
-                    else False,
-                    unresolved=len(self._preparation.review.requirements)
-                    if self._preparation is not None
-                    else 0,
-                    history_retained=self._last_history,
-                    checkpoint_commit=self._last_checkpoint,
-                    publication=self._last_publication,
-                    operation=self._last_operation
-                    if self._preparation is None
-                    else None,
-                    capture=self._last_capture,
-                    next_actions=self._last_actions,
-                )
-            )
+            return self._continue_source_review()
         if choice == "save":
             saved = self.save(binding)
             if saved.code != "saved":
                 return saved
         elif choice != "discard":
             return self._edit_refusal("invalid_close_choice")
-        if self._edit is not None:
-            self._edit.close()
-            self._edit = None
-        self._reference_drafts.clear()
-        self._retire_owner()
+        self._retire_review_resources()
         self._preparation = self._binding = None
         self._requires_source_refresh = False
         return UpdateContextResult(

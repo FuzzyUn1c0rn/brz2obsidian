@@ -229,16 +229,7 @@ class HistoryWorkflowResult(ReconciliationContract):
     recovery_gaps: tuple[str, ...] | None = None
     guidance: tuple[str, ...]
 
-    @model_validator(mode="after")
-    def native_truth(self):
-        if self.operation is not None and self.repair is not None:
-            raise ValueError("A history action has one native execution result")
-        if self.publication != (
-            None if self.operation is None else self.operation.publication
-        ):
-            raise ValueError(
-                "Publication describes the observed native file operation only"
-            )
+    def _require_native_preparation(self):
         if self.status in ("direction_required", "review_required", "ready"):
             if (
                 self.preparation is None
@@ -260,6 +251,18 @@ class HistoryWorkflowResult(ReconciliationContract):
             raise ValueError(
                 "A completed or refused action cannot carry live preparation authority"
             )
+
+    @model_validator(mode="after")
+    def native_truth(self):
+        if self.operation is not None and self.repair is not None:
+            raise ValueError("A history action has one native execution result")
+        if self.publication != (
+            None if self.operation is None else self.operation.publication
+        ):
+            raise ValueError(
+                "Publication describes the observed native file operation only"
+            )
+        self._require_native_preparation()
         before_repair_cancel = (
             self.status == "cancelled"
             and self.kind == "repair"

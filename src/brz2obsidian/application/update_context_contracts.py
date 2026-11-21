@@ -227,8 +227,7 @@ class UpdateContextResult(ReconciliationContract):
     operation: VaultApplyResult | None = None
     capture: CheckpointResult | None = None
 
-    @model_validator(mode="after")
-    def truthful_context(self):
+    def _require_snapshot_truth(self):
         capture = self.capture
         if capture is not None:
             if (
@@ -267,7 +266,8 @@ class UpdateContextResult(ReconciliationContract):
                     raise ValueError(
                         "Saved snapshot must agree with its actual locator"
                     )
-        action = self.history_action
+
+    def _require_native_operation_truth(self, action):
         native = self.operation
         if native is not None:
             if len(native.message) > 2048 or self.publication != native.publication:
@@ -287,6 +287,26 @@ class UpdateContextResult(ReconciliationContract):
                 )
             if action is not None and action.operation != native:
                 raise ValueError("Native operation facts disagree")
+
+    def _require_history_execution_truth(self, action):
+        if action.operation is not None:
+            native = action.operation
+            if (
+                action.status not in ("refused", "recovery_required")
+                and action.status != native.status
+            ):
+                raise ValueError("History outcome differs from its native operation")
+            if self.publication != native.publication or self.history_retained is not (
+                None if native.history == "unknown" else native.history != "none"
+            ):
+                raise ValueError("Native history/publication facts must be retained")
+        if (
+            action.repair is not None
+            and self.history_retained is not action.repair.history_retained
+        ):
+            raise ValueError("Repair must preserve actual history retention")
+
+    def _require_history_action_truth(self, action):
         if self.kind == "history" and self.ready and action is None:
             raise ValueError("Ready history requires its native action facts")
         if self.status == "repaired" and (
@@ -314,32 +334,7 @@ class UpdateContextResult(ReconciliationContract):
                 raise ValueError(
                     "A ready recovery review requires its chosen direction"
                 )
-            if action.operation is not None:
-                native = action.operation
-                if (
-                    action.status not in ("refused", "recovery_required")
-                    and action.status != native.status
-                ):
-                    raise ValueError(
-                        "History outcome differs from its native operation"
-                    )
-                if (
-                    self.publication != native.publication
-                    or self.history_retained
-                    is not (
-                        None
-                        if native.history == "unknown"
-                        else native.history != "none"
-                    )
-                ):
-                    raise ValueError(
-                        "Native history/publication facts must be retained"
-                    )
-            if (
-                action.repair is not None
-                and self.history_retained is not action.repair.history_retained
-            ):
-                raise ValueError("Repair must preserve actual history retention")
+            self._require_history_execution_truth(action)
         if (
             self.kind == "history"
             and self.status
@@ -351,6 +346,13 @@ class UpdateContextResult(ReconciliationContract):
             )
         ):
             raise ValueError("History file outcomes require their exact native result")
+
+    @model_validator(mode="after")
+    def truthful_context(self):
+        self._require_snapshot_truth()
+        action = self.history_action
+        self._require_native_operation_truth(action)
+        self._require_history_action_truth(action)
         if self.ready and (
             self.binding is None
             or self.draft_pending

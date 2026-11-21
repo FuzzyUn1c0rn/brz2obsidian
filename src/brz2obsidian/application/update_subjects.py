@@ -43,6 +43,42 @@ def approved_attachment_subjects(plan):
     )
 
 
+def _add_selected_review_subjects(review, add):
+    changed_documents = set()
+    approvals = {a.change_id: a for a in review.approvals}
+    views = {a.decision_id: a.candidate for a in review.attachment_applicability}
+    context = review.producer_facts.link_context
+    documents = (
+        {} if context is None else {d.document_id: d for d in context.current_documents}
+    )
+    for change in review.proposal.changes:
+        approval = approvals.get(change.change_id)
+        candidate = (
+            None
+            if approval is None
+            else views.get(approval.decision_id, approval.attachment_candidate)
+        )
+        if candidate is not None:
+            for output in candidate.outputs:
+                add(output.path, change.subject_id)
+            for document in candidate.documents:
+                prior = documents.get(document.document_id)
+                if (
+                    prior is None
+                    or prior.source_path != document.source_path
+                    or not canonical_equal(prior.content, document.content)
+                ):
+                    if prior is not None and prior.source_path == document.source_path:
+                        changed_documents.add(document.source_path)
+                    add(document.source_path, change.subject_id)
+        elif (change.result if approval is None else approval.result) is not None:
+            add(
+                change.target_path if approval is None else approval.target_path,
+                change.subject_id,
+            )
+    return changed_documents
+
+
 def review_subjects(facts, review=None, *, effects=None):
     paths = {}
 
@@ -62,43 +98,7 @@ def review_subjects(facts, review=None, *, effects=None):
                 add(path, subject_id)
     if review is not None:
         declared = tuple(paths)
-        changed_documents = set()
-        approvals = {a.change_id: a for a in review.approvals}
-        views = {a.decision_id: a.candidate for a in review.attachment_applicability}
-        context = review.producer_facts.link_context
-        documents = (
-            {}
-            if context is None
-            else {d.document_id: d for d in context.current_documents}
-        )
-        for change in review.proposal.changes:
-            approval = approvals.get(change.change_id)
-            candidate = (
-                None
-                if approval is None
-                else views.get(approval.decision_id, approval.attachment_candidate)
-            )
-            if candidate is not None:
-                for output in candidate.outputs:
-                    add(output.path, change.subject_id)
-                for document in candidate.documents:
-                    prior = documents.get(document.document_id)
-                    if (
-                        prior is None
-                        or prior.source_path != document.source_path
-                        or not canonical_equal(prior.content, document.content)
-                    ):
-                        if (
-                            prior is not None
-                            and prior.source_path == document.source_path
-                        ):
-                            changed_documents.add(document.source_path)
-                        add(document.source_path, change.subject_id)
-            elif (change.result if approval is None else approval.result) is not None:
-                add(
-                    change.target_path if approval is None else approval.target_path,
-                    change.subject_id,
-                )
+        changed_documents = _add_selected_review_subjects(review, add)
         if facts.format_operation.kind == "attachment_cleanup":
             selected = select_review_effects(review) if effects is None else effects
             if selected.status == "selected":
