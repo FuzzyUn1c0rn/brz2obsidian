@@ -86,6 +86,29 @@ TEMP_PATHS = (".brz2obsidian/tmp",)
 FALSE = ("false", "0", "no", "off", "")
 
 
+def _scratch_candidates():
+    """Yield Python's temporary directory candidates without write probes."""
+    override = tempfile.tempdir
+    if override:
+        yield Path(os.fsdecode(override))
+        return
+
+    for variable in ("TMPDIR", "TEMP", "TMP"):
+        if value := os.environ.get(variable):
+            yield Path(value)
+
+    if os.name == "nt":
+        yield Path(os.path.expanduser(r"~\AppData\Local\Temp"))
+        yield Path(os.path.expandvars(r"%SYSTEMROOT%\Temp"))
+        yield from map(Path, (r"C:\TEMP", r"C:\TMP", r"\TEMP", r"\TMP"))
+    else:
+        yield from map(Path, ("/tmp", "/var/tmp", "/usr/tmp"))
+    try:
+        yield Path.cwd()
+    except OSError:
+        yield Path(".")
+
+
 def _digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=True).encode()
@@ -1738,14 +1761,8 @@ class _Inspection:
             self.consents.append(consent("tracking", "ordinary", included))
 
     def temporary_base(self):
-        candidates = (
-            [tempfile.tempdir]
-            if tempfile.tempdir
-            else tempfile._candidate_tempdir_list()
-        )
         resolved_root = self.root.resolve(strict=True)
-        for candidate in candidates:
-            path = Path(candidate)
+        for path in _scratch_candidates():
             if not path.is_dir():
                 continue
             base = path.resolve(strict=True)
