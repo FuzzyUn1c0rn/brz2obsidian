@@ -58,6 +58,18 @@ def _name(original):
     return readable_filename(PurePosixPath(original).name)
 
 
+def _resource_filename(asset, base, suffix_length):
+    extension = PurePosixPath(base).suffix
+    stem = base[: -len(extension)] if extension else base
+    marker = " — " + asset.naming_seed[:suffix_length] if suffix_length else ""
+    ending = extension + (".original" if asset.role == "note_original" else "")
+    while len((stem + marker + ending).encode("utf-16-le")) // 2 > 120 and stem:
+        stem = stem[:-1]
+    if not stem:
+        _refuse("Resource extension/identity exceeds the safe filename bound")
+    return stem.rstrip(" .") + marker + ending
+
+
 def assign_asset_targets(snapshot):
     owners = _tokens({item.key: item.naming_seed for item in snapshot.items})
     locals_ = [a for a in snapshot.assets if a.availability == "present"]
@@ -76,25 +88,10 @@ def assign_asset_targets(snapshot):
         for key in p.image_asset_ids
     )
 
-    def filename(asset):
-        base = bases[asset.asset_id]
-        extension = PurePosixPath(base).suffix
-        stem = base[: -len(extension)] if extension else base
-        marker = (
-            " — " + asset.naming_seed[: suffix_lengths[asset.asset_id]]
-            if suffix_lengths[asset.asset_id]
-            else ""
-        )
-        ending = extension + (".original" if asset.role == "note_original" else "")
-        while len((stem + marker + ending).encode("utf-16-le")) // 2 > 120 and stem:
-            stem = stem[:-1]
-        if not stem:
-            _refuse("Resource extension/identity exceeds the safe filename bound")
-        return stem.rstrip(" .") + marker + ending
-
     while True:
         paths = {
-            a.asset_id: f"Attachments/{owners[a.owner]}/{filename(a)}" for a in locals_
+            a.asset_id: f"Attachments/{owners[a.owner]}/{_resource_filename(a, bases[a.asset_id], suffix_lengths[a.asset_id])}"
+            for a in locals_
         }
         groups = {}
         for key, path in paths.items():

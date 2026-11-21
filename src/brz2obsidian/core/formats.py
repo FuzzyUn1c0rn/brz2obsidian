@@ -9,41 +9,49 @@ def output_semantics(identity):
     return identity.model_dump(mode="json", exclude={"module_version"})
 
 
+def _cleanup_format_findings(operation, baseline, target):
+    if (
+        operation.recorded_generation != "supported"
+        or operation.baseline_source_version is None
+        or operation.baseline_source_version != operation.target_source_version
+    ):
+        return ("format_source_changed",)
+    if output_semantics(baseline) != output_semantics(target):
+        return ("profile_transition_required",)
+    return (
+        ()
+        if baseline.output_format in REVIEWABLE_OUTPUT_FORMATS
+        else ("unsupported_format",)
+    )
+
+
+def _transition_format_findings(facts, operation, baseline, target):
+    if not facts.subjects:
+        return ("format_outputs_unavailable",)
+    if target.output_format not in REVIEWABLE_OUTPUT_FORMATS:
+        return ("format_target_unsupported",)
+    if (
+        operation.baseline_source_version is not None
+        and operation.target_source_version is not None
+        and operation.baseline_source_version != operation.target_source_version
+        and not (
+            operation.kind == "onboarding"
+            and operation.automatic_merge
+            and output_semantics(baseline) == output_semantics(target)
+        )
+    ):
+        return ("format_source_changed",)
+    return ()
+
+
 def format_findings(facts):
     """Return typed operation-level problems; unavailable old paths allow onboarding."""
     operation = facts.format_operation
     baseline, target = facts.baseline_identity, facts.incoming_identity
     if operation.kind == "attachment_cleanup":
-        if (
-            operation.recorded_generation != "supported"
-            or operation.baseline_source_version is None
-            or operation.baseline_source_version != operation.target_source_version
-        ):
-            return ("format_source_changed",)
-        if output_semantics(baseline) != output_semantics(target):
-            return ("profile_transition_required",)
-        return (
-            ()
-            if baseline.output_format in REVIEWABLE_OUTPUT_FORMATS
-            else ("unsupported_format",)
-        )
+        return _cleanup_format_findings(operation, baseline, target)
     if operation.kind != "source_update":
-        if not facts.subjects:
-            return ("format_outputs_unavailable",)
-        if target.output_format not in REVIEWABLE_OUTPUT_FORMATS:
-            return ("format_target_unsupported",)
-        if (
-            operation.baseline_source_version is not None
-            and operation.target_source_version is not None
-            and operation.baseline_source_version != operation.target_source_version
-            and not (
-                operation.kind == "onboarding"
-                and operation.automatic_merge
-                and output_semantics(baseline) == output_semantics(target)
-            )
-        ):
-            return ("format_source_changed",)
-        return ()
+        return _transition_format_findings(facts, operation, baseline, target)
     if operation.recorded_generation != "supported":
         return ()
     if baseline.output_format != target.output_format:

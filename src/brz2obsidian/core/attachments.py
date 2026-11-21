@@ -31,14 +31,7 @@ def _allocation_path(subject, ordinal):
     return f"{folder}/{name}" if folder else name
 
 
-def attachment_review(facts, subject, subject_id, *, _links=None):
-    if subject.attachment is None:
-        return None, ()
-    if subject.operation_reversal is not None:
-        return _operation_attachment_review(facts, subject, subject_id, _links=_links)
-    if facts.format_operation.kind == "attachment_cleanup":
-        return _cleanup_attachment_review(facts, subject, subject_id, _links=_links)
-    association = subject.attachment.current_target_id
+def _prospective_paths(facts, subject):
     prospective = []
     for other in facts.subjects:
         if (other.item_id, other.facet) == (subject.item_id, subject.facet):
@@ -54,6 +47,19 @@ def attachment_review(facts, subject, subject_id, *, _links=None):
                     slot.path, slot.target, ()
                 ):
                     prospective.append((other.item_id, other.facet, slot.path))
+
+    return prospective
+
+
+def attachment_review(facts, subject, subject_id, *, _links=None):
+    if subject.attachment is None:
+        return None, ()
+    if subject.operation_reversal is not None:
+        return _operation_attachment_review(facts, subject, subject_id, _links=_links)
+    if facts.format_operation.kind == "attachment_cleanup":
+        return _cleanup_attachment_review(facts, subject, subject_id, _links=_links)
+    association = subject.attachment.current_target_id
+    prospective = _prospective_paths(facts, subject)
 
     def output(content, path, target_id):
         return AttachmentOutput(
