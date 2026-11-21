@@ -5,7 +5,7 @@ positions; they neither locate storage nor establish availability.
 """
 
 from dataclasses import dataclass
-from itertools import chain, repeat
+from itertools import chain
 from types import UnionType
 from typing import Annotated, ForwardRef, Literal, Union, get_args, get_origin
 
@@ -236,7 +236,7 @@ class _ModelInventory:
         self.retained = self.temporary = self.nodes = self.steps = 0
         self.text = self.raw_work = self.encoded = 0
 
-    def charge(self, *, nodes=0, steps=0, retained=0, temporary=0):
+    def charge(self, steps=0, *, nodes=0, retained=0, temporary=0):
         if (
             nodes > self.node_limit - self.nodes
             or steps > self.step_limit - self.steps
@@ -334,13 +334,24 @@ class _ModelInventory:
             # Slice materialization and the comparison read of both byte values.
             self.raw_work += 2 * (length + 1) + len(expected) + 1
 
-    def validators(self, model, value, depth):
-        name = model.__name__
-        get = lambda key, default=None: self.field(value, key, default)
+    def validators(self, model, depth):
         # Model-level after validators can raise one error after field parsing.
         for validator in model.__pydantic_decorators__.model_validators:
             self.charge(steps=_VALIDATOR_STEPS[validator])
             self.error(depth)
+
+    def _validator_work(self, name, value, depth):
+        get = lambda key, default=None: self.field(value, key, default)
+        if name == "OperationReversalTarget":
+            return self._reversal_target_work, (get,)
+        if name == "ReconciliationInput":
+            return self._reconciliation_input_work, (get,)
+        if name == "SourceVersionMemory":
+            return self._source_memory_work, (get, depth)
+        if name == "LinkTargetFacts":
+            return self._target_evidence, (get,)
+        if name == "LinkDocument":
+            return self._link_occurrences, (get,)
         if name in (
             "InlineExactContent",
             "ContentIdentity",
@@ -348,22 +359,18 @@ class _ModelInventory:
             "StructureField",
             "StructuredDocument",
             "OperationReversalOutput",
-            "OperationReversalTarget",
         ):
-            self._content_validator_work(name, get)
-        elif name in (
-            "ReconciliationInput",
+            return self._content_validator_work, (name, get)
+        if name in (
             "UpdateProposal",
             "ProposedChange",
             "IdentityAssociationDecision",
             "SourceMemoryProvenance",
-            "SourceVersionMemory",
             "RetainedAttachmentOwnership",
             "AttachmentRemovalContinuation",
         ):
-            self._decision_validator_work(name, get, depth)
-        else:
-            self._evidence_validator_work(name, get)
+            return self._decision_validator_work, (name, get)
+        return self._evidence_validator_work, (name, get)
 
     def _reversal_target_work(self, get):
         owned, rows = get("owned_targets", ()), get("outputs", ())
@@ -402,13 +409,9 @@ class _ModelInventory:
             self.charge(steps=count)
         elif name == "OperationReversalOutput":
             self.compare_content(get("produced"), get("target"))
-        elif name == "OperationReversalTarget":
-            self._reversal_target_work(get)
 
-    def _decision_validator_work(self, name, get, depth):
-        if name == "ReconciliationInput":
-            self._reconciliation_input_work(get)
-        elif name == "UpdateProposal":
+    def _decision_validator_work(self, name, get):
+        if name == "UpdateProposal":
             count = len(get("changes", ()))
             self.sequence(count)
             self.mapping(count)
@@ -428,8 +431,6 @@ class _ModelInventory:
                 self.mapping(len(self.field(assumption, "fingerprint", "")))
                 self.mapping(16)
                 self.mapping(64)
-        elif name == "SourceVersionMemory":
-            self._source_memory_work(get, depth)
         elif name in ("RetainedAttachmentOwnership", "AttachmentRemovalContinuation"):
             self.path(
                 get("source_path" if name == "RetainedAttachmentOwnership" else "path")
@@ -496,11 +497,7 @@ class _ModelInventory:
         self.charge(steps=3 * count + 10)
 
     def _evidence_validator_work(self, name, get):
-        if name == "LinkTargetFacts":
-            self._target_evidence(get)
-        elif name == "LinkDocument":
-            self._link_occurrences(get)
-        elif name in ("LinkDocumentValidation", "AttachmentCandidateValidation"):
+        if name in ("LinkDocumentValidation", "AttachmentCandidateValidation"):
             count = len(get("findings", ()))
             if name == "AttachmentCandidateValidation":
                 count += len(get("link_findings", ()))
@@ -622,7 +619,7 @@ class _ModelInventory:
             self.charge(temporary=64 + 4 * size + 64 + 4 * size)
             self.raw_work += 4 * size + 1
 
-    def walk(self, annotation, item, depth, *, metadata=()):
+    def walk(self, annotation, item, depth, metadata=()):
         if depth > self.depth_limit:
             raise ModelBudgetError(self.nodes, self.steps)
         self.charge(nodes=1, steps=1)
@@ -665,13 +662,12 @@ class _ModelInventory:
                 else None
             )
             children = (
-                self._model_children(selected, item, fields, depth)
+                self._model_visits(selected, item, fields, depth)
                 if alternatives is None
-                else zip(alternatives, repeat(item), repeat(()))
+                else self._alternative_visits(alternatives, item, depth)
             )
-            for child_type, child, child_metadata in children:
-                # Separate attempted graphs/errors; never merge equal field names.
-                self.walk(child_type, child, depth + 1, metadata=child_metadata)
+            for visit, args in children:
+                visit(*args)
             return
         if type(item) is dict:
             self.charge(retained=256 + 64 * len(item))
@@ -700,7 +696,13 @@ class _ModelInventory:
         self.charge(retained=retained, temporary=temporary, steps=steps)
         self.text += len(item) if type(item) is bytes else 0
 
-    def _model_children(self, selected, item, fields, depth):
+    def _alternative_visits(self, alternatives, item, depth):
+        for annotation in alternatives:
+            # Separate attempted graphs/errors; never merge equal field names.
+            yield self.walk, (annotation, item, depth + 1)
+
+    def _model_visits(self, selected, item, fields, depth):
+        """Schedule visits at the walker's stack depth and in validation order."""
         if isinstance(item, selected) and type(item) is not selected:
             raise ValueError("Caller-defined model subclasses are not owned schemas")
         if type(item) is not dict and type(item) is not selected:
@@ -716,17 +718,18 @@ class _ModelInventory:
             child = self.field(
                 item, name, None if field.is_required() else field.default
             )
-            yield field.annotation, child, field.metadata
+            yield self.walk, (field.annotation, child, depth + 1, field.metadata)
             if self.validate:
-                self._charge_field_validation(name, field, child, depth)
+                yield from self._field_validation_visits(name, field, child, depth)
         if self.validate:
-            self.validators(selected, item, depth)
+            yield self.validators, (selected, depth)
+            yield self._validator_work(selected.__name__, item, depth)
         if type(item) is not dict:
             return
         for name, child in item.items():
             self.charge(steps=1)
             if name not in fields:
-                yield None, name, ()
+                yield self.walk, (None, name, depth + 1)
                 if (
                     self.validate
                     and selected.__module__ == "brz2obsidian.contracts"
@@ -738,20 +741,21 @@ class _ModelInventory:
                     # subtree. Keep key/location and error charges.
                     self.charge(nodes=1, steps=1, temporary=16)
                 else:
-                    yield None, child, ()
-                self.error(depth + 1)
+                    yield self.walk, (None, child, depth + 1)
+                yield self.error, (depth + 1,)
 
-    def _charge_field_validation(self, name, field, child, depth):
-        self.error(depth + 1)
-        self.charge(steps=1 + len(field.metadata))
-        if type(child) is str and any(
-            getattr(rule, "pattern", None) is not None for rule in field.metadata
-        ):
-            self.charge(steps=len(child))
+    def _field_validation_visits(self, name, field, child, depth):
+        yield self.error, (depth + 1,)
+        yield self.charge, (1 + len(field.metadata),)
+        if type(child) is str:
+            for rule in field.metadata:
+                if getattr(rule, "pattern", None) is not None:
+                    yield self.charge, (len(child),)
+                    break
         if name in ("path", "current_path", "source_path", "target_path"):
-            self.path(child)
+            yield self.path, (child,)
         if name == "reviewed_assumptions" and type(child) in (tuple, list):
-            self.mapping(len(child))
+            yield self.mapping, (len(child),)
 
     def _leaf_cost(self, item, depth):
         if isinstance(item, BaseModel):
