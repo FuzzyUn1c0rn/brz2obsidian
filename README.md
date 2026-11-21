@@ -808,6 +808,30 @@ and build a wheel using the same environment:
 .\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
+### Repository rules
+
+Run the focused lint, formatting, and architecture checks used by GitHub Actions
+from the checkout root.
+
+```powershell
+.\.venv\Scripts\python.exe tools/check.py rules
+```
+
+The command compares the Python comment baseline to the local `origin/main` ref.
+Fetch the target branch for an up-to-date comparison. If the target has removed
+inherited entries from your checkout, merge or rebase onto it and rerun the check.
+
+To replay a GitHub Actions check, use a checkout of the tested merge commit and a
+base virtual environment without Qt. Set `$eventBase` to the base SHA printed in
+the run's check output.
+
+```powershell
+.\.venv\Scripts\python.exe tools/check.py rules --environment base --base-ref $eventBase
+```
+
+The [runner contract](docs/testing.md#automated-check-runner) describes the
+selection and receipts.
+
 ### Snyk dependency scan
 
 After completing the Python 3.14+ environment setup above, run Snyk from the

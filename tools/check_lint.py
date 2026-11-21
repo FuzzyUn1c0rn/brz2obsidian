@@ -4,12 +4,11 @@ import json
 import subprocess
 import sys
 import tokenize
-from collections import Counter
 from pathlib import Path
 
-from tools.check import Invalid, digest, git
+from tools.check import COMMENT_BASELINE as BASELINE
+from tools.check import Invalid, comment_fingerprints, digest, git
 
-BASELINE = Path("tools/comment-baseline.json")
 PYTHON_SUFFIXES = {".py", ".pyi", ".pyw"}
 
 
@@ -33,10 +32,7 @@ def python_comments(root):
 
 def check_comments(root, *, prune=False):
     path = root / BASELINE
-    remaining = {
-        name: Counter(hashes)
-        for name, hashes in json.loads(path.read_text(encoding="utf-8")).items()
-    }
+    remaining = comment_fingerprints(path.read_bytes())
     retained = {}
     added = 0
     for name, token in python_comments(root):

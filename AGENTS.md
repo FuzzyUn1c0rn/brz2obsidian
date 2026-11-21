@@ -68,6 +68,9 @@ criteria. Run or accept pytest, Ruff lint/format and dependency checks only thro
 `tools/check.py`; before running or accepting them, read
 [the runner and receipt contract](docs/testing.md#automated-check-runner).
 
+For fast local feedback on the rules enforced in CI, use
+[the repository rules command](README.md#repository-rules).
+
 Focused or manual-only verification is valid when it establishes the required
 scope. Broaden or repeat checks for new changes, failures or unresolved concerns.
 Use `tools/coverage_suite.py` for the complete ordinary verification bundle:

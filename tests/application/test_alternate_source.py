@@ -18,6 +18,7 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 from tests.application.test_module_seams import METADATA
 from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+from tests.support.import_routes import literal_imports
 from tests.support.notes import note_body
 from tests.support.paired_sources import paired_sources
 from tests.support.paired_v2_sources import paired_v2_sources
@@ -435,7 +436,196 @@ if int(sys.argv[4]):
 
 
 def test_reusable_modules_import_only_inward_packages_including_initializers():
-    root = Path(brz2obsidian.__file__).parent
+    assert_inward_imports(Path(brz2obsidian.__file__).parent)
+
+
+@pytest.fixture
+def inward_import_root(tmp_path):
+    root = tmp_path / "brz2obsidian"
+    (root / "core").mkdir(parents=True)
+    for original in Path(brz2obsidian.__file__).parent.glob("*.py"):
+        (root / original.name).touch()
+    return root
+
+
+@pytest.mark.parametrize(
+    ("filename", "source", "line", "target"),
+    [
+        (
+            "wiring.py",
+            "import brz2obsidian.sources.thebrain\n",
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            'import importlib as loader\nloader.import_module("brz2obsidian.sources.thebrain")\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            'from importlib import import_module as load\nload("..sources.thebrain", __package__)\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            '__import__("brz2obsidian.sources.thebrain")\n',
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            'import builtins as loader\nloader.__import__("brz2obsidian.sources.thebrain")\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            '__import__("brz2obsidian", fromlist=("sources",))\n',
+            1,
+            "brz2obsidian.sources",
+        ),
+        (
+            "planner.py",
+            'from builtins import __import__ as load\nload("sources.thebrain", globals(), level=2)\n',
+            2,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def make_loader():\n"
+                "    from builtins import __import__ as load\n"
+                "    def apply():\n"
+                '        return load("brz2obsidian.sources.thebrain")\n'
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run(callback):\n"
+                "    from importlib import import_module as load\n"
+                '    module = load("brz2obsidian.sources.thebrain")\n'
+                "    load = callback\n"
+                "    return load(module)\n"
+            ),
+            3,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run(callback):\n"
+                "    load = callback\n"
+                "    from importlib import import_module as load\n"
+                '    return load("brz2obsidian.sources.thebrain")\n'
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "import importlib as loader\n"
+                "class Registry:\n"
+                '    module = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    loader = None\n"
+            ),
+            3,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            '__import__("sources.thebrain", {"__package__": "brz2obsidian"}, level=1)\n',
+            1,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run():\n"
+                "    class Registry:\n"
+                "        global loader\n"
+                '        value = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    return Registry.value\n\n"
+                "import importlib as loader\n"
+            ),
+            4,
+            "brz2obsidian.sources.thebrain",
+        ),
+        (
+            "planner.py",
+            (
+                "def run():\n"
+                "    global loader\n"
+                "    import importlib as loader\n"
+                "    class Registry:\n"
+                "        global loader\n"
+                '        value = loader.import_module("brz2obsidian.sources.thebrain")\n'
+                "    return Registry.value\n"
+            ),
+            6,
+            "brz2obsidian.sources.thebrain",
+        ),
+    ],
+)
+def test_inward_imports_report_unapproved_wiring_and_literal_dynamic_imports(
+    inward_import_root, filename, source, line, target
+):
+    (inward_import_root / "core" / filename).write_text(source, encoding="utf-8")
+
+    with pytest.raises(pytest.fail.Exception) as failure:
+        assert_inward_imports(inward_import_root)
+
+    message = str(failure.value)
+    assert f"src/brz2obsidian/core/{filename}:{line}:" in message
+    assert f"ADR 0001 forbids {target} here" in message
+    assert "outer adapter or composition module" in message
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            "def make_loader():\n"
+            "    from importlib import import_module as load\n"
+            "    return load\n\n"
+            "def use_collaborator(load):\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "import builtins as loader\n\n"
+            "def use_collaborator(loader):\n"
+            '    return loader.__import__("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "from importlib import import_module as load\n\n"
+            "def use_collaborator(callback):\n"
+            "    load = callback\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+        (
+            "from importlib import import_module as load\n"
+            "def run(take_callback, callback):\n"
+            "    if take_callback:\n"
+            "        load = callback\n"
+            "    else:\n"
+            "        from importlib import import_module as load\n"
+            '    return load("brz2obsidian.sources.thebrain")\n'
+        ),
+    ],
+)
+def test_inward_imports_respect_unrelated_bindings(inward_import_root, source):
+    (inward_import_root / "core" / "planner.py").write_text(source, encoding="utf-8")
+
+    assert_inward_imports(inward_import_root)
+
+
+def assert_inward_imports(root):
     allowed = {
         "contracts": {"brz2obsidian", "brz2obsidian.contracts"},
         "diagnostics": {"brz2obsidian", "brz2obsidian.contracts"},
@@ -819,6 +1009,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.obsidian",
         },
     }
+    violations = []
     for area, permitted in allowed.items():
         files = (
             [root / (area + ".py")]
@@ -834,19 +1025,21 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             else sorted((root / area).rglob("*.py"))
         )
         for file in files:
-            if file.name == "wiring.py":
+            relative = file.relative_to(root)
+            if relative.as_posix() == "application/wiring.py":
                 continue
             file_permitted = permitted | application_additions.get(
-                file.relative_to(root).as_posix(), set()
+                relative.as_posix(), set()
             )
-            relative = file.relative_to(root).with_suffix("")
-            module = "brz2obsidian." + ".".join(relative.parts)
+            module = "brz2obsidian." + ".".join(relative.with_suffix("").parts)
             package = (
                 module.removesuffix(".__init__")
                 if file.name == "__init__.py"
                 else module.rsplit(".", 1)[0]
             )
-            for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            dynamic = dict(literal_imports(tree, package))
+            for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     imports = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom):
@@ -863,15 +1056,25 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
                     imports = ([] if node.module is None else [base]) + [
                         base + "." + alias.name for alias in node.names
                     ]
+                elif node in dynamic:
+                    imports = dynamic[node]
                 else:
                     continue
                 for imported in imports:
-                    if imported.startswith("brz2obsidian"):
-                        assert any(
+                    if (
+                        imported.startswith("brz2obsidian")
+                        and imported not in {"brz2obsidian", "brz2obsidian.__version__"}
+                        and not any(
                             imported == prefix or imported.startswith(prefix + ".")
                             for prefix in file_permitted
                             if prefix != "brz2obsidian"
-                        ) or imported in {"brz2obsidian", "brz2obsidian.__version__"}, (
-                            file,
-                            imported,
                         )
+                    ):
+                        violations.append(
+                            f"src/brz2obsidian/{relative.as_posix()}:{node.lineno}:{node.col_offset + 1}: "
+                            f"ADR 0001 forbids {imported} here. Use an inward contract or "
+                            "keep the dependency in an outer adapter or composition module."
+                        )
+                        break
+    if violations:
+        pytest.fail("\n".join(violations), pytrace=False)

@@ -10,15 +10,20 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
 VERSION = "1"
 CHECKS = ("dependency", "pytest", "lint", "format")
+RULES_MANIFEST = Path(".github/repository-rules.json")
+RULE_CHECKS = ("pytest", "lint", "format")
+COMMENT_BASELINE = Path("tools/comment-baseline.json")
 
 
 class Invalid(ValueError):
@@ -295,6 +300,17 @@ def parse(argv=None, checkout=None):
     run.add_argument("-m", dest="marker")
     run.add_argument("--require-gui", action="store_true")
     run.add_argument("--workers", type=int, choices=(1, 2, 3, 4), default=1)
+    rules = commands.add_parser(
+        "rules", help="Run and validate the focused repository rules used in CI"
+    )
+    rules.add_argument(
+        "--checkout", type=Path, default=checkout or Path(__file__).resolve().parents[1]
+    )
+    rules.add_argument("--python", type=Path, help="Project interpreter override")
+    rules.add_argument("--environment", choices=("auto", "base", "gui"), default="auto")
+    rules.add_argument(
+        "--base-ref", default="origin/main", help="Base Git commit or ref"
+    )
     validate = commands.add_parser(
         "validate",
         help="Validate completed evidence against independent scope requirements",
@@ -655,7 +671,7 @@ def run(args):
             code = 2
         save(run_dir / "receipt.json", receipt)
         print(f"RECEIPT: {run_dir / 'receipt.json'}", flush=True)
-    return code
+    return code, run_dir / "receipt.json"
 
 
 def load_json(path):
@@ -663,6 +679,184 @@ def load_json(path):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise Invalid(f"Cannot read complete JSON evidence {path}: {error}") from error
+
+
+def rule_requirements(root, raw):
+    try:
+        manifest = json.loads(raw)
+    except ValueError as error:
+        raise Invalid(f"{RULES_MANIFEST.as_posix()}: invalid JSON: {error}") from error
+    label = RULES_MANIFEST.as_posix()
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"schema_version", "environment", "checks"}
+        or type(manifest["schema_version"]) is not int
+        or manifest["schema_version"] != 1
+        or manifest["environment"] != "base"
+    ):
+        raise Invalid(f"{label}: expected schema_version 1 and environment 'base'")
+    checks = manifest["checks"]
+    if (
+        not isinstance(checks, list)
+        or any(not isinstance(check, dict) for check in checks)
+        or len(checks) != len(RULE_CHECKS)
+        or any(
+            sum(check.get("id") == name for check in checks) != 1
+            for name in RULE_CHECKS
+        )
+    ):
+        raise Invalid(
+            f"{label}: include each required check once: pytest, lint, format"
+        )
+    pytest_check = next(check for check in checks if check["id"] == "pytest")
+    if any(
+        check != {"id": check["id"]} for check in checks if check is not pytest_check
+    ):
+        raise Invalid(f"{label}: lint and format checks accept only an id")
+    selectors = pytest_check.get("selectors")
+    focused = {
+        "id": "pytest",
+        "scope": "focused",
+        "selectors": selectors,
+        "keyword": None,
+        "marker": None,
+        "require_gui": False,
+    }
+    if pytest_check != focused or pytest_check["require_gui"] is not False:
+        raise Invalid(
+            f"{label}: pytest must use focused selectors without filters or GUI"
+        )
+    if not isinstance(selectors, list) or not selectors:
+        raise Invalid(f"{label}: add at least one explicit pytest node ID")
+    for selector in selectors:
+        if not isinstance(selector, str) or not re.fullmatch(
+            r"tests/(?:[\w-]+/)*test_\w+\.py::(?:Test\w*::)*test_\w+", selector
+        ):
+            raise Invalid(f"{label}: use an explicit pytest node ID, got {selector!r}")
+        path = (root / selector.split("::", 1)[0]).resolve()
+        if not path.is_relative_to(root / "tests") or not path.is_file():
+            raise Invalid(
+                f"{label}: selector must name an existing test file: {selector}"
+            )
+    if len(set(selectors)) != len(selectors):
+        raise Invalid(f"{label}: remove duplicate pytest node IDs")
+    return manifest, selectors
+
+
+def comment_fingerprints(raw):
+    path = COMMENT_BASELINE.as_posix()
+    try:
+        fingerprints = json.loads(raw)
+    except ValueError as error:
+        raise Invalid(f"{path}: invalid JSON: {error}") from error
+    if not isinstance(fingerprints, dict) or any(
+        not isinstance(hashes, list)
+        or any(not isinstance(item, str) for item in hashes)
+        for hashes in fingerprints.values()
+    ):
+        raise Invalid(f"{path}: expected paths and fingerprint lists")
+    return {path: Counter(hashes) for path, hashes in fingerprints.items()}
+
+
+def check_comment_baseline(root, base_ref, candidate):
+    path = COMMENT_BASELINE.as_posix()
+    try:
+        base_bytes = git(
+            root, "rev-parse", "--verify", "--end-of-options", f"{base_ref}^{{commit}}"
+        )
+        base = base_bytes.decode("ascii").strip()
+        original = comment_fingerprints(git(root, "show", f"{base}:{path}"))
+    except (Invalid, ValueError) as error:
+        raise Invalid(
+            f"{path}: cannot read the base at {base_ref!r}. "
+            "Fetch the target branch or pass its commit with --base-ref. "
+            f"Git or baseline error: {str(error).strip()}"
+        ) from error
+    additions = {}
+    for source, counts in sorted(candidate.items()):
+        extra = counts - original.get(source, Counter())
+        if extra:
+            additions[source] = extra
+    if not additions:
+        print(f"Comment baseline checked against {base}", flush=True)
+        return True
+
+    try:
+        common = git(root, "merge-base", "HEAD", base)
+    except Invalid as error:
+        raise Invalid(
+            f"{path}: cannot find a common Git ancestor with {base}. "
+            "Fetch the target branch and its history, then rerun the rules check."
+        ) from error
+    ancestor = common.decode("ascii").strip()
+    if ancestor != base:
+        inherited = comment_fingerprints(git(root, "show", f"{ancestor}:{path}"))
+        stale = []
+        for source, extra in additions.items():
+            removed = inherited.get(source, Counter()) - original.get(source, Counter())
+            inherited_extra = extra & removed
+            if inherited_extra:
+                stale.append(source)
+                additions[source] -= inherited_extra
+        if stale:
+            print(
+                f"{path}: checkout is missing target branch changes from {base}. "
+                "The target removed inherited fingerprints for:\n"
+                + "\n".join(stale)
+                + "\nMerge or rebase onto the target branch and rerun the rules check.",
+                file=sys.stderr,
+            )
+    if any(additions.values()):
+        print(
+            f"{path}: deletion-only under ADR 0014. New fingerprints relative to {base}:\n"
+            + "\n".join(
+                f"{source} (+{extra.total()})"
+                for source, extra in additions.items()
+                if extra
+            )
+            + "\nRemove the new fingerprints and any corresponding new Python comments.",
+            file=sys.stderr,
+        )
+    return False
+
+
+def run_rules(args):
+    root = args.checkout.resolve()
+    manifest_path = root / RULES_MANIFEST
+    raw = manifest_path.read_bytes()
+    manifest, selectors = rule_requirements(root, raw)
+    baseline_path = root / COMMENT_BASELINE
+    baseline_raw = baseline_path.read_bytes()
+    candidate = comment_fingerprints(baseline_raw)
+    if not check_comment_baseline(root, args.base_ref, candidate):
+        return 1
+    run_args = parse(["run", "--checkout", str(root)])
+    run_args.python = args.python
+    run_args.environment = args.environment
+    run_args.check = RULE_CHECKS
+    run_args.test = selectors
+    code, receipt = run(run_args)
+    if code:
+        return code
+    for path, checked in ((manifest_path, raw), (baseline_path, baseline_raw)):
+        if path.read_bytes() != checked:
+            raise Invalid(f"{path} changed during the repository rules check; rerun it")
+    manifest["environment"] = load_json(receipt)["environment"]
+    requirements = receipt.with_name("requirements.json")
+    save(requirements, manifest)
+    return validate(
+        parse(
+            [
+                "validate",
+                "--checkout",
+                str(root),
+                "--receipt",
+                str(receipt),
+                "--requirements",
+                str(requirements),
+            ]
+        )
+    )
 
 
 def validate(args):
@@ -1074,7 +1268,9 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace", newline="")
     args = parse()
     try:
-        return run(args) if args.command == "run" else validate(args)
+        if args.command == "rules":
+            return run_rules(args)
+        return run(args)[0] if args.command == "run" else validate(args)
     except (
         Invalid,
         OSError,
