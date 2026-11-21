@@ -1,4 +1,5 @@
 import pytest
+from markdown_it.rules_block.state_block import StateBlock
 
 from brz2obsidian.contracts import MigrationRefused
 from brz2obsidian.sources.thebrain import trace_note_references
@@ -27,6 +28,55 @@ def test_active_html_local_reference_is_explicitly_unsupported():
     assert error.value.issues[0].code == "unsupported_feature"
 
 
+@pytest.mark.parametrize("trace_slices", (False, True), ids=("untraced", "different"))
+def test_block_output_without_matching_source_evidence_is_refused(
+    monkeypatch, trace_slices
+):
+    text = "[local](brain://abc/title)"
+    original = StateBlock.getLines
+
+    def block_output(*args):
+        if trace_slices:
+            return original(*args).replace("title", "different")
+        return text
+
+    monkeypatch.setattr(StateBlock, "getLines", block_output)
+
+    with pytest.raises(MigrationRefused) as error:
+        trace_note_references(text)
+
+    issue = error.value.issues[0]
+    assert issue.code == "unsupported_feature"
+    assert issue.phase == "source"
+    assert issue.message == "Markdown block provenance cannot be established"
+
+
+@pytest.mark.parametrize(
+    "wrong_line", (True, False), ids=("fenced-copy", "empty-slice")
+)
+def test_block_slices_cannot_reassign_or_drop_authored_text(monkeypatch, wrong_line):
+    phrase = "[local](brain://abc/title)"
+    text = f"{phrase}\n\n```\n{phrase}\n```\n"
+    original = StateBlock.getLines
+
+    def block_output(state, begin, end, indent, keepLastLF):
+        if (begin, end) != (0, 1):
+            return original(state, begin, end, indent, keepLastLF)
+        if wrong_line:
+            return original(state, 3, 4, indent, keepLastLF)
+        stop = state.eMarks[begin]
+        return state.src[stop:stop]
+
+    monkeypatch.setattr(StateBlock, "getLines", block_output)
+
+    with pytest.raises(MigrationRefused) as error:
+        trace_note_references(text)
+
+    issue = error.value.issues[0]
+    assert issue.code == "unsupported_feature"
+    assert issue.message == "Markdown block provenance cannot be established"
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -48,6 +98,7 @@ def test_normalization_and_block_indentation_retain_exact_original_offsets(text)
         "[local][ref]\n\n[ref]: brain://abc/title",
         "![local][ref]\n\n[ref]: .data/md-images/x.png",
         "<brain://abc/title>",
+        "> - paragraph\r\n>\t[local\r\n>\tlabel](brain://abc/title)\r\n",
         "[local](../other.md)",
         "![local](other.png)",
         '<a href="brain://abc/title">local</a>',
