@@ -34,20 +34,7 @@ def _content_branches(annotation, metadata):
     """Recognize only the source-pinned owned callable tagged declaration."""
     if not _CONTENT_DISPATCH_PINNED:
         return None
-    discriminator = None
-    for rule in metadata:
-        if type(rule) is Discriminator:
-            if discriminator is not None:
-                return None
-            discriminator = rule
-    if get_origin(annotation) is Annotated:
-        arguments = get_args(annotation)
-        for rule in arguments[1:]:
-            if type(rule) is Discriminator:
-                if discriminator is not None:
-                    return None
-                discriminator = rule
-        annotation = arguments[0]
+    annotation, discriminator = _content_discriminator(annotation, metadata)
     if (
         discriminator is None
         or discriminator.discriminator is not _content_kind
@@ -60,22 +47,42 @@ def _content_branches(annotation, metadata):
     branches = get_args(annotation)
     if len(branches) != 2:
         return None
-    for branch, model, name in (
-        (branches[0], InlineExactContent, "inline"),
-        (branches[1], OpaqueContent, "opaque"),
-    ):
-        if get_origin(branch) is not Annotated:
-            return None
-        arguments = get_args(branch)
-        if (
-            len(arguments) != 2
-            or arguments[0] is not model
-            or type(arguments[1]) is not Tag
-            or type(arguments[1].tag) is not str
-            or arguments[1].tag != name
-        ):
-            return None
+    if not _tag_matches(branches[0], InlineExactContent, "inline"):
+        return None
+    if not _tag_matches(branches[1], OpaqueContent, "opaque"):
+        return None
     return branches
+
+
+def _content_discriminator(annotation, metadata):
+    discriminator = None
+    for rule in metadata:
+        if type(rule) is Discriminator:
+            if discriminator is not None:
+                return annotation, None
+            discriminator = rule
+    if get_origin(annotation) is Annotated:
+        arguments = get_args(annotation)
+        for rule in arguments[1:]:
+            if type(rule) is Discriminator:
+                if discriminator is not None:
+                    return annotation, None
+                discriminator = rule
+        annotation = arguments[0]
+    return annotation, discriminator
+
+
+def _tag_matches(branch, model, name):
+    if get_origin(branch) is not Annotated:
+        return False
+    arguments = get_args(branch)
+    return (
+        len(arguments) == 2
+        and arguments[0] is model
+        and type(arguments[1]) is Tag
+        and type(arguments[1].tag) is str
+        and arguments[1].tag == name
+    )
 
 
 # Closed source-audited predicate inventories. Collection/raw work is additional
@@ -341,6 +348,42 @@ class _ModelInventory:
         for validator in model.__pydantic_decorators__.model_validators:
             self.charge(steps=_VALIDATOR_STEPS[validator])
             self.error(depth)
+        if name in (
+            "InlineExactContent",
+            "ContentIdentity",
+            "SupportedFormatBaseline",
+            "StructureField",
+            "StructuredDocument",
+            "OperationReversalOutput",
+            "OperationReversalTarget",
+        ):
+            self._content_validator_work(name, get)
+        elif name in (
+            "ReconciliationInput",
+            "UpdateProposal",
+            "ProposedChange",
+            "IdentityAssociationDecision",
+            "SourceMemoryProvenance",
+            "SourceVersionMemory",
+            "RetainedAttachmentOwnership",
+            "AttachmentRemovalContinuation",
+        ):
+            self._decision_validator_work(name, get, depth)
+        else:
+            self._evidence_validator_work(name, get)
+
+    def _reversal_target_work(self, get):
+        owned, rows = get("owned_targets", ()), get("outputs", ())
+        self.sequence(len(owned), pairs=True)
+        self.sequence(len(rows), pairs=True)
+        for count in (len(owned), len(owned), len(rows), len(rows), len(owned)):
+            self.mapping(count)
+        for _ in range(2):
+            self.sequence(len(rows))
+            self.mapping(len(rows))
+        self.charge(steps=len(rows) * len(owned))
+
+    def _content_validator_work(self, name, get):
         if name == "InlineExactContent":
             data = get("data")
             if type(data) is bytes:
@@ -367,53 +410,11 @@ class _ModelInventory:
         elif name == "OperationReversalOutput":
             self.compare_content(get("produced"), get("target"))
         elif name == "OperationReversalTarget":
-            owned, rows = get("owned_targets", ()), get("outputs", ())
-            self.sequence(len(owned), pairs=True)
-            self.sequence(len(rows), pairs=True)
-            for count in (len(owned), len(owned), len(rows), len(rows), len(owned)):
-                self.mapping(count)
-            for _ in range(2):
-                self.sequence(len(rows))
-                self.mapping(len(rows))
-            self.charge(steps=len(rows) * len(owned))
-        elif name == "ReconciliationInput":
-            subjects, safety = get("subjects", ()), get("safety_facts", ())
-            self.sequence(len(subjects), pairs=True)
-            self.sequence(len(safety))
-            self.mapping(len(subjects))
-            self.mapping(len(safety))
-            self.mapping(len(subjects))
-            for fact in safety:
-                self.charge(steps=1)
-                count = len(self.field(fact, "subjects", ()))
-                self.mapping(count)
-                self.mapping(count)
-            count = len(get("identity_inventory", ()))
-            self.sequence(count)
-            self.mapping(count)
-            association, rename, preservation = (
-                get(key, ())
-                for key in (
-                    "association_decisions",
-                    "rename_decisions",
-                    "preservation_decisions",
-                )
-            )
-            decisions = len(association) + len(rename) + len(preservation)
-            self.sequence(len(association) + len(rename))
-            self.sequence(decisions)
-            self.mapping(decisions)
-            for family in (association, rename, preservation):
-                self.sequence(len(family), pairs=True)
-                self.mapping(len(family))
-                self.mapping(len(family))
-                self.mapping(len(subjects))
-            count = len(get("source_version_memory", ()))
-            self.sequence(count)
-            self.mapping(count)
-            self.mapping(count)
-            self.mapping(decisions)
-            self.mapping(min(count, decisions))
+            self._reversal_target_work(get)
+
+    def _decision_validator_work(self, name, get, depth):
+        if name == "ReconciliationInput":
+            self._reconciliation_input_work(get)
         elif name == "UpdateProposal":
             count = len(get("changes", ()))
             self.sequence(count)
@@ -435,68 +436,77 @@ class _ModelInventory:
                 self.mapping(16)
                 self.mapping(64)
         elif name == "SourceVersionMemory":
-            self.sequence(4)
-            scope = tuple(
-                get(key, "")
-                for key in ("module_id", "collection_id", "item_id", "facet")
-            )
-            self.json_hash(scope, depth + 1)
-            context = get("configuration_context")
-            if context is not None:
-                self.json_hash(scope, depth + 1)
-                self.json_hash(context, depth + 1)
-            self.mapping(8)
-            self.mapping(2)
-            self.mapping(10)
-            self.charge(temporary=10 * (64 + 4 * 96) + 64 + 4 * 96)
-            provenance = get("provenance")
-            count = len(self.field(provenance, "reviewed_assumptions", ()))
-            self.mapping(count)
-            self.mapping(count)
-            self.mapping(4)
-            self.charge(steps=3 * count + 10)
+            self._source_memory_work(get, depth)
         elif name in ("RetainedAttachmentOwnership", "AttachmentRemovalContinuation"):
             self.path(
                 get("source_path" if name == "RetainedAttachmentOwnership" else "path")
             )
-        elif name == "LinkTargetFacts":
-            anchors = get("anchors", ())
-            self.sequence(len(anchors))
-            for anchor in anchors:
-                self.charge(steps=1)
-                total = 0
-                spans = self.field(anchor, "spans", ())
-                parts = self.field(anchor, "raw_parts", ())
-                for span, part in zip(spans, parts):
-                    self.compare_span(get("content"), span, part)
-                for part in parts:
-                    self.charge(steps=1)
-                    length = len(part)
-                    self.charge(temporary=64 + length)
-                    self.raw_work += length + 1
-                    total += length + 1
-                fragment = self.field(anchor, "fragment")
-                encoded = 4 * len(self.field(fragment, "value", ""))
-                self.charge(temporary=128 + total + encoded)
-                self.raw_work += 2 * (total + encoded + 2)
-            structure = get("structure")
-            if structure is not None:
-                self.compare_content(self.field(structure, "content"), get("content"))
-                count = 0
-                for membership in self.field(structure, "memberships", ()):
-                    self.charge(steps=1)
-                    count += len(self.field(membership, "entries", ()))
-                self.sequence(count)
+
+    def _reconciliation_input_work(self, get):
+        subjects, safety = get("subjects", ()), get("safety_facts", ())
+        self.sequence(len(subjects), pairs=True)
+        self.sequence(len(safety))
+        self.mapping(len(subjects))
+        self.mapping(len(safety))
+        self.mapping(len(subjects))
+        for fact in safety:
+            self.charge(steps=1)
+            count = len(self.field(fact, "subjects", ()))
+            self.mapping(count)
+            self.mapping(count)
+        count = len(get("identity_inventory", ()))
+        self.sequence(count)
+        self.mapping(count)
+        association, rename, preservation = (
+            get(key, ())
+            for key in (
+                "association_decisions",
+                "rename_decisions",
+                "preservation_decisions",
+            )
+        )
+        decisions = len(association) + len(rename) + len(preservation)
+        self.sequence(len(association) + len(rename))
+        self.sequence(decisions)
+        self.mapping(decisions)
+        for family in (association, rename, preservation):
+            self.sequence(len(family), pairs=True)
+            self.mapping(len(family))
+            self.mapping(len(family))
+            self.mapping(len(subjects))
+        count = len(get("source_version_memory", ()))
+        self.sequence(count)
+        self.mapping(count)
+        self.mapping(count)
+        self.mapping(decisions)
+        self.mapping(min(count, decisions))
+
+    def _source_memory_work(self, get, depth):
+        self.sequence(4)
+        scope = tuple(
+            get(key, "") for key in ("module_id", "collection_id", "item_id", "facet")
+        )
+        self.json_hash(scope, depth + 1)
+        context = get("configuration_context")
+        if context is not None:
+            self.json_hash(scope, depth + 1)
+            self.json_hash(context, depth + 1)
+        self.mapping(8)
+        self.mapping(2)
+        self.mapping(10)
+        self.charge(temporary=10 * (64 + 4 * 96) + 64 + 4 * 96)
+        provenance = get("provenance")
+        count = len(self.field(provenance, "reviewed_assumptions", ()))
+        self.mapping(count)
+        self.mapping(count)
+        self.mapping(4)
+        self.charge(steps=3 * count + 10)
+
+    def _evidence_validator_work(self, name, get):
+        if name == "LinkTargetFacts":
+            self._target_evidence(get)
         elif name == "LinkDocument":
-            occurrences = get("occurrences", ())
-            self.mapping(len(occurrences))
-            for occurrence in occurrences:
-                self.charge(steps=1)
-                self.compare_span(
-                    get("content"),
-                    self.field(occurrence, "span"),
-                    self.field(occurrence, "raw", b""),
-                )
+            self._link_occurrences(get)
         elif name in ("LinkDocumentValidation", "AttachmentCandidateValidation"):
             count = len(get("findings", ()))
             if name == "AttachmentCandidateValidation":
@@ -518,6 +528,46 @@ class _ModelInventory:
             for path in removals:
                 self.charge(steps=1)
                 self.path(path)
+
+    def _target_evidence(self, get):
+        anchors = get("anchors", ())
+        self.sequence(len(anchors))
+        for anchor in anchors:
+            self.charge(steps=1)
+            total = 0
+            spans = self.field(anchor, "spans", ())
+            parts = self.field(anchor, "raw_parts", ())
+            for span, part in zip(spans, parts):
+                self.compare_span(get("content"), span, part)
+            for part in parts:
+                self.charge(steps=1)
+                length = len(part)
+                self.charge(temporary=64 + length)
+                self.raw_work += length + 1
+                total += length + 1
+            fragment = self.field(anchor, "fragment")
+            encoded = 4 * len(self.field(fragment, "value", ""))
+            self.charge(temporary=128 + total + encoded)
+            self.raw_work += 2 * (total + encoded + 2)
+        structure = get("structure")
+        if structure is not None:
+            self.compare_content(self.field(structure, "content"), get("content"))
+            count = 0
+            for membership in self.field(structure, "memberships", ()):
+                self.charge(steps=1)
+                count += len(self.field(membership, "entries", ()))
+            self.sequence(count)
+
+    def _link_occurrences(self, get):
+        occurrences = get("occurrences", ())
+        self.mapping(len(occurrences))
+        for occurrence in occurrences:
+            self.charge(steps=1)
+            self.compare_span(
+                get("content"),
+                self.field(occurrence, "span"),
+                self.field(occurrence, "raw", b""),
+            )
 
     def _tag_repr_bound(self, value, depth):
         """Bound invalid-tag formatting without invoking caller repr/hash/eq."""
@@ -580,19 +630,7 @@ class _ModelInventory:
             self.raw_work += 4 * size + 1
 
     def walk(self, annotation, item, depth, *, metadata=()):
-        if depth > self.depth_limit:
-            raise ModelBudgetError(self.nodes, self.steps)
-        self.charge(nodes=1, steps=1)
-        if self.validate:
-            branches = _content_branches(annotation, metadata)
-            if branches is not None:
-                self._tagged_content(branches, item, depth)
-                return
-        if self.validate and annotation is type(None) and item is not None:
-            # A None leaf checks the existing input, not its descendants.
-            # Keep a conservative input-alias and error/location allowance.
-            self.charge(temporary=16)
-            self.error(depth)
+        if not self._begin_walk(annotation, item, depth, metadata):
             return
         origin = get_origin(annotation)
         if origin is Annotated:
@@ -606,69 +644,9 @@ class _ModelInventory:
                 # Separate attempted graphs/errors; never merge equal field names.
                 self.walk(alternative, item, depth + 1)
             return
-        selected = (
-            annotation
-            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
-            else None
-        )
-        if selected is None and isinstance(item, BaseModel) and annotation is None:
-            selected = type(item)
+        selected = self._walk_model_type(annotation, item)
         if selected is not None:
-            fields = (
-                resolved_contract_fields(selected)
-                if selected.__module__ == "brz2obsidian.contracts"
-                else selected.model_fields
-            )
-            if isinstance(item, selected) and type(item) is not selected:
-                raise ValueError(
-                    "Caller-defined model subclasses are not owned schemas"
-                )
-            if type(item) is not dict and type(item) is not selected:
-                self.error(depth)
-                return
-            self.charge(
-                nodes=1 if self.validate else 0,
-                retained=1024 + 128 * len(fields),
-                temporary=256 + 64 * len(fields) if self.validate else 0,
-            )
-            for name, field in fields.items():
-                self.charge(steps=1)
-                child = self.field(
-                    item, name, None if field.is_required() else field.default
-                )
-                self.walk(field.annotation, child, depth + 1, metadata=field.metadata)
-                if self.validate:
-                    self.error(depth + 1)
-                    self.charge(steps=1 + len(field.metadata))
-                    if type(child) is str and any(
-                        getattr(rule, "pattern", None) is not None
-                        for rule in field.metadata
-                    ):
-                        self.charge(steps=len(child))
-                    if name in ("path", "current_path", "source_path", "target_path"):
-                        self.path(child)
-                    if name == "reviewed_assumptions" and type(child) in (tuple, list):
-                        self.mapping(len(child))
-            if self.validate:
-                self.validators(selected, item, depth)
-            if type(item) is dict:
-                for name, child in item.items():
-                    self.charge(steps=1)
-                    if name not in fields:
-                        self.walk(None, name, depth + 1)
-                        if (
-                            self.validate
-                            and selected.__module__ == "brz2obsidian.contracts"
-                            and selected.model_config.get("extra") == "forbid"
-                            and type(name) is str
-                        ):
-                            # Pinned Python-input ExtraForbidden retains the
-                            # already owned input by reference, not a rebuilt
-                            # subtree. Keep key/location and error charges.
-                            self.charge(nodes=1, steps=1, temporary=16)
-                        else:
-                            self.walk(None, child, depth + 1)
-                        self.error(depth + 1)
+            self._walk_model(selected, item, depth)
             return
         if type(item) is dict:
             self.charge(retained=256 + 64 * len(item))
@@ -693,6 +671,95 @@ class _ModelInventory:
                 )
                 self.walk(child_type, child, depth + 1)
             return
+        self._walk_leaf(item, depth)
+
+    def _begin_walk(self, annotation, item, depth, metadata):
+        if depth > self.depth_limit:
+            raise ModelBudgetError(self.nodes, self.steps)
+        self.charge(nodes=1, steps=1)
+        if self.validate:
+            branches = _content_branches(annotation, metadata)
+            if branches is not None:
+                self._tagged_content(branches, item, depth)
+                return False
+        if self.validate and annotation is type(None) and item is not None:
+            # A None leaf checks the existing input, not its descendants.
+            # Keep a conservative input-alias and error/location allowance.
+            self.charge(temporary=16)
+            self.error(depth)
+            return False
+        return True
+
+    @staticmethod
+    def _walk_model_type(annotation, item):
+        selected = (
+            annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
+            else None
+        )
+        if selected is None and isinstance(item, BaseModel) and annotation is None:
+            selected = type(item)
+        return selected
+
+    def _walk_extra_fields(self, selected, item, fields, depth):
+        for name, child in item.items():
+            self.charge(steps=1)
+            if name not in fields:
+                self.walk(None, name, depth + 1)
+                if (
+                    self.validate
+                    and selected.__module__ == "brz2obsidian.contracts"
+                    and selected.model_config.get("extra") == "forbid"
+                    and type(name) is str
+                ):
+                    # Pinned Python-input ExtraForbidden retains the
+                    # already owned input by reference, not a rebuilt
+                    # subtree. Keep key/location and error charges.
+                    self.charge(nodes=1, steps=1, temporary=16)
+                else:
+                    self.walk(None, child, depth + 1)
+                self.error(depth + 1)
+
+    def _walk_model(self, selected, item, depth):
+        fields = (
+            resolved_contract_fields(selected)
+            if selected.__module__ == "brz2obsidian.contracts"
+            else selected.model_fields
+        )
+        if isinstance(item, selected) and type(item) is not selected:
+            raise ValueError("Caller-defined model subclasses are not owned schemas")
+        if type(item) is not dict and type(item) is not selected:
+            self.error(depth)
+            return
+        self.charge(
+            nodes=1 if self.validate else 0,
+            retained=1024 + 128 * len(fields),
+            temporary=256 + 64 * len(fields) if self.validate else 0,
+        )
+        for name, field in fields.items():
+            self.charge(steps=1)
+            child = self.field(
+                item, name, None if field.is_required() else field.default
+            )
+            self.walk(field.annotation, child, depth + 1, metadata=field.metadata)
+            if self.validate:
+                self.error(depth + 1)
+                self.charge(steps=1 + len(field.metadata))
+                if type(child) is str and any(
+                    getattr(rule, "pattern", None) is not None
+                    for rule in field.metadata
+                ):
+                    self.charge(steps=len(child))
+                if name in ("path", "current_path", "source_path", "target_path"):
+                    self.path(child)
+                if name == "reviewed_assumptions" and type(child) in (tuple, list):
+                    self.mapping(len(child))
+        if self.validate:
+            self.validators(selected, item, depth)
+        if type(item) is dict:
+            self._walk_extra_fields(selected, item, fields, depth)
+
+    def _walk_leaf(self, item, depth):
         if isinstance(item, BaseModel):
             # A failed ordinary-union alternative does not inspect attributes of
             # a model of another type, but its error/work remains accounted.
@@ -1135,46 +1202,19 @@ def advance_work(work, returned=None, *, context=None):
     """One closed pure transition. No IO or caller-supplied executable exists."""
     from .core.attachment_validation import CandidateWork, advance_candidate
     from .core.reconciliation import ReconcileWork, advance_reconciliation
-    from .core.refresh import (
-        AttachmentViewsWork,
-        ClosureWork,
-        RefreshWork,
-        advance_attachment_views,
-        advance_closure,
-        advance_refresh,
-    )
     from .core.resolution import (
         ActionWork,
-        ApprovalWork,
         AttachmentActionWork,
         KeepCurrentWork,
         PlanWork,
-        PreservedMemoryWork,
-        ProducerActionWork,
         advance_action,
-        advance_approval,
         advance_attachment_action,
         advance_keep_current,
         advance_plan,
-        advance_preserved_memory,
-        advance_producer_action,
     )
-    from .core.review_composition import CompositionWork, advance_composition
-    from .core.selected_effects import SelectedEffectsWork, advance_selected_effects
 
     if context is None:
         context = ExecutionContext(object(), 0, 0, 0)
-    if type(work) is CompositionWork:
-        return advance_composition(work, returned, context)
-    if type(work) is SelectedEffectsWork:
-        return advance_selected_effects(work, returned)
-    if type(work) is ProducerActionWork:
-        return advance_producer_action(work, returned)
-    if type(work) is PreservedMemoryWork:
-        return advance_preserved_memory(work, returned)
-    if type(work) is ApprovalWork:
-        return advance_approval(work, returned)
-
     if type(work) is CandidateWork:
         return advance_candidate(work, returned)
     if type(work) is ReconcileWork:
@@ -1187,6 +1227,44 @@ def advance_work(work, returned=None, *, context=None):
         return advance_keep_current(work, returned, context)
     if type(work) is ActionWork:
         return advance_action(work, returned, context)
+    return _advance_review_work(work, returned, context)
+
+
+def _advance_review_work(work, returned, context):
+    from .core.resolution import (
+        ApprovalWork,
+        PreservedMemoryWork,
+        ProducerActionWork,
+        advance_approval,
+        advance_preserved_memory,
+        advance_producer_action,
+    )
+    from .core.review_composition import CompositionWork, advance_composition
+    from .core.selected_effects import SelectedEffectsWork, advance_selected_effects
+
+    if type(work) is CompositionWork:
+        return advance_composition(work, returned, context)
+    if type(work) is SelectedEffectsWork:
+        return advance_selected_effects(work, returned)
+    if type(work) is ProducerActionWork:
+        return advance_producer_action(work, returned)
+    if type(work) is PreservedMemoryWork:
+        return advance_preserved_memory(work, returned)
+    if type(work) is ApprovalWork:
+        return advance_approval(work, returned)
+    return _advance_refresh_work(work, returned)
+
+
+def _advance_refresh_work(work, returned):
+    from .core.refresh import (
+        AttachmentViewsWork,
+        ClosureWork,
+        RefreshWork,
+        advance_attachment_views,
+        advance_closure,
+        advance_refresh,
+    )
+
     if type(work) is AttachmentViewsWork:
         return advance_attachment_views(work, returned)
     if type(work) is ClosureWork:

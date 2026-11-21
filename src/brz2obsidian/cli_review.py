@@ -75,7 +75,7 @@ class CliReviewResult(ReconciliationContract):
     guidance: tuple[str, ...]
 
 
-def report(result, *, json_output):
+def _review_exit_code(result):
     exit_code = (
         0
         if result.status == "available"
@@ -103,12 +103,10 @@ def report(result, *, json_output):
         )
     ):
         exit_code = 1
-    if json_output:
-        print(result.model_dump_json(by_alias=True))
-        return exit_code
-    label = "review" if result.command == "review" else f"review {result.command}"
-    print(f"{label}: {result.status}")
-    print(result.summary)
+    return exit_code
+
+
+def _print_review_provenance(result):
     if result.source is not None:
         print(
             f"Source: {result.source.source_id}; module: {result.source.module_id} {result.source.module_version}; format: {result.source.format_version}"
@@ -129,23 +127,9 @@ def report(result, *, json_output):
         print("Diagnostic detail omitted; this result is a bounded summary.")
     if result.recovery_gaps:
         print("Recovery gaps: " + ", ".join(result.recovery_gaps))
-    if result.proposal_id is not None:
-        print(
-            f"Proposal: {result.proposal_id}; generation: {result.generation}; ready: {result.ready}"
-        )
-        print(
-            f"Review changes: {result.changes}; unresolved: {result.unresolved}; stale: {result.stale}"
-        )
-    if result.publication is not None:
-        print(
-            f"Publication: {result.publication}; retained history: {result.history_retained}"
-        )
-    if result.page is not None:
-        print(
-            f"Review page: {result.page.offset}; total: {result.page.total}; next: {result.page.next_offset}; omitted: {result.page.omitted}"
-        )
-    if result.omissions:
-        print("Omitted detail: " + ", ".join(result.omissions))
+
+
+def _print_review_history(result):
     if result.checkpoint is not None:
         print(
             f"Checkpoint: {result.checkpoint.commit}; "
@@ -167,6 +151,35 @@ def report(result, *, json_output):
             f"publication: {result.operation.publication}; "
             f"history: {result.operation.history}"
         )
+
+
+def report(result, *, json_output):
+    exit_code = _review_exit_code(result)
+    if json_output:
+        print(result.model_dump_json(by_alias=True))
+        return exit_code
+    label = "review" if result.command == "review" else f"review {result.command}"
+    print(f"{label}: {result.status}")
+    print(result.summary)
+    _print_review_provenance(result)
+    if result.proposal_id is not None:
+        print(
+            f"Proposal: {result.proposal_id}; generation: {result.generation}; ready: {result.ready}"
+        )
+        print(
+            f"Review changes: {result.changes}; unresolved: {result.unresolved}; stale: {result.stale}"
+        )
+    if result.publication is not None:
+        print(
+            f"Publication: {result.publication}; retained history: {result.history_retained}"
+        )
+    if result.page is not None:
+        print(
+            f"Review page: {result.page.offset}; total: {result.page.total}; next: {result.page.next_offset}; omitted: {result.page.omitted}"
+        )
+    if result.omissions:
+        print("Omitted detail: " + ", ".join(result.omissions))
+    _print_review_history(result)
     print("Next actions: " + ", ".join(result.next_actions))
     for guidance in result.guidance:
         print(guidance)

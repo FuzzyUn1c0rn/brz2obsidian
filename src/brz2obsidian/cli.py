@@ -193,35 +193,83 @@ def _unexpected_failure(args):
     return 1
 
 
+def _execute_check_vault(args):
+    from brz2obsidian.vault_check import check_vault
+
+    result = check_vault(args.vault)
+    if args.json_output:
+        print(result.model_dump_json(by_alias=True))
+    else:
+        from brz2obsidian.application.checking import finding_for_check
+
+        print(f"check-vault: {result.outcome}")
+        print(f"Vault: {result.vault.location}")
+        print(
+            f"Read Markdown files: {result.counts.read_markdown_files}; "
+            f"read Bases: {result.counts.read_base_files}"
+        )
+        for issue in result.issues:
+            location = issue.artifact or "vault"
+            print(finding_for_check(issue, result.outcome).message)
+            print(f"Details: {issue.code}; affected file: {location}")
+    return {"clean": 0, "issues": 2, "failed": 1}[result.outcome]
+
+
+def _print_conversion_counts(counts):
+    if counts.image_presentation_normalizations:
+        print(
+            f"Image presentation normalizations: {counts.image_presentation_normalizations}"
+        )
+    if counts.text_adaptations:
+        print(f"Text adaptations: {counts.text_adaptations}")
+    print(
+        f"Planned thought notes: {counts.planned_notes}; present payloads: {counts.present_assets}"
+    )
+    print(
+        f"Local references: {counts.source_references}; planned conversions: {counts.planned_references}"
+    )
+    if counts.planned_generated_embeds:
+        print(f"Planned generated image embeds: {counts.planned_generated_embeds}")
+    if counts.actual_generated_embeds:
+        print(f"Generated image embeds: {counts.actual_generated_embeds}")
+    if counts.actual_references is not None:
+        print(f"Converted local references: {counts.actual_references}")
+
+
+def _print_conversion_result(args, result):
+    from brz2obsidian.diagnostics import explain_issue
+
+    if args.json_output:
+        print(result.model_dump_json(by_alias=True))
+    else:
+        print(f"{result.operation}: {result.outcome}")
+        if args.source_kind == "local-api":
+            print(
+                "Local API acquisition is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Capture verification checks the retained copy, not live atomicity or universal discovery completeness."
+            )
+        if result.counts:
+            _print_conversion_counts(result.counts)
+        if result.receipt:
+            print(f"Verified vault published: {result.receipt.destination}")
+        if result.inspection:
+            print("Pending: " + ", ".join(result.inspection.pending_checks))
+        for issue in result.issues:
+            print(explain_issue(issue, result.operation))
+            print(f"Details: {issue.code}")
+            if issue.leftover_path:
+                print(f"Owned staging left at: {issue.leftover_path}")
+
+
 def _execute(args):
     if args.operation == "review":
         from .cli_review import run
 
         return run(args)
     if args.operation == "check-vault":
-        from brz2obsidian.vault_check import check_vault
-
-        result = check_vault(args.vault)
-        if args.json_output:
-            print(result.model_dump_json(by_alias=True))
-        else:
-            from brz2obsidian.application.checking import finding_for_check
-
-            print(f"check-vault: {result.outcome}")
-            print(f"Vault: {result.vault.location}")
-            print(
-                f"Read Markdown files: {result.counts.read_markdown_files}; "
-                f"read Bases: {result.counts.read_base_files}"
-            )
-            for issue in result.issues:
-                location = issue.artifact or "vault"
-                print(finding_for_check(issue, result.outcome).message)
-                print(f"Details: {issue.code}; affected file: {location}")
-        return {"clean": 0, "issues": 2, "failed": 1}[result.outcome]
+        return _execute_check_vault(args)
     from brz2obsidian import __version__
     from brz2obsidian.application.wiring import default_workflow, local_api_workflow
     from brz2obsidian.contracts import Issue, RunResult
-    from brz2obsidian.diagnostics import explain_issue
 
     options = {
         name: getattr(args, "api_" + name)
@@ -271,44 +319,5 @@ def _execute(args):
             if args.operation == "inspect"
             else workflow.convert(reference, args.destination)
         )
-    if args.json_output:
-        print(result.model_dump_json(by_alias=True))
-    else:
-        print(f"{result.operation}: {result.outcome}")
-        if args.source_kind == "local-api":
-            print(
-                "Local API acquisition is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Capture verification checks the retained copy, not live atomicity or universal discovery completeness."
-            )
-        if result.counts:
-            if result.counts.image_presentation_normalizations:
-                print(
-                    f"Image presentation normalizations: {result.counts.image_presentation_normalizations}"
-                )
-            if result.counts.text_adaptations:
-                print(f"Text adaptations: {result.counts.text_adaptations}")
-            print(
-                f"Planned thought notes: {result.counts.planned_notes}; present payloads: {result.counts.present_assets}"
-            )
-            print(
-                f"Local references: {result.counts.source_references}; planned conversions: {result.counts.planned_references}"
-            )
-            if result.counts.planned_generated_embeds:
-                print(
-                    f"Planned generated image embeds: {result.counts.planned_generated_embeds}"
-                )
-            if result.counts.actual_generated_embeds:
-                print(
-                    f"Generated image embeds: {result.counts.actual_generated_embeds}"
-                )
-            if result.counts.actual_references is not None:
-                print(f"Converted local references: {result.counts.actual_references}")
-        if result.receipt:
-            print(f"Verified vault published: {result.receipt.destination}")
-        if result.inspection:
-            print("Pending: " + ", ".join(result.inspection.pending_checks))
-        for issue in result.issues:
-            print(explain_issue(issue, result.operation))
-            print(f"Details: {issue.code}")
-            if issue.leftover_path:
-                print(f"Owned staging left at: {issue.leftover_path}")
+    _print_conversion_result(args, result)
     return {"clean": 0, "warnings": 2, "refused": 1, "failed": 1}[result.outcome]
