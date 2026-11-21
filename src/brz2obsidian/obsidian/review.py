@@ -30,6 +30,50 @@ class _UniqueLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
+def _candidate_lines(raw, output_format):
+    if output_format not in REVIEWABLE_OUTPUT_FORMATS:
+        raise ValueError("candidate_format_unsupported")
+    text = raw.decode("utf-8")
+    if (
+        raw.startswith(b"\xef\xbb\xbf")
+        or any(c < 32 and c not in (9, 10, 13) for c in raw)
+        or b"\r" in raw.replace(b"\r\n", b"")
+    ):
+        raise ValueError("candidate_encoding_uncertain")
+    return text.splitlines(keepends=True)
+
+
+def _membership_values(parsed, kind, membership_targets):
+    if not isinstance(parsed, list) or any(not isinstance(v, str) for v in parsed):
+        raise ValueError("candidate_membership_invalid")
+    representations = tuple(parsed)
+    selected = []
+    for representation in parsed:
+        matches = [
+            t
+            for t in membership_targets
+            if t.kind == kind and representation in t.representations
+        ]
+        if len(matches) != 1:
+            raise ValueError("candidate_target_unknown")
+        selected.append(matches[0])
+    return representations, tuple(selected)
+
+
+def _property_values(loader):
+    node = loader.get_single_node()
+    if node is None:
+        return
+    if not isinstance(node, yaml.MappingNode) or any(
+        k.tag != "tag:yaml.org,2002:str" for k, _ in node.value
+    ):
+        raise ValueError("property_key_unsupported")
+    values = loader.construct_document(node)
+    for key, value in node.value:
+        name = loader.construct_object(key)
+        yield key, value, name, values[name]
+
+
 def inspect_text_candidate(
     content,
     *,
@@ -52,16 +96,7 @@ def inspect_text_candidate(
     appearance_present = False
     status, issues = "safe", ()
     try:
-        if output_format not in REVIEWABLE_OUTPUT_FORMATS:
-            raise ValueError("candidate_format_unsupported")
-        text = raw.decode("utf-8")
-        if (
-            raw.startswith(b"\xef\xbb\xbf")
-            or any(c < 32 and c not in (9, 10, 13) for c in raw)
-            or b"\r" in raw.replace(b"\r\n", b"")
-        ):
-            raise ValueError("candidate_encoding_uncertain")
-        lines = text.splitlines(keepends=True)
+        lines = _candidate_lines(raw, output_format)
         if lines and lines[0].rstrip("\r\n") == "---":
             closing = next(
                 (
@@ -78,65 +113,38 @@ def inspect_text_candidate(
             body_start = len("".join(lines[: closing + 1]).encode("utf-8"))
             loader = _UniqueLoader(front)
             try:
-                node = loader.get_single_node()
-                if node is not None:
-                    if not isinstance(node, yaml.MappingNode) or any(
-                        k.tag != "tag:yaml.org,2002:str" for k, _ in node.value
-                    ):
-                        raise ValueError("property_key_unsupported")
-                    values = loader.construct_document(node)
-                    for key, value in node.value:
-                        name = loader.construct_object(key)
-                        parsed = values[name]
-                        component = {
-                            "source_collection_id": "collection",
-                            "source_item_id": "item",
-                        }.get(name)
-                        if component and (not isinstance(parsed, str) or not parsed):
-                            raise ValueError("candidate_identity_invalid")
-                        kind = {"categories": "category", "tags": "tag"}.get(name)
-                        representations, targets = (), ()
-                        if kind:
-                            if not isinstance(parsed, list) or any(
-                                not isinstance(v, str) for v in parsed
-                            ):
-                                raise ValueError("candidate_membership_invalid")
-                            representations = tuple(parsed)
-                            selected = []
-                            for representation in parsed:
-                                matches = [
-                                    t
-                                    for t in membership_targets
-                                    if t.kind == kind
-                                    and representation in t.representations
-                                ]
-                                if len(matches) != 1:
-                                    raise ValueError("candidate_target_unknown")
-                                selected.append(matches[0])
-                            targets = tuple(selected)
-                        if name == "appearance_category":
-                            appearance_present = True
-                            if parsed is not None and not isinstance(parsed, str):
-                                raise ValueError("candidate_appearance_invalid")
-                            appearance = parsed
-                        start = offset + len(
-                            front[: key.start_mark.index].encode("utf-8")
+                for key, value, name, parsed in _property_values(loader):
+                    component = {
+                        "source_collection_id": "collection",
+                        "source_item_id": "item",
+                    }.get(name)
+                    if component and (not isinstance(parsed, str) or not parsed):
+                        raise ValueError("candidate_identity_invalid")
+                    kind = {"categories": "category", "tags": "tag"}.get(name)
+                    representations, targets = (), ()
+                    if kind:
+                        representations, targets = _membership_values(
+                            parsed, kind, membership_targets
                         )
-                        end = offset + len(
-                            front[: value.end_mark.index].encode("utf-8")
+                    if name == "appearance_category":
+                        appearance_present = True
+                        if parsed is not None and not isinstance(parsed, str):
+                            raise ValueError("candidate_appearance_invalid")
+                        appearance = parsed
+                    start = offset + len(front[: key.start_mark.index].encode("utf-8"))
+                    end = offset + len(front[: value.end_mark.index].encode("utf-8"))
+                    properties.append(
+                        ReviewedProperty(
+                            key=name,
+                            span=StructureSpan(start=start, end=end),
+                            raw=raw[start:end],
+                            identity_component=component,
+                            identity_value=parsed if component else None,
+                            membership_kind=kind,
+                            representations=representations,
+                            targets=targets,
                         )
-                        properties.append(
-                            ReviewedProperty(
-                                key=name,
-                                span=StructureSpan(start=start, end=end),
-                                raw=raw[start:end],
-                                identity_component=component,
-                                identity_value=parsed if component else None,
-                                membership_kind=kind,
-                                representations=representations,
-                                targets=targets,
-                            )
-                        )
+                    )
             finally:
                 loader.dispose()
         elif raw.startswith(b"---"):

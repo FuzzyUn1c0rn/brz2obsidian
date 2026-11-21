@@ -48,7 +48,7 @@ def _json(value):
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
+def _check_plan(plan, run_metadata):
     snapshot = plan.analysis.snapshot
     if (
         plan.output_format not in (8, 9)
@@ -77,7 +77,6 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
-    items = {item.key: item for item in snapshot.items}
     validate_references(snapshot, "rendering")
     if plan.icon_snapshots != expected_icon_snapshots(
         snapshot, {t.item_key for t in plan.item_targets if t.created}
@@ -94,6 +93,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
     checked_plan = build_plan(checked_analysis, output_format=plan.output_format)
+    _check_document_evidence(plan, checked_analysis, checked_plan)
+    _check_gap_obligations(plan, checked_analysis, checked_plan)
+
+
+def _check_document_evidence(plan, checked_analysis, checked_plan):
     if (
         plan.counts.text_adaptations != checked_analysis.counts.text_adaptations
         or plan.counts.image_presentation_normalizations
@@ -137,6 +141,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
+
+
+def _check_gap_obligations(plan, checked_analysis, checked_plan):
+    snapshot = plan.analysis.snapshot
     expected_targets = checked_plan.item_targets
     expected_gaps, expected_presentations = (
         checked_plan.source_gaps,
@@ -193,17 +201,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
-    presentations = {p.presentation.owner: p for p in plan.generated_presentations}
-    documents = {document.key: document for document in snapshot.documents}
-    icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
-    item_targets = {target.item_key: target for target in plan.item_targets}
-    asset_targets = {target.asset_id: target for target in plan.asset_targets}
-    asset_paths = {key: target.relative_path for key, target in asset_targets.items()}
-    neighbors_by_item = navigation_index(snapshot.relationships)
-    category_links, native_tags = property_memberships(plan, item_targets)
-    resources_by_owner = defaultdict(list)
-    for asset in sorted(snapshot.assets, key=lambda asset: asset.asset_id):
-        resources_by_owner[asset.owner].append(asset)
+
+
+def _check_icon_kinds(plan, asset_paths):
     # Destination eligibility matches the native Base views and source-free
     # checker. A neutral source icon may be valid without being an Obsidian image.
     for selection in plan.icon_snapshots:
@@ -231,30 +231,101 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                         ),
                     )
                 )
-    files = []
-    counts = plan.counts.model_copy(
-        update={
-            "actual_generated_embeds": sum(
-                len(p.image_paths) for p in plan.generated_presentations
-            ),
-            "actual_references": sum(
-                len(documents[key].references)
-                for target in plan.item_targets
-                if target.created
-                for key in items[target.item_key].document_ids
-            ),
-        }
-    )
 
-    def add(path, content):
-        files.append(
-            GeneratedFile(
-                relative_path=path,
-                content=content,
-                sha256=hashlib.sha256(content).hexdigest(),
-            )
+
+def _note_appearance(item, icon, neighbors, plan, asset_paths, item_targets, items):
+    text = ""
+    if item.role == "definition":
+        hierarchy = relationship_sections(
+            neighbors, item_targets, items, headings=("Parents", "Children")
         )
+        if hierarchy:
+            text += hierarchy + "\n"
+        if any(
+            g.gap.owner == item.key and g.outcome == "unknown_note"
+            for g in plan.source_gaps
+        ):
+            text += "> [!warning] Source category note unavailable\n> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+    elif icon is not None:
+        text += "![[" + asset_paths[icon] + "]]\n\n"
+    return text
 
+
+def _note_icon_warnings(item, icon, source_gaps, items, item_targets):
+    text = ""
+    for gap in source_gaps:
+        if gap.gap.role != "definition_icon":
+            continue
+        appearance = (
+            "a farther selected appearance-category icon is used"
+            if icon is not None
+            else "appearance is neutral"
+        )
+        if gap.gap.owner == item.key:
+            text += (
+                "> [!warning] Source category icon unavailable\n> Source category icon is absent; "
+                + appearance
+                + ". See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+            )
+        elif item.key in gap.affected_member_keys:
+            provider = items[gap.provider_key]
+            provider_target = item_targets[provider.key]
+            text += (
+                "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
+                + note_link(provider_target, provider.title)
+                + "; "
+                + appearance
+                + ". See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+            )
+    return text
+
+
+def _append_note_sections(text, resources, relationships, navigation):
+    if resources or relationships:
+        text += append_boundary(text)
+    if resources:
+        text += "\n\n" + resources
+    if relationships:
+        endings = text.replace("\r\n", "\n").replace("\r", "\n")
+        separator = (
+            ""
+            if endings.endswith("\n\n")
+            else "\n"
+            if endings.endswith("\n")
+            else "\n\n"
+        )
+        text += separator + relationships
+    if navigation:
+        text += append_boundary(text)
+        endings = text.replace("\r\n", "\n").replace("\r", "\n")
+        text += (
+            ""
+            if endings.endswith("\n\n")
+            else "\n"
+            if endings.endswith("\n")
+            else "\n\n"
+        ) + navigation
+    return text
+
+
+def _add_notes(
+    plan,
+    add,
+    items,
+    documents,
+    icon_snapshots,
+    item_targets,
+    asset_targets,
+    asset_paths,
+    memberships,
+):
+    snapshot = plan.analysis.snapshot
+    presentations = {p.presentation.owner: p for p in plan.generated_presentations}
+    neighbors_by_item = navigation_index(snapshot.relationships)
+    category_links, native_tags = memberships
+    resources_by_owner = defaultdict(list)
+    for asset in sorted(snapshot.assets, key=lambda asset: asset.asset_id):
+        resources_by_owner[asset.owner].append(asset)
     for target in plan.item_targets:
         if not target.created:
             continue
@@ -277,43 +348,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         if presentation:
             text += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
-        if item.role == "definition":
-            hierarchy = relationship_sections(
-                neighbors, item_targets, items, headings=("Parents", "Children")
-            )
-            if hierarchy:
-                text += hierarchy + "\n"
-            if any(
-                g.gap.owner == item.key and g.outcome == "unknown_note"
-                for g in plan.source_gaps
-            ):
-                text += "> [!warning] Source category note unavailable\n> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
-        elif icon is not None:
-            text += "![[" + asset_paths[icon] + "]]\n\n"
-        for gap in plan.source_gaps:
-            if gap.gap.role != "definition_icon":
-                continue
-            appearance = (
-                "a farther selected appearance-category icon is used"
-                if icon is not None
-                else "appearance is neutral"
-            )
-            if gap.gap.owner == item.key:
-                text += (
-                    "> [!warning] Source category icon unavailable\n> Source category icon is absent; "
-                    + appearance
-                    + ". See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
-                )
-            elif item.key in gap.affected_member_keys:
-                provider = items[gap.provider_key]
-                provider_target = item_targets[provider.key]
-                text += (
-                    "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
-                    + note_link(provider_target, provider.title)
-                    + "; "
-                    + appearance
-                    + ". See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
-                )
+        text += _note_appearance(
+            item, icon, neighbors, plan, asset_paths, item_targets, items
+        )
+        text += _note_icon_warnings(item, icon, plan.source_gaps, items, item_targets)
         if item.role == "definition":
             text += CATEGORY_VIEWS + "\n"
         if item.label:
@@ -341,34 +379,12 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             if item.role == "definition"
             else ("Parents", "Children", "Related"),
         )
-        if resources or relationships:
-            text += append_boundary(text)
-        if resources:
-            text += "\n\n" + resources
-        if relationships:
-            endings = text.replace("\r\n", "\n").replace("\r", "\n")
-            separator = (
-                ""
-                if endings.endswith("\n\n")
-                else "\n"
-                if endings.endswith("\n")
-                else "\n\n"
-            )
-            text += separator + relationships
-        navigation = ""
-        if item.key == plan.analysis.entry_key:
-            navigation += HOME_CATEGORIES
-        if navigation:
-            text += append_boundary(text)
-            endings = text.replace("\r\n", "\n").replace("\r", "\n")
-            text += (
-                ""
-                if endings.endswith("\n\n")
-                else "\n"
-                if endings.endswith("\n")
-                else "\n\n"
-            ) + navigation
+        navigation = HOME_CATEGORIES if item.key == plan.analysis.entry_key else ""
+        text = _append_note_sections(text, resources, relationships, navigation)
         add(target.relative_path, text.encode("utf-8"))
+
+
+def _add_configuration(plan, run_metadata, add):
     home = next(
         target.relative_path
         for target in plan.item_targets
@@ -425,6 +441,68 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             }
         ),
     )
+    return configuration, core_plugins
+
+
+def _image_normalization_report(plan):
+    if not plan.counts.image_presentation_normalizations:
+        return ""
+    snapshot = plan.analysis.snapshot
+    report = "\n> [!warning] Image sizing normalized\n> Original image sizing declarations use ordinary responsive inline Markdown presentation; exact percentage sizing is not reproduced. Review placement and readability in each affected note, and adjust manually if desired. Images retain their original bytes and aspect ratio.\n\n"
+    for document in sorted(snapshot.documents, key=lambda d: d.key):
+        target = next(t for t in plan.item_targets if t.item_key == document.owner)
+        for reference in document.references:
+            normalization = reference.presentation_normalization
+            if normalization:
+                declaration = (
+                    normalization.declaration.replace("`", "\\`")
+                    .replace("\r", " ")
+                    .replace("\n", " ")
+                )
+                report += (
+                    "- "
+                    + note_link(target, target.original_title)
+                    + ": `"
+                    + declaration
+                    + "`; exact declaration, scoped document codepoint span/digest and original reference remain in migration-record.json.\n"
+                )
+    return report
+
+
+def _source_warning_report(plan):
+    report = ""
+    depth_warnings = [i for i in plan.issues if i.code == "icon_lookup_depth"]
+    if depth_warnings:
+        target_by_key = {t.item_key: t for t in plan.item_targets}
+        report += "\n## Native icon lookup warnings\n\nIcon lookup exceeds 8 links. Native dashboards display no inherited icon for these lookups; ordinary body snapshots use the full finite migration-time chain. Memberships and owned icon declarations are unchanged. After category icon, membership or provider edits, close and reopen affected category dashboards and Categories overview; open views may retain stale or inconsistent icons and statuses.\n\n"
+        for issue in depth_warnings:
+            report += (
+                "- "
+                + " -> ".join(
+                    note_link(target_by_key[key], target_by_key[key].original_title)
+                    for key in issue.affected
+                )
+                + "\n"
+            )
+    if plan.issues:
+        report += "\n## Source warnings\n\n"
+        for issue in plan.issues:
+            affected_notes = [
+                note_link(t, t.original_title)
+                for t in plan.item_targets
+                if t.created and t.item_key in issue.affected
+            ]
+            message = (
+                re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", issue.message)
+                .replace("\r", " ")
+                .replace("\n", " ")
+            )
+            report += f"- {', '.join(affected_notes)} — {issue.code} ({issue.rule_id}): {message} {issue.guidance}\n"
+    return report
+
+
+def _add_migration_report(plan, add):
+    snapshot = plan.analysis.snapshot
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     if plan.counts.text_adaptations:
@@ -467,52 +545,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     if any(a.video_presentation for a in snapshot.assets):
         report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
     report += gap_report(plan)
-    if plan.counts.image_presentation_normalizations:
-        report += "\n> [!warning] Image sizing normalized\n> Original image sizing declarations use ordinary responsive inline Markdown presentation; exact percentage sizing is not reproduced. Review placement and readability in each affected note, and adjust manually if desired. Images retain their original bytes and aspect ratio.\n\n"
-        for document in sorted(snapshot.documents, key=lambda d: d.key):
-            target = next(t for t in plan.item_targets if t.item_key == document.owner)
-            for reference in document.references:
-                normalization = reference.presentation_normalization
-                if normalization:
-                    declaration = (
-                        normalization.declaration.replace("`", "\\`")
-                        .replace("\r", " ")
-                        .replace("\n", " ")
-                    )
-                    report += (
-                        "- "
-                        + note_link(target, target.original_title)
-                        + ": `"
-                        + declaration
-                        + "`; exact declaration, scoped document codepoint span/digest and original reference remain in migration-record.json.\n"
-                    )
-    depth_warnings = [i for i in plan.issues if i.code == "icon_lookup_depth"]
-    if depth_warnings:
-        target_by_key = {t.item_key: t for t in plan.item_targets}
-        report += "\n## Native icon lookup warnings\n\nIcon lookup exceeds 8 links. Native dashboards display no inherited icon for these lookups; ordinary body snapshots use the full finite migration-time chain. Memberships and owned icon declarations are unchanged. After category icon, membership or provider edits, close and reopen affected category dashboards and Categories overview; open views may retain stale or inconsistent icons and statuses.\n\n"
-        for issue in depth_warnings:
-            report += (
-                "- "
-                + " -> ".join(
-                    note_link(target_by_key[key], target_by_key[key].original_title)
-                    for key in issue.affected
-                )
-                + "\n"
-            )
-    if plan.issues:
-        report += "\n## Source warnings\n\n"
-        for issue in plan.issues:
-            affected_notes = [
-                note_link(t, t.original_title)
-                for t in plan.item_targets
-                if t.created and t.item_key in issue.affected
-            ]
-            message = (
-                re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", issue.message)
-                .replace("\r", " ")
-                .replace("\n", " ")
-            )
-            report += f"- {', '.join(affected_notes)} — {issue.code} ({issue.rule_id}): {message} {issue.guidance}\n"
+    report += _image_normalization_report(plan)
+    report += _source_warning_report(plan)
     if any(r.kind in {"hierarchy", "related"} for r in snapshot.relationships):
         report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
     listing = uncreated_listing(plan)
@@ -528,18 +562,20 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         add(plan.tag_memberships_path, listing.encode("utf-8"))
         report += "\n[[Tag memberships.md|Tag memberships]] lists assignments on uncreated targets and source tags without assignments.\n"
     add("MIGRATION REPORT.md", report.encode())
-    assets = {asset.asset_id: asset for asset in snapshot.assets}
-    copies = tuple(
-        CopyEntry(
-            relative_path=target.relative_path,
-            asset_id=target.asset_id,
-            expected_length=assets[target.asset_id].actual_length,
-            expected_sha256=assets[target.asset_id].actual_sha256,
-        )
-        for target in plan.asset_targets
-        if target.relative_path is not None
-        and assets[target.asset_id].availability == "present"
-    )
+
+
+def _migration_record(
+    plan,
+    run_metadata,
+    counts,
+    configuration,
+    core_plugins,
+    items,
+    item_targets,
+    icon_snapshots,
+    assets,
+):
+    snapshot = plan.analysis.snapshot
     document_records = {
         d.key: dict(
             **d.model_dump(exclude={"text"}),
@@ -650,10 +686,83 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         for evidence in snapshot.original_evidence
     )
     record_json = json.dumps(record, ensure_ascii=False, indent=2)[:-1]
+    return (record_json + ',"original_evidence":[' + original_values + "]}\n").encode(
+        "utf-8"
+    )
+
+
+def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
+    _check_plan(plan, run_metadata)
+    snapshot = plan.analysis.snapshot
+    items = {item.key: item for item in snapshot.items}
+    documents = {document.key: document for document in snapshot.documents}
+    icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
+    item_targets = {target.item_key: target for target in plan.item_targets}
+    asset_targets = {target.asset_id: target for target in plan.asset_targets}
+    asset_paths = {key: target.relative_path for key, target in asset_targets.items()}
+    memberships = property_memberships(plan, item_targets)
+    _check_icon_kinds(plan, asset_paths)
+    files = []
+    counts = plan.counts.model_copy(
+        update={
+            "actual_generated_embeds": sum(
+                len(p.image_paths) for p in plan.generated_presentations
+            ),
+            "actual_references": sum(
+                len(documents[key].references)
+                for target in plan.item_targets
+                if target.created
+                for key in items[target.item_key].document_ids
+            ),
+        }
+    )
+
+    def add(path, content):
+        files.append(
+            GeneratedFile(
+                relative_path=path,
+                content=content,
+                sha256=hashlib.sha256(content).hexdigest(),
+            )
+        )
+
+    _add_notes(
+        plan,
+        add,
+        items,
+        documents,
+        icon_snapshots,
+        item_targets,
+        asset_targets,
+        asset_paths,
+        memberships,
+    )
+    configuration, core_plugins = _add_configuration(plan, run_metadata, add)
+    _add_migration_report(plan, add)
+    assets = {asset.asset_id: asset for asset in snapshot.assets}
+    copies = tuple(
+        CopyEntry(
+            relative_path=target.relative_path,
+            asset_id=target.asset_id,
+            expected_length=assets[target.asset_id].actual_length,
+            expected_sha256=assets[target.asset_id].actual_sha256,
+        )
+        for target in plan.asset_targets
+        if target.relative_path is not None
+        and assets[target.asset_id].availability == "present"
+    )
     add(
         "migration-record.json",
-        (record_json + ',"original_evidence":[' + original_values + "]}\n").encode(
-            "utf-8"
+        _migration_record(
+            plan,
+            run_metadata,
+            counts,
+            configuration,
+            core_plugins,
+            items,
+            item_targets,
+            icon_snapshots,
+            assets,
         ),
     )
     manifest = tuple(file.relative_path for file in files) + tuple(

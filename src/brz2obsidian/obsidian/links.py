@@ -131,88 +131,12 @@ def interpret_link_target(
         else None
     )
 
-    fragments, anchors, status, structure = (
-        [],
-        [],
-        "unknown" if content is None else "supported",
-        None,
-    )
+    fragments, anchors, status, structure = (), (), "unknown", None
     if content is not None:
         structure = interpret_structure(
             content, output_format=output_format, membership_targets=membership_targets
         )
-        try:
-            text = content.data.decode("utf-8")
-        except UnicodeDecodeError:
-            status = "unsupported"
-        else:
-            if source_path is not None and source_path.casefold().endswith(".base"):
-                try:
-                    anchors = list(view_anchors(text))
-                    fragments = [anchor.fragment for anchor in anchors]
-                except ValueError, yaml.YAMLError:
-                    status = "unsupported"
-                return LinkTargetFacts(
-                    schema_id="brz2obsidian.link-target-facts",
-                    schema_version=1,
-                    target_id=target_id,
-                    existence=existence,
-                    content=content,
-                    fragments=tuple(fragments),
-                    anchors=tuple(anchors),
-                    structure=structure,
-                    memberships=memberships,
-                    interpretation=status,
-                    file_roles=roles,
-                )
-            ranges, issues = _code_ranges(text)
-            if issues:
-                status = "unsupported"
-            headings, offset = [], 0
-
-            def append(kind, parts):
-                fragment = LinkFragment(
-                    kind=kind, value="#".join(value for value, _ in parts)
-                )
-                spans = tuple(
-                    StructureSpan(
-                        start=len(text[:start].encode()),
-                        end=len(text[: start + len(value)].encode()),
-                    )
-                    for value, start in parts
-                )
-                fragments.append(fragment)
-                anchors.append(
-                    LinkAnchor(
-                        fragment=fragment,
-                        spans=spans,
-                        raw_parts=tuple(value.encode() for value, _ in parts),
-                    )
-                )
-
-            for line in text.splitlines(keepends=True):
-                line_text = line.rstrip("\r\n")
-                heading = re.fullmatch(r"(#{1,6}) (.+)", line_text)
-                block = re.search(r"(?:^| )\^([A-Za-z0-9-]+)$", line_text)
-                if not any(a <= offset < b for a, b in ranges):
-                    if heading and any(
-                        ord(c) < 32 or c in "*_`\\<>[]#" for c in heading[2]
-                    ):
-                        status = "unsupported"
-                        heading = None
-                    if heading:
-                        while headings and headings[-1][0] >= len(heading[1]):
-                            headings.pop()
-                        part = heading[2], offset + heading.start(2)
-                        headings.append((len(heading[1]), part))
-                        append("heading", (part,))
-                        if len(headings) > 1:
-                            append("heading", tuple(part for _, part in headings))
-                    if block and not any(
-                        a <= offset + block.start(1) < b for a, b in ranges
-                    ):
-                        append("block", ((block[1], offset + block.start(1)),))
-                offset += len(line)
+        fragments, anchors, status = _target_anchors(content, source_path)
     return LinkTargetFacts(
         schema_id="brz2obsidian.link-target-facts",
         schema_version=1,
@@ -226,6 +150,68 @@ def interpret_link_target(
         interpretation=status,
         file_roles=roles,
     )
+
+
+def _target_anchors(content, source_path):
+    try:
+        text = content.data.decode("utf-8")
+    except UnicodeDecodeError:
+        return (), (), "unsupported"
+    if source_path is not None and source_path.casefold().endswith(".base"):
+        anchors = []
+        try:
+            anchors = list(view_anchors(text))
+            fragments = [anchor.fragment for anchor in anchors]
+        except ValueError, yaml.YAMLError:
+            return (), anchors, "unsupported"
+        return fragments, anchors, "supported"
+    return _markdown_anchors(text)
+
+
+def _markdown_anchors(text):
+    fragments, anchors = [], []
+    ranges, issues = _code_ranges(text)
+    status = "unsupported" if issues else "supported"
+    headings, offset = [], 0
+
+    def append(kind, parts):
+        fragment = LinkFragment(kind=kind, value="#".join(value for value, _ in parts))
+        spans = tuple(
+            StructureSpan(
+                start=len(text[:start].encode()),
+                end=len(text[: start + len(value)].encode()),
+            )
+            for value, start in parts
+        )
+        fragments.append(fragment)
+        anchors.append(
+            LinkAnchor(
+                fragment=fragment,
+                spans=spans,
+                raw_parts=tuple(value.encode() for value, _ in parts),
+            )
+        )
+
+    for line in text.splitlines(keepends=True):
+        line_text = line.rstrip("\r\n")
+        heading = re.fullmatch(r"(#{1,6}) (.+)", line_text)
+        block = re.search(r"(?:^| )\^([A-Za-z0-9-]+)$", line_text)
+        if not any(a <= offset < b for a, b in ranges):
+            if heading and any(ord(c) < 32 or c in "*_`\\<>[]#" for c in heading[2]):
+                status = "unsupported"
+                heading = None
+            if heading:
+                while headings and headings[-1][0] >= len(heading[1]):
+                    headings.pop()
+                part = heading[2], offset + heading.start(2)
+                headings.append((len(heading[1]), part))
+                append("heading", (part,))
+                if len(headings) > 1:
+                    append("heading", tuple(part for _, part in headings))
+            if block and not any(a <= offset + block.start(1) < b for a, b in ranges):
+                append("block", ((block[1], offset + block.start(1)),))
+        offset += len(line)
+    return fragments, anchors, status
 
 
 def _relationship_entries(text):
@@ -248,6 +234,87 @@ def _relationship_entries(text):
     return entries
 
 
+def _link_destination(
+    match, wiki, raw_destination, alias, display, source_path, path_mode, output_format
+):
+    try:
+        angled = (
+            not wiki
+            and raw_destination.startswith("<")
+            and raw_destination.endswith(">")
+        )
+        if (
+            wiki and (match["w"].count("|") > 1 or ("|" in match["w"] and not alias))
+        ) or (not wiki and not angled and any(c.isspace() for c in raw_destination)):
+            raise ValueError("Unsupported destination")
+        semantic_destination = raw_destination[1:-1] if angled else raw_destination
+        # A literal drive-rooted path is outside managed-vault resolution.
+        # Preserve its spelling; percent signs and fragments are opaque here.
+        external = (
+            output_format in QUALIFIED_OUTPUT_FORMATS
+            and not wiki
+            and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
+            and not any(ord(c) < 32 for c in semantic_destination)
+        )
+        target_text, marker, fragment_text = semantic_destination.partition("#")
+        if not wiki and not external:
+            target_text, fragment_text = (
+                _decode(target_text),
+                _decode(fragment_text),
+            )
+        if (
+            not external
+            and marker
+            and (
+                not fragment_text
+                or (
+                    fragment_text.startswith("^")
+                    and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
+                )
+                or any(
+                    not part or any(c in "[]|^" for c in part)
+                    for part in fragment_text.removeprefix("^").split("#")
+                )
+            )
+        ):
+            raise ValueError("Unsupported fragment")
+        fragment = (
+            None
+            if external or not fragment_text
+            else LinkFragment(
+                kind="block" if fragment_text.startswith("^") else "heading",
+                value=fragment_text.removeprefix("^"),
+            )
+        )
+        external = external or (
+            not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
+        )
+        query = (
+            None
+            if external
+            else _query(
+                target_text,
+                source_path,
+                "relative"
+                if output_format in QUALIFIED_OUTPUT_FORMATS
+                and path_mode == "vault"
+                and not wiki
+                and target_text.startswith(("./", "../"))
+                else "shortened"
+                if output_format == 9
+                and path_mode == "vault"
+                and wiki
+                and target_text
+                and "/" not in target_text
+                else path_mode,
+                (f"[[{target_text}]]", f"[[{target_text}|{display}]]") if wiki else (),
+            )
+        )
+    except ValueError, UnicodeDecodeError:
+        query, fragment, external = None, None, False
+    return query, fragment, external
+
+
 def interpret_links(
     content,
     *,
@@ -260,7 +327,7 @@ def interpret_links(
     output_format=7,
     record_format=None,
 ):
-    occurrences, issues, consumed = [], [], []
+    occurrences, issues = [], []
 
     def document():
         return LinkDocument(
@@ -294,102 +361,74 @@ def interpret_links(
     if output_format in QUALIFIED_OUTPUT_FORMATS:
         masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
+    occurrences, consumed = _scan_links(
+        text,
+        masked,
+        issues,
+        document_id,
+        source_path,
+        path_mode,
+        targets,
+        target_facts,
+        inventory,
+        output_format,
+    )
+    residue = list(text)
+    for start, end in masked + consumed:
+        residue[start:end] = " " * (end - start)
+    residue = "".join(residue)
+    if (
+        "[[" in residue
+        or "](" in residue
+        or re.search(
+            r"!?\[[^\[\]\n]+\]\s*\[[^\[\]\n]*\]|<(?:a|img|iframe|audio|video|source|object|embed)\b",
+            residue,
+            re.IGNORECASE,
+        )
+        or re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:", residue)
+    ):
+        issues.append("link_syntax_unsupported")
+    return document()
+
+
+def _scan_links(
+    text,
+    masked,
+    issues,
+    document_id,
+    source_path,
+    path_mode,
+    targets,
+    target_facts,
+    inventory,
+    output_format,
+):
+    occurrences, consumed = [], []
     relationship_entries = _relationship_entries(text) if output_format == 9 else {}
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
     )
     for match in re.finditer(pattern, text):
+        consumed.append(match.span())
         escaped = len(text[: match.start()]) - len(text[: match.start()].rstrip("\\"))
         if escaped % 2 or any(a <= match.start() < b for a, b in masked):
-            consumed.append((match.start(), match.end()))
             continue
-        consumed.append((match.start(), match.end()))
         wiki = match["w"] is not None
         syntax = "wiki" if wiki else "markdown"
         raw_destination, _, alias = (
             match["w"].partition("|") if wiki else (match["m"], "", match["label"])
         )
         display = alias if alias or not wiki else raw_destination
-        try:
-            angled = (
-                not wiki
-                and raw_destination.startswith("<")
-                and raw_destination.endswith(">")
-            )
-            if (
-                wiki
-                and (match["w"].count("|") > 1 or ("|" in match["w"] and not alias))
-            ) or (
-                not wiki and not angled and any(c.isspace() for c in raw_destination)
-            ):
-                raise ValueError("Unsupported destination")
-            semantic_destination = raw_destination[1:-1] if angled else raw_destination
-            # A literal drive-rooted path is outside managed-vault resolution.
-            # Preserve its spelling; percent signs and fragments are opaque here.
-            external = (
-                output_format in QUALIFIED_OUTPUT_FORMATS
-                and not wiki
-                and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
-                and not any(ord(c) < 32 for c in semantic_destination)
-            )
-            target_text, marker, fragment_text = semantic_destination.partition("#")
-            if not wiki and not external:
-                target_text, fragment_text = (
-                    _decode(target_text),
-                    _decode(fragment_text),
-                )
-            if (
-                not external
-                and marker
-                and (
-                    not fragment_text
-                    or (
-                        fragment_text.startswith("^")
-                        and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
-                    )
-                    or any(
-                        not part or any(c in "[]|^" for c in part)
-                        for part in fragment_text.removeprefix("^").split("#")
-                    )
-                )
-            ):
-                raise ValueError("Unsupported fragment")
-            fragment = (
-                None
-                if external or not fragment_text
-                else LinkFragment(
-                    kind="block" if fragment_text.startswith("^") else "heading",
-                    value=fragment_text.removeprefix("^"),
-                )
-            )
-            external = external or (
-                not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
-            )
-            query = (
-                None
-                if external
-                else _query(
-                    target_text,
-                    source_path,
-                    "relative"
-                    if output_format in QUALIFIED_OUTPUT_FORMATS
-                    and path_mode == "vault"
-                    and not wiki
-                    and target_text.startswith(("./", "../"))
-                    else "shortened"
-                    if output_format == 9
-                    and path_mode == "vault"
-                    and wiki
-                    and target_text
-                    and "/" not in target_text
-                    else path_mode,
-                    (f"[[{target_text}]]", f"[[{target_text}|{display}]]")
-                    if wiki
-                    else (),
-                )
-            )
-        except ValueError, UnicodeDecodeError:
-            query, fragment, external = None, None, False
+        query, fragment, external = _link_destination(
+            match,
+            wiki,
+            raw_destination,
+            alias,
+            display,
+            source_path,
+            path_mode,
+            output_format,
+        )
         if query is None and not external:
             issues.append("path_unsupported")
         meaning = resolve_link_meaning(
@@ -417,25 +456,10 @@ def interpret_links(
                     start=destination_start,
                     end=destination_start + len(raw_destination.encode()),
                 ),
-                raw=content.data[start:end],
+                raw=match[0].encode(),
                 query=query,
                 meaning=meaning,
                 relationship_heading=relationship_entries.get(match.span()),
             )
         )
-    residue = list(text)
-    for start, end in masked + consumed:
-        residue[start:end] = " " * (end - start)
-    residue = "".join(residue)
-    if (
-        "[[" in residue
-        or "](" in residue
-        or re.search(
-            r"!?\[[^\[\]\n]+\]\s*\[[^\[\]\n]*\]|<(?:a|img|iframe|audio|video|source|object|embed)\b",
-            residue,
-            re.IGNORECASE,
-        )
-        or re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:", residue)
-    ):
-        issues.append("link_syntax_unsupported")
-    return document()
+    return occurrences, consumed

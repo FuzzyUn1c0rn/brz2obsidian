@@ -75,6 +75,15 @@ def render_link_replacement(
         path = posixpath.relpath(path, posixpath.dirname(document.source_path) or ".")
         if relative_markdown and not path.startswith(("../", "./")):
             path = "./" + path
+    replacement = _replacement(occurrence, path, selected)
+    if not agrees(replacement, selected, output_format=output_format):
+        raise ValueError(
+            "The selected destination cannot preserve the offered link meaning"
+        )
+    return replacement
+
+
+def _replacement(occurrence, path, selected):
     fragment = ""
     if selected.fragment is not None:
         fragment = (
@@ -98,9 +107,5 @@ def render_link_replacement(
             destination = "<" + destination + ">"
         replacement = (
             occurrence.raw[:start] + destination.encode() + occurrence.raw[end:]
-        )
-    if not agrees(replacement, selected, output_format=output_format):
-        raise ValueError(
-            "The selected destination cannot preserve the offered link meaning"
         )
     return replacement

@@ -13,6 +13,27 @@ def plain(value):
     )
 
 
+def _diagnostic_details(diagnostic, owner, items, targets, paths):
+    text = ""
+    if diagnostic.provider_key:
+        text += "  Provider: " + owner + ".\n"
+        text += (
+            f"  Affected included members ({len(diagnostic.affected_member_keys)}):\n"
+        )
+        for key in diagnostic.affected_member_keys:
+            member = items[key]
+            text += (
+                "  - "
+                + note_link(targets[key], member.title)
+                + "; thought ID "
+                + plain(key)
+                + "\n"
+            )
+    for image_id in diagnostic.image_asset_ids:
+        text += "  - Image " + plain(image_id) + ": [[" + paths[image_id] + "]]\n"
+    return text
+
+
 def gap_report(plan):
     snapshot = plan.analysis.snapshot
     findings = [f for f in snapshot.findings if f.kind == "known_absent_payload"]
@@ -59,24 +80,5 @@ def gap_report(plan):
                 + "\n"
             )
             if diagnostic:
-                if diagnostic.provider_key:
-                    text += "  Provider: " + owner + ".\n"
-                    text += f"  Affected included members ({len(diagnostic.affected_member_keys)}):\n"
-                    for key in diagnostic.affected_member_keys:
-                        member = items[key]
-                        text += (
-                            "  - "
-                            + note_link(targets[key], member.title)
-                            + "; thought ID "
-                            + plain(key)
-                            + "\n"
-                        )
-                for image_id in diagnostic.image_asset_ids:
-                    text += (
-                        "  - Image "
-                        + plain(image_id)
-                        + ": [["
-                        + paths[image_id]
-                        + "]]\n"
-                    )
+                text += _diagnostic_details(diagnostic, owner, items, targets, paths)
     return text

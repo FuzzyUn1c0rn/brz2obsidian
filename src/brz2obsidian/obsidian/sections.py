@@ -10,6 +10,25 @@ class SectionUnsupported(ValueError):
     pass
 
 
+def _read_section_entries(lines, index):
+    selected, entries = [lines[index]], []
+    for line in lines[index + 1 :]:
+        text = line.rstrip(b"\r\n")
+        if not text:
+            selected.append(line)
+            continue
+        if not text.startswith(b"- "):
+            break
+        match = re.fullmatch(rb"- (\[\[[^\[\]\r\n|#^]+(?:\|[^\[\]\r\n]+)?\]\])", text)
+        if match is None:
+            raise SectionUnsupported("section_entry_unsupported")
+        entries.append(match[1].decode("utf-8"))
+        selected.append(line)
+    if not entries:
+        raise SectionUnsupported("section_entry_unsupported")
+    return b"".join(selected), entries
+
+
 def _locate(raw, basis, targets):
     allowed = {
         "relationship": (b"## Parents", b"## Children", b"## Related"),
@@ -29,21 +48,7 @@ def _locate(raw, basis, targets):
     if lines[index].rstrip(b"\r\n") != basis.heading:
         raise SectionUnsupported("section_boundary_ambiguous")
     start = sum(map(len, lines[:index]))
-    selected, entries = [lines[index]], []
-    for line in lines[index + 1 :]:
-        text = line.rstrip(b"\r\n")
-        if not text:
-            selected.append(line)
-            continue
-        if not text.startswith(b"- "):
-            break
-        match = re.fullmatch(rb"- (\[\[[^\[\]\r\n|#^]+(?:\|[^\[\]\r\n]+)?\]\])", text)
-        if match is None:
-            raise SectionUnsupported("section_entry_unsupported")
-        entries.append(match[1].decode("utf-8"))
-        selected.append(line)
-    if not entries:
-        raise SectionUnsupported("section_entry_unsupported")
+    section, entries = _read_section_entries(lines, index)
     selected_targets = []
     for entry in entries:
         matches = [
@@ -55,7 +60,6 @@ def _locate(raw, basis, targets):
     ids = [t.target_id for t in selected_targets]
     if len(set(ids)) != len(ids):
         raise SectionUnsupported("section_duplicate_entry")
-    section = b"".join(selected)
     return OwnedSection(
         section_id=basis.section_id,
         kind=basis.kind,
