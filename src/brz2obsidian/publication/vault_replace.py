@@ -107,6 +107,46 @@ def _ordinary_streams(path):
         kernel.FindClose(handle)
 
 
+def _copy_windows_dacl(copy_to, advapi, set_info, dacl, descriptor, expected):
+    observed, control = expected
+    if _windows_security(copy_to, _include_control=True) == expected:
+        return
+    protection = (
+        PROTECTED_DACL_SECURITY_INFORMATION
+        if control & SE_DACL_PROTECTED
+        else UNPROTECTED_DACL_SECURITY_INFORMATION
+    )
+    code = set_info(
+        str(copy_to),
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION | protection,
+        None,
+        None,
+        dacl,
+        None,
+    )
+    if code:
+        raise OSError(code, "File DACL could not be retained")
+    current = _windows_security(copy_to, _include_control=True)
+    if (
+        control & SE_DACL_PROTECTED
+        and not control & SE_DACL_AUTO_INHERITED
+        and "D:P(" in observed
+        and current[1] == control | SE_DACL_AUTO_INHERITED
+        and current[0] == observed.replace("D:P(", "D:PAI(", 1)
+    ):
+        # Repair only the high-level setter's proven AI-only conversion.
+        # This documented legacy file setter does not propagate to children.
+        exact = advapi.SetFileSecurityW
+        exact.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+        exact.restype = wintypes.BOOL
+        if not exact(str(copy_to), DACL_SECURITY_INFORMATION, descriptor):
+            raise ctypes.WinError(ctypes.get_last_error())
+        current = _windows_security(copy_to, _include_control=True)
+    if current != expected:
+        raise OSError("Replacement owner, group or DACL changed")
+
+
 def _windows_security(path, *, copy_to=None, _include_control=False):
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -166,42 +206,7 @@ def _windows_security(path, *, copy_to=None, _include_control=False):
         observed = ctypes.wstring_at(text)
         expected = observed, control.value
         if copy_to is not None:
-            if _windows_security(copy_to, _include_control=True) == expected:
-                return expected if _include_control else observed
-            protection = (
-                PROTECTED_DACL_SECURITY_INFORMATION
-                if control.value & SE_DACL_PROTECTED
-                else UNPROTECTED_DACL_SECURITY_INFORMATION
-            )
-            code = set_info(
-                str(copy_to),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | protection,
-                None,
-                None,
-                dacl,
-                None,
-            )
-            if code:
-                raise OSError(code, "File DACL could not be retained")
-            current = _windows_security(copy_to, _include_control=True)
-            if (
-                control.value & SE_DACL_PROTECTED
-                and not control.value & SE_DACL_AUTO_INHERITED
-                and "D:P(" in observed
-                and current[1] == control.value | SE_DACL_AUTO_INHERITED
-                and current[0] == observed.replace("D:P(", "D:PAI(", 1)
-            ):
-                # Repair only the high-level setter's proven AI-only conversion.
-                # This documented legacy file setter does not propagate to children.
-                exact = advapi.SetFileSecurityW
-                exact.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
-                exact.restype = wintypes.BOOL
-                if not exact(str(copy_to), DACL_SECURITY_INFORMATION, descriptor):
-                    raise ctypes.WinError(ctypes.get_last_error())
-                current = _windows_security(copy_to, _include_control=True)
-            if current != expected:
-                raise OSError("Replacement owner, group or DACL changed")
+            _copy_windows_dacl(copy_to, advapi, set_info, dacl, descriptor, expected)
         return expected if _include_control else observed
     finally:
         if text:

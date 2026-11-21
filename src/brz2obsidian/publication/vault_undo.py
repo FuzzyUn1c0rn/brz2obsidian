@@ -218,6 +218,23 @@ def _unpublished_undo_matches(observation):
     )
 
 
+def _qualify_undo_target(graph, observation):
+    if graph.receipt.status == "no_content_change":
+        return "none", "latest_update_had_no_effect", None
+    if graph.receipt.status != "applied":
+        return "none", "latest_update_not_applied", None
+    if not _target_history_known(graph, observation):
+        return "unsupported", "maintenance_eligibility_unavailable", None
+    target = _target_from_graph(graph, observation)
+    if target.plan.facts.format_operation.kind not in ("source_update", "onboarding"):
+        return "none", "latest_operation_is_maintenance", None
+    return (
+        "offered",
+        "latest_undo_review_required",
+        target,
+    )
+
+
 def _eligible_target(observed, observation, *, active_operation=None):
     if observation is None:
         return (
@@ -255,20 +272,7 @@ def _eligible_target(observed, observation, *, active_operation=None):
         )
         if graph is None:
             return "unavailable", "undo_target_missing", None
-    if graph.receipt.status == "no_content_change":
-        return "none", "latest_update_had_no_effect", None
-    if graph.receipt.status != "applied":
-        return "none", "latest_update_not_applied", None
-    if not _target_history_known(graph, observation):
-        return "unsupported", "maintenance_eligibility_unavailable", None
-    target = _target_from_graph(graph, observation)
-    if target.plan.facts.format_operation.kind not in ("source_update", "onboarding"):
-        return "none", "latest_operation_is_maintenance", None
-    return (
-        "offered",
-        "latest_undo_review_required",
-        target,
-    )
+    return _qualify_undo_target(graph, observation)
 
 
 def _capture_target(
