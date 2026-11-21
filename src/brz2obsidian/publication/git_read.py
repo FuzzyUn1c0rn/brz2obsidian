@@ -8,6 +8,11 @@ import subprocess
 from threading import Event, Lock, Thread
 
 OUTPUT_BUDGET = 16 * 1024 * 1024
+CREATE_SUSPENDED = 0x00000004
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+RESUME_THREAD_FAILED = 0xFFFFFFFF
+THREAD_TERMINATE = 0x0001
 
 
 class _WindowsJob:
@@ -54,9 +59,12 @@ class _WindowsJob:
         if not self.handle:
             raise ctypes.WinError(ctypes.get_last_error())
         information = Information()
-        information.basic.flags = 0x2000
+        information.basic.flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if not self.kernel.SetInformationJobObject(
-            self.handle, 9, ctypes.byref(information), ctypes.sizeof(information)
+            self.handle,
+            JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(information),
+            ctypes.sizeof(information),
         ):
             self.close()
             raise OSError("Owned process cleanup capability unavailable")
@@ -122,7 +130,7 @@ class _SuspendedPopen(subprocess.Popen):
                 None,
                 None,
                 True,
-                creationflags | 4,
+                creationflags | CREATE_SUSPENDED,
                 env,
                 cwd,
                 startup,
@@ -135,7 +143,7 @@ class _SuspendedPopen(subprocess.Popen):
                 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                 kernel.ResumeThread.argtypes = [w.HANDLE]
                 kernel.ResumeThread.restype = w.DWORD
-                if kernel.ResumeThread(thread) == 0xFFFFFFFF:
+                if kernel.ResumeThread(thread) == RESUME_THREAD_FAILED:
                     raise OSError("Owned process could not be resumed")
             except BaseException:
                 _winapi.TerminateProcess(process, 1)
@@ -159,7 +167,7 @@ def _cancel(thread):
         kernel.OpenThread.restype = w.HANDLE
         kernel.CancelSynchronousIo.argtypes = [w.HANDLE]
         kernel.CloseHandle.argtypes = [w.HANDLE]
-        handle = kernel.OpenThread(1, False, thread.native_id)
+        handle = kernel.OpenThread(THREAD_TERMINATE, False, thread.native_id)
         if handle:
             try:
                 kernel.CancelSynchronousIo(handle)
