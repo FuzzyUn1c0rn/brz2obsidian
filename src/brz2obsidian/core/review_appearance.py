@@ -57,66 +57,74 @@ def _category_reference(query, targets, states):
     return None
 
 
+def _qualified_appearance(state, roles, targets, states, providers, invalid):
+    memberships = tuple(
+        _category_reference(query, targets, states)
+        for query in roles.category_memberships.queries
+    )
+    if roles.category_memberships.status == "invalid" or any(
+        member is None for member in memberships
+    ):
+        invalid[(state.target_id, "categories")] = (
+            "category_declaration",
+            roles.category_memberships.status,
+            memberships,
+        )
+    provider = roles.provider
+    if provider.status == "invalid":
+        invalid[(state.target_id, "provider")] = (
+            "provider_declaration",
+            provider.status,
+        )
+    elif provider.status == "valid":
+        selected = _category_reference(provider.query, targets, states)
+        if selected is None or selected not in memberships:
+            invalid[(state.target_id, "provider")] = (
+                "provider_member",
+                selected,
+            )
+        else:
+            providers[state.target_id] = selected
+    problem = _icon_problem(state, targets, states)
+    if problem is not None:
+        invalid[(state.target_id, "icon")] = problem
+
+
+def _retained_appearance(state, providers, invalid):
+    document = state.structure
+    if document is None:
+        return
+    if document.appearance_field is None:
+        return
+    field = next(f for f in document.fields if f.key == document.appearance_field)
+    if field.value in (None, ""):
+        return
+    matches = {
+        entry.target_id
+        for membership in document.memberships
+        if membership.kind == "category"
+        for entry in membership.entries
+        if field.value in entry.target.representations
+    }
+    if len(matches) == 1:
+        provider = matches.pop()
+        providers[state.target_id] = provider
+    else:
+        invalid[(state.target_id, "provider")] = (
+            field.kind,
+            field.scalar_type,
+            field.value,
+        )
+
+
 def _chain_problems(states, targets):
     providers, invalid = {}, {}
     for state in states:
         roles = state.file_roles
         if roles is not None:
-            memberships = tuple(
-                _category_reference(query, targets, states)
-                for query in roles.category_memberships.queries
-            )
-            if roles.category_memberships.status == "invalid" or any(
-                member is None for member in memberships
-            ):
-                invalid[(state.target_id, "categories")] = (
-                    "category_declaration",
-                    roles.category_memberships.status,
-                    memberships,
-                )
-            provider = roles.provider
-            if provider.status == "invalid":
-                invalid[(state.target_id, "provider")] = (
-                    "provider_declaration",
-                    provider.status,
-                )
-            elif provider.status == "valid":
-                selected = _category_reference(provider.query, targets, states)
-                if selected is None or selected not in memberships:
-                    invalid[(state.target_id, "provider")] = (
-                        "provider_member",
-                        selected,
-                    )
-                else:
-                    providers[state.target_id] = selected
-            problem = _icon_problem(state, targets, states)
-            if problem is not None:
-                invalid[(state.target_id, "icon")] = problem
-            continue
-        document = state.structure
-        if document is None:
-            continue
-        if document.appearance_field is None:
-            continue
-        field = next(f for f in document.fields if f.key == document.appearance_field)
-        if field.value in (None, ""):
-            continue
-        matches = {
-            entry.target_id
-            for membership in document.memberships
-            if membership.kind == "category"
-            for entry in membership.entries
-            if field.value in entry.target.representations
-        }
-        if len(matches) == 1:
-            provider = matches.pop()
-            providers[state.target_id] = provider
+            _qualified_appearance(state, roles, targets, states, providers, invalid)
         else:
-            invalid[(state.target_id, "provider")] = (
-                field.kind,
-                field.scalar_type,
-                field.value,
-            )
+            _retained_appearance(state, providers, invalid)
     problems = {}
     for state in states:
         chain = [state.target_id]

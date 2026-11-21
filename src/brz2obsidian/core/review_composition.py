@@ -83,9 +83,7 @@ def _rewritten_state(state, content, edits):
     )
 
 
-def _compose(document, state, prior, choices):
-    if state.file_roles is not None and state.file_roles.path != document.source_path:
-        raise ValueError("Reference rewrite changes the qualified file path")
+def _reference_replacements(document, prior, choices):
     replacements = {}
     for choice, proof, later_reference in choices:
         old = next(
@@ -132,6 +130,27 @@ def _compose(document, state, prior, choices):
         if previous is not None and previous[0] != template:
             raise ValueError("Reference choices select conflicting final effects")
         replacements[selected.occurrence_id] = template, proof
+    return replacements
+
+
+def _composition_spans(document, edits):
+    spans, cursor = [], 0
+    for start, end, replacement in edits:
+        if cursor < start:
+            spans.append(source_span(document.content, cursor, start))
+        spans.append(replacement)
+        cursor = end
+    if cursor < document.content.identity.size:
+        spans.append(
+            source_span(document.content, cursor, document.content.identity.size)
+        )
+    return tuple(spans)
+
+
+def _compose(document, state, prior, choices):
+    if state.file_roles is not None and state.file_roles.path != document.source_path:
+        raise ValueError("Reference rewrite changes the qualified file path")
+    replacements = _reference_replacements(document, prior, choices)
     edits, occurrences, offset = [], [], 0
     for occurrence in document.occurrences:
         replacement = replacements.get(occurrence.occurrence_id)
@@ -174,19 +193,8 @@ def _compose(document, state, prior, choices):
                 )
             )
             offset += len(template.raw) - len(occurrence.raw)
-    spans, cursor = [], 0
-    for start, end, replacement in edits:
-        if cursor < start:
-            spans.append(source_span(document.content, cursor, start))
-        spans.append(replacement)
-        cursor = end
-    if cursor < document.content.identity.size:
-        spans.append(
-            source_span(document.content, cursor, document.content.identity.size)
-        )
-    return CompositionGeometry(
-        document, state, tuple(edits), tuple(occurrences), tuple(spans)
-    )
+    spans = _composition_spans(document, edits)
+    return CompositionGeometry(document, state, tuple(edits), tuple(occurrences), spans)
 
 
 def _complete(geometry, content):
@@ -201,14 +209,7 @@ def _complete(geometry, content):
     )
 
 
-def _composition_inputs(facts, actions, approvals):
-    """Renew only uniquely unchanged occurrences; retain historical decisions intact."""
-    context = facts.link_context
-    if context is None:
-        return (), False
-    originals = {d.document_id: d for d in context.current_documents}
-    action_by_id = {a.decision_id: a for a in actions}
-    action_order = {a.decision_id: index for index, a in enumerate(actions)}
+def _edited_reference_inputs(approvals, action_by_id, action_order, originals):
     documents, conflict = [], False
     for approval in approvals:
         action = action_by_id.get(approval.decision_id)
@@ -259,6 +260,11 @@ def _composition_inputs(facts, actions, approvals):
             conflict = True
             continue
         documents.append((document, states[0], prior, choices))
+    return documents, conflict
+
+
+def _append_shared_reference_inputs(facts, context, approvals, originals, documents):
+    conflict = False
     edited_documents = {document.document_id for document, _, _, _ in documents}
     for document_id, prior in originals.items():
         if (
@@ -293,6 +299,24 @@ def _composition_inputs(facts, actions, approvals):
             continue
         choices = tuple((choice, proof, True) for _, choice, proof in selected)
         documents.append((prior, states[0], prior, choices))
+    return conflict
+
+
+def _composition_inputs(facts, actions, approvals):
+    """Renew only uniquely unchanged occurrences; retain historical decisions intact."""
+    context = facts.link_context
+    if context is None:
+        return (), False
+    originals = {d.document_id: d for d in context.current_documents}
+    action_by_id = {a.decision_id: a for a in actions}
+    action_order = {a.decision_id: index for index, a in enumerate(actions)}
+    documents, conflict = _edited_reference_inputs(
+        approvals, action_by_id, action_order, originals
+    )
+    binary_conflict = _append_shared_reference_inputs(
+        facts, context, approvals, originals, documents
+    )
+    conflict |= binary_conflict
     return tuple(documents), conflict
 
 

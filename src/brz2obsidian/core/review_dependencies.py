@@ -18,6 +18,203 @@ def digest(value):
     return sha256(json.dumps(_semantic(value), sort_keys=True).encode()).hexdigest()
 
 
+def _record_selected_dependencies(plan, approved, state_key, add, derived):
+    selected = {}
+    for change in plan.proposal.changes:
+        for node in change.assumptions:
+            add(node, "producer")
+        approval = approved.get(change.change_id)
+        extra = (
+            ()
+            if approval is None
+            else tuple(a for a in approval.assumptions if a not in change.assumptions)
+        )
+        for node in extra:
+            add(node, "candidate")
+        content = change.result if approval is None else approval.result
+        path = change.target_path if approval is None else approval.target_path
+        producer_keys = []
+        for decision in (
+            plan.producer_facts.association_decisions
+            + plan.producer_facts.rename_decisions
+        ):
+            if (decision.item_id, decision.facet) == (change.item_id, change.facet):
+                decision_key = "producer-choice:" + decision.decision_id
+                derived(
+                    decision_key,
+                    "identity" if hasattr(decision, "selected_entry_id") else "target",
+                    decision,
+                    tuple(a.key for a in decision.reviewed_assumptions) + (state_key,),
+                    "selected",
+                )
+                producer_keys.append(decision_key)
+        key = "selected:" + change.subject_id
+        selected[change.subject_id] = key
+        derived(
+            key,
+            "content",
+            (path, content)
+            if reversal_subject(plan.producer_facts, change).operation_reversal is None
+            else (
+                path,
+                content,
+                selected_reversal_outputs(plan.producer_facts, change, approval),
+            ),
+            tuple(a.key for a in change.assumptions) + tuple(producer_keys),
+            "selected",
+        )
+    return selected
+
+
+def _inbound_dependencies(facts, change, context):
+    inbound = []
+    own = {
+        t.target_id
+        for t in context.current_targets + context.incoming_targets
+        if t.canonical_path in (change.path, change.target_path)
+    }
+    subject = reversal_subject(facts, change)
+    if subject.operation_reversal is not None:
+        own.update(r.target_id for r in subject.operation_reversal.outputs)
+    for doc in context.current_documents:
+        occurrences = tuple(
+            o
+            for o in doc.occurrences
+            if any(
+                resolve_occurrence(
+                    o, (t,), context.current_target_facts, context.inventory
+                ).target_id
+                in own
+                for t in context.current_targets
+            )
+        )
+        if occurrences:
+            inbound.append(
+                (
+                    doc.document_id,
+                    doc.source_path,
+                    tuple(
+                        (
+                            o.query,
+                            o.meaning,
+                            resolve_occurrence(
+                                o,
+                                context.current_targets,
+                                context.current_target_facts,
+                                context.inventory,
+                            ),
+                        )
+                        for o in occurrences
+                    ),
+                )
+            )
+    return inbound
+
+
+def _selected_link_dependencies(plan, change, approval, action, context):
+    inbound = []
+    if context is None:
+        return (), inbound, set()
+    inbound = _inbound_dependencies(plan.producer_facts, change, context)
+    if action is not None and action.candidate is not None:
+        documents = (action.candidate.links,)
+    elif approval is not None and approval.attachment_candidate is not None:
+        documents = tuple(
+            d
+            for d in approval.attachment_candidate.documents
+            if d.document_id
+            in {r.document_id for r in change.attachment_review.links}
+            | {c.document_id for c in approval.attachment_selection.link_choices}
+        )
+    else:
+        documents = tuple(
+            d
+            for d in context.current_documents + context.incoming_documents
+            if d.source_path in (change.path, change.target_path)
+        )
+    portions = tuple(
+        consumed_context(
+            documents,
+            targets,
+            states,
+            context.inventory,
+            appearance_documents=provider_documents(plan.producer_facts),
+        )
+        for targets, states in (
+            (context.current_targets, context.current_target_facts),
+            (context.incoming_targets, context.incoming_target_facts),
+        )
+    )
+    target_ids = {t.target_id for portion in portions for t in portion[2]}
+    return portions, inbound, target_ids
+
+
+def _record_effect_dependencies(
+    plan, approved, actions, context, selected, coverage, state_key, derived
+):
+    for change in plan.proposal.changes:
+        approval = approved.get(change.change_id)
+        action = None if approval is None else actions.get(approval.decision_id)
+        portions, inbound, target_ids = _selected_link_dependencies(
+            plan, change, approval, action, context
+        )
+        dependencies = {a.key for a in change.assumptions}
+        if approval is not None:
+            dependencies.update(a.key for a in approval.assumptions)
+        if context is not None:
+            for other in plan.proposal.changes:
+                other_subject = reversal_subject(plan.producer_facts, other)
+                paths = {other.path, other.target_path}
+                if other_subject.operation_reversal is not None:
+                    paths.update(
+                        r.path for r in other_subject.operation_reversal.outputs
+                    )
+                if any(
+                    t.target_id in target_ids and t.canonical_path in paths
+                    for t in context.current_targets + context.incoming_targets
+                ):
+                    dependencies.add(selected[other.subject_id])
+        dependencies.update((coverage, state_key))
+        derived(
+            "effect:" + change.subject_id,
+            "candidate",
+            (portions, sorted(inbound, key=lambda entry: (entry[0], entry[1]))),
+            dependencies,
+            "effect",
+        )
+
+
+def _record_consent_and_group_dependencies(plan, state_key, add):
+    for requirement in consent_requirements(
+        plan.preflight, plan.proposal, plan.approvals
+    ):
+        for node in requirement.assumptions:
+            scope = next(
+                c
+                for c in plan.preflight.consents
+                if "consent:" + c.consent_id == node.key
+            )
+            extra = tuple(
+                "effect:" + c.subject_id
+                for c in plan.proposal.changes
+                if requirement.domain == "storage"
+                and (not scope.subjects or c.subject_id in scope.subjects)
+            )
+            add(
+                node.model_copy(
+                    update={
+                        "depends_on": tuple(
+                            sorted(set(node.depends_on + extra + (state_key,)))
+                        )
+                    }
+                ),
+                "consent",
+            )
+    for group in plan.groups:
+        for node in group.assumptions:
+            add(node, "group")
+
+
 def review_dependencies(plan):
     nodes = {}
 
@@ -63,50 +260,7 @@ def review_dependencies(plan):
         (),
         "coverage",
     )
-    selected = {}
-    for change in plan.proposal.changes:
-        for node in change.assumptions:
-            add(node, "producer")
-        approval = approved.get(change.change_id)
-        extra = (
-            ()
-            if approval is None
-            else tuple(a for a in approval.assumptions if a not in change.assumptions)
-        )
-        for node in extra:
-            add(node, "candidate")
-        content = change.result if approval is None else approval.result
-        path = change.target_path if approval is None else approval.target_path
-        producer_keys = []
-        for decision in (
-            plan.producer_facts.association_decisions
-            + plan.producer_facts.rename_decisions
-        ):
-            if (decision.item_id, decision.facet) == (change.item_id, change.facet):
-                decision_key = "producer-choice:" + decision.decision_id
-                derived(
-                    decision_key,
-                    "identity" if hasattr(decision, "selected_entry_id") else "target",
-                    decision,
-                    tuple(a.key for a in decision.reviewed_assumptions) + (state_key,),
-                    "selected",
-                )
-                producer_keys.append(decision_key)
-        key = "selected:" + change.subject_id
-        selected[change.subject_id] = key
-        derived(
-            key,
-            "content",
-            (path, content)
-            if reversal_subject(plan.producer_facts, change).operation_reversal is None
-            else (
-                path,
-                content,
-                selected_reversal_outputs(plan.producer_facts, change, approval),
-            ),
-            tuple(a.key for a in change.assumptions) + tuple(producer_keys),
-            "selected",
-        )
+    selected = _record_selected_dependencies(plan, approved, state_key, add, derived)
     coverage = "review:lookup-coverage"
     derived(
         coverage,
@@ -120,139 +274,9 @@ def review_dependencies(plan):
         (),
         "coverage",
     )
-    for change in plan.proposal.changes:
-        approval = approved.get(change.change_id)
-        action = None if approval is None else actions.get(approval.decision_id)
-        documents = ()
-        inbound = []
-        target_ids = set()
-        if context is not None:
-            own = {
-                t.target_id
-                for t in context.current_targets + context.incoming_targets
-                if t.canonical_path in (change.path, change.target_path)
-            }
-            subject = reversal_subject(plan.producer_facts, change)
-            if subject.operation_reversal is not None:
-                own.update(r.target_id for r in subject.operation_reversal.outputs)
-            for doc in context.current_documents:
-                occurrences = tuple(
-                    o
-                    for o in doc.occurrences
-                    if any(
-                        resolve_occurrence(
-                            o, (t,), context.current_target_facts, context.inventory
-                        ).target_id
-                        in own
-                        for t in context.current_targets
-                    )
-                )
-                if occurrences:
-                    inbound.append(
-                        (
-                            doc.document_id,
-                            doc.source_path,
-                            tuple(
-                                (
-                                    o.query,
-                                    o.meaning,
-                                    resolve_occurrence(
-                                        o,
-                                        context.current_targets,
-                                        context.current_target_facts,
-                                        context.inventory,
-                                    ),
-                                )
-                                for o in occurrences
-                            ),
-                        )
-                    )
-            if action is not None and action.candidate is not None:
-                documents = (action.candidate.links,)
-            elif approval is not None and approval.attachment_candidate is not None:
-                documents = tuple(
-                    d
-                    for d in approval.attachment_candidate.documents
-                    if d.document_id
-                    in {r.document_id for r in change.attachment_review.links}
-                    | {
-                        c.document_id
-                        for c in approval.attachment_selection.link_choices
-                    }
-                )
-            else:
-                documents = tuple(
-                    d
-                    for d in context.current_documents + context.incoming_documents
-                    if d.source_path in (change.path, change.target_path)
-                )
-            portions = tuple(
-                consumed_context(
-                    documents,
-                    targets,
-                    states,
-                    context.inventory,
-                    appearance_documents=provider_documents(plan.producer_facts),
-                )
-                for targets, states in (
-                    (context.current_targets, context.current_target_facts),
-                    (context.incoming_targets, context.incoming_target_facts),
-                )
-            )
-            target_ids = {t.target_id for portion in portions for t in portion[2]}
-        else:
-            portions = ()
-        dependencies = {a.key for a in change.assumptions}
-        if approval is not None:
-            dependencies.update(a.key for a in approval.assumptions)
-        if context is not None:
-            for other in plan.proposal.changes:
-                other_subject = reversal_subject(plan.producer_facts, other)
-                paths = {other.path, other.target_path}
-                if other_subject.operation_reversal is not None:
-                    paths.update(
-                        r.path for r in other_subject.operation_reversal.outputs
-                    )
-                if any(
-                    t.target_id in target_ids and t.canonical_path in paths
-                    for t in context.current_targets + context.incoming_targets
-                ):
-                    dependencies.add(selected[other.subject_id])
-        dependencies.update((coverage, state_key))
-        derived(
-            "effect:" + change.subject_id,
-            "candidate",
-            (portions, sorted(inbound, key=lambda entry: (entry[0], entry[1]))),
-            dependencies,
-            "effect",
-        )
-    for requirement in consent_requirements(
-        plan.preflight, plan.proposal, plan.approvals
-    ):
-        for node in requirement.assumptions:
-            scope = next(
-                c
-                for c in plan.preflight.consents
-                if "consent:" + c.consent_id == node.key
-            )
-            extra = tuple(
-                "effect:" + c.subject_id
-                for c in plan.proposal.changes
-                if requirement.domain == "storage"
-                and (not scope.subjects or c.subject_id in scope.subjects)
-            )
-            add(
-                node.model_copy(
-                    update={
-                        "depends_on": tuple(
-                            sorted(set(node.depends_on + extra + (state_key,)))
-                        )
-                    }
-                ),
-                "consent",
-            )
-    for group in plan.groups:
-        for node in group.assumptions:
-            add(node, "group")
+    _record_effect_dependencies(
+        plan, approved, actions, context, selected, coverage, state_key, derived
+    )
+    _record_consent_and_group_dependencies(plan, state_key, add)
     validate_dependencies(nodes)
     return nodes
