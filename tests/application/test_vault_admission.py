@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from textwrap import dedent
 from uuid import uuid4
 
 import pytest
@@ -1183,36 +1184,84 @@ def test_admission_records_reject_unsupported_duplicate_unknown_and_inconsistent
     assert duplicate_subject.findings[0].code == "duplicate_subject"
 
 
-def test_fresh_process_policy_view_never_allocates_inside_the_vault(vault):
+def test_fresh_process_policy_view_never_allocates_inside_the_vault():
     root = fixture_root("temp-policy")
     (root / "note.md").write_bytes(b"untouched authored")
+    scratch = root.parent / "scratch"
+    scratch.mkdir()
+    before = storage(root)
     script = root.parent / (root.name + "-inspect.py")
     script.write_text(
-        "import json,os,sys,tempfile\nfrom pathlib import Path\nsys.path.insert(0,sys.argv[2])\ncreated=[]\ncreated_files=[]\ndef audit(event,args):\n if event=='tempfile.mkdtemp': created.append(args[0])\n if event=='open' and isinstance(args[0],str) and args[2] & os.O_CREAT and Path(args[0]).is_relative_to(sys.argv[1]): created_files.append(args[0])\nsys.addaudithook(audit)\ntempfile.tempdir=None\nfrom brz2obsidian.application.operations import Operations\nresult=Operations().inspect_vault(sys.argv[1])\nprint(json.dumps({'status':result.status,'codes':[f.code for f in result.findings],'created':created,'created_files':created_files,'left':[p for p in created if Path(p).exists()]}))\n",
+        dedent("""\
+            import json
+            import os
+            import sys
+            import tempfile
+            from pathlib import Path
+
+            sys.path.insert(0, sys.argv[2])
+            from brz2obsidian.application.operations import Operations
+
+            root = Path(sys.argv[1])
+            tempfile.tempdir = os.fsencode(sys.argv[3]) if len(sys.argv) > 3 else None
+            vars(tempfile).pop("_candidate_tempdir_list", None)
+            created = []
+            unexpected_files = []
+
+            def audit(event, args):
+                if event == "tempfile.mkdtemp":
+                    created.append(args[0])
+                if event == "open" and isinstance(args[0], str) and args[2] & os.O_CREAT:
+                    if not created or Path(args[0]).is_relative_to(root):
+                        unexpected_files.append(args[0])
+
+            sys.addaudithook(audit)
+            result = Operations().inspect_vault(root)
+            print(json.dumps({
+                "status": result.status,
+                "codes": [finding.code for finding in result.findings],
+                "created": created,
+                "unexpected_files": unexpected_files,
+                "left": [path for path in created if Path(path).exists()],
+            }))
+            """),
         encoding="utf-8",
     )
     args = [
         sys.executable,
+        "-B",
         str(script),
         str(root),
         str(Path(__file__).resolve().parents[2] / "src"),
     ]
-    ordinary = subprocess.run(args, capture_output=True, text=True, check=True)
-    facts = json.loads(ordinary.stdout)
-    assert facts["status"] == "supported"
-    assert len(facts["created"]) == 1
-    assert root not in Path(facts["created"][0]).parents
-    assert facts["left"] == []
-    before = storage(root)
-    unsafe = subprocess.run(
+    env = {**os.environ, "TEMP": str(scratch), "TMP": str(root)}
+    ordinary = subprocess.run(
         args,
-        env={**os.environ, "TEMP": str(root), "TMP": str(root)},
+        env={**env, "TMPDIR": str(root / "note.md")},
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    unsafe_env = {**env, "TMPDIR": str(root)}
+    unsafe = subprocess.run(
+        args, env=unsafe_env, capture_output=True, text=True, check=False
+    )
+    overridden = subprocess.run(
+        [*args, str(scratch)],
+        env=unsafe_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for process in (ordinary, unsafe, overridden):
+        assert process.returncode == 0, process.stderr
+    for process in (ordinary, overridden):
+        facts = json.loads(process.stdout)
+        assert facts["status"] == "supported"
+        assert [Path(path).parent for path in facts["created"]] == [scratch.resolve()]
+        assert facts["left"] == facts["unexpected_files"] == []
     facts = json.loads(unsafe.stdout)
     assert facts["status"] == "refused"
     assert "unsafe_temp_location" in facts["codes"]
-    assert facts["created"] == facts["left"] == facts["created_files"] == []
+    assert facts["created"] == facts["left"] == facts["unexpected_files"] == []
     assert storage(root) == before
