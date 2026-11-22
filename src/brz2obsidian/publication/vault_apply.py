@@ -3626,6 +3626,38 @@ def _acquire_reviewed_apply(root, operation_id, checkpoint, undo_target):
     return scoped
 
 
+def _qualify_collection_apply(source, review, selected, observed):
+    if review.facts.format_operation.kind != "collection_import":
+        return None
+    from .collection_placement import collection_write_refusal, reviewed_connections
+
+    checkpoint = observed.checkpoint
+    retained = checkpoint.review
+    if retained is None or checkpoint.manifest.boundary != "local":
+        return "current_review_required"
+    return collection_write_refusal(
+        observed.admission,
+        checkpoint,
+        source,
+        checkpoint.manifest.collection_record_path,
+        review,
+        choices=reviewed_connections(retained.saved.plan),
+        selected=selected,
+    )
+
+
+def _held_apply_refusal(first, observed, source, review, selected):
+    if (
+        observed.status != "intact"
+        or observed.admission.status != "supported"
+        or observed.admission.inventory != first.admission.inventory
+        or observed.admission.policy_fingerprint != first.admission.policy_fingerprint
+        or observed.checkpoint.locator.commit != first.checkpoint.locator.commit
+    ):
+        return "current_admission_required"
+    return _qualify_collection_apply(source, review, selected, observed)
+
+
 def _apply_reviewed_update(
     vault,
     source,
@@ -3716,15 +3748,9 @@ def _apply_reviewed_update(
             _owned_export,
             _owners,
         )
-        if (
-            observed.status != "intact"
-            or observed.admission.status != "supported"
-            or observed.admission.inventory != first.admission.inventory
-            or observed.admission.policy_fingerprint
-            != first.admission.policy_fingerprint
-            or observed.checkpoint.locator.commit != first.checkpoint.locator.commit
-        ):
-            return outcome("refused", "current_admission_required", start=start)
+        refusal = _held_apply_refusal(first, observed, source, review, selected)
+        if refusal is not None:
+            return outcome("refused", refusal, start=start)
         state.operation_generation = observed.checkpoint.manifest.generation + 1
         paths = _apply_path_plan(
             observed, review, selected, subjects, undo_target, outcome, start

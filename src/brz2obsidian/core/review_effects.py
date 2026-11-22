@@ -12,6 +12,7 @@ from brz2obsidian.core.review_composition import (
 )
 from brz2obsidian.core.review_links import (
     bound_resource_record,
+    collection_asset_effect,
     current_baseline,
     current_keep_needs_proof,
     current_lookup_coverage,
@@ -761,6 +762,11 @@ def _apply_text_change(
     if subject.attachment is not None:
         return
     selected_path = change.target_path if approval is None else approval.target_path
+    asset = collection_asset_effect(facts, change)
+    if asset is not None and approval is None:
+        target, state = asset
+        registry.write(target, content, selected_path, state, add)
+        return
 
     if _apply_automatic_text(
         facts,
@@ -903,6 +909,51 @@ def _renew_document_navigation(
     return document
 
 
+def _unrelated_import_document(facts, document):
+    return (
+        facts.format_operation.kind == "collection_import"
+        and (
+            document.source_path,
+            document.content.identity.sha256,
+        )
+        in facts.link_context.import_unrelated_documents
+    )
+
+
+def _renew_import_connections(facts, document, prior, resolved):
+    if (
+        facts.format_operation.kind != "collection_import"
+        or prior is None
+        or prior.content != document.content
+        or prior.source_path != document.source_path
+    ):
+        return document
+    choices = {
+        (row.occurrence_id, row.target_path, row.target_sha256)
+        for row in facts.link_context.import_link_connections
+        if row.document_path == document.source_path
+        and row.document_sha256 == document.content.identity.sha256
+    }
+    old_occurrences = {row.occurrence_id: row for row in prior.occurrences}
+    occurrences = []
+    for row, actual in zip(document.occurrences, resolved, strict=True):
+        ordinal = row.occurrence_id.rsplit(":link:", 1)[-1]
+        key = (
+            f"{document.source_path}:link:{ordinal}",
+            actual.path,
+            actual.target_version,
+        )
+        if (
+            old_occurrences.get(row.occurrence_id) == row
+            and row.meaning.status == "missing"
+            and actual.status == "resolved"
+            and key in choices
+        ):
+            row = row.model_copy(update={"meaning": actual})
+        occurrences.append(row)
+    return document.model_copy(update={"occurrences": tuple(occurrences)})
+
+
 def _validate_effect_document(
     facts,
     final_targets,
@@ -970,6 +1021,7 @@ def _validate_effect_document(
         final_states,
         registry.current_resources,
     )
+    document = _renew_import_connections(facts, document, prior, resolved)
     validation = _validate_link_document(
         document,
         expected_content=document.content,
@@ -977,6 +1029,12 @@ def _validate_effect_document(
         targets=final_targets,
         target_facts=final_states,
         inventory=context.inventory,
+        allow_existing_unsupported=(
+            prior is not None
+            and prior.content == document.content
+            and prior.source_path == document.source_path
+            and _unrelated_import_document(facts, document)
+        ),
         baseline=None
         if prior is None or prior.source_path != document.source_path
         else current_baseline(context, document),
@@ -1149,7 +1207,10 @@ def current_note_coverage(facts):
         )
         if (
             len(documents) != 1
-            or documents[0].status != "supported"
+            or (
+                documents[0].status != "supported"
+                and not _unrelated_import_document(facts, documents[0])
+            )
             or documents[0].inventory != "complete"
         ):
             return False

@@ -2331,6 +2331,14 @@ class LinkContext(ReconciliationContract):
     incoming_target_facts: tuple[LinkTargetFacts, ...]
     current_documents: tuple[LinkDocument, ...]
     incoming_documents: tuple[LinkDocument, ...]
+    import_link_connections: tuple[ImportLinkConnection, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
+    import_unrelated_documents: tuple[tuple[str, str], ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
 
 
 class LinkValidationBaseline(ReconciliationContract):

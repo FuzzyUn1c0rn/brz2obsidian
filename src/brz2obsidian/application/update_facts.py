@@ -572,7 +572,7 @@ def assemble_facts(
             ),
         )
         attachment = None
-        if facet == "asset":
+        if facet == "asset" and not first_import:
             slots = ()
             if received is not None:
                 parent = PurePosixPath(selected.path)
@@ -1116,6 +1116,7 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
                         else facts.baseline_identity.output_format
                     ),
                     record_format=facts.baseline_identity.output_format,
+                    authored_links=facts.format_operation.kind == "collection_import",
                 )
             )
         if received is not None and actual.kind != "resource":
@@ -1132,6 +1133,10 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
                         target_facts=tuple(incoming_states),
                         inventory="complete",
                         output_format=facts.incoming_identity.output_format,
+                        authored_links=(
+                            facts.format_operation.kind == "collection_import"
+                            and subject is None
+                        ),
                     )
                 )
     return current_documents, incoming_documents

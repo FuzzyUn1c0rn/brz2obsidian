@@ -4,6 +4,7 @@ import json
 from zipfile import ZipFile
 
 from brz2obsidian.application.operations import Operations
+from brz2obsidian.core import select_review_effects
 from tests.application.test_collection_import_transaction import _user_git, _vault
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.application.test_sized_images_workflow import images
@@ -25,8 +26,8 @@ def _incoming_archive(path):
     graph_archive(
         path,
         {1: "Independent entry", 2: "Twin", 3: "Prospective", 4: "Future", 5: "Clear"},
-        tuple((1, n, 1, 2, -1) for n in range(2, 6)),
-        notes={4: (b"## Landing\n\n![](picture.png)\n", 4)},
+        tuple((1, n, 1, 1, -1) for n in range(2, 6)),
+        notes={4: (b"## Landing\n\n![Picture](.data/md-images/picture.png)\n", 4)},
     )
     with ZipFile(path) as archive:
         files = {name: archive.read(name) for name in archive.namelist()}
@@ -55,6 +56,43 @@ def _observation(result, display):
     )
 
 
+def test_rendered_collection_fixture_offers_a_publishable_review(tmp_path):
+    archive, _ = _incoming_archive(tmp_path / "independent.brz")
+    operations = Operations()
+    inspected = operations.inspect(archive)
+    assert inspected.outcome in ("clean", "warnings"), inspected.findings
+    vault = _vault(established=False)
+    _write(vault, "Journal/Author.md", DRAFT_LINKS)
+    _write(vault, "Old/Twin.md", b"# Old heading\n\nExisting body ^old-block\n")
+    _write(vault, "Old/Existing.png", images()[1])
+    preview = operations.prepare_collection_import_from_source(
+        vault,
+        archive,
+        staging=tmp_path / "preview",
+        import_location=LOCATION,
+        preview_connections=True,
+    )
+    choice = _observation(preview, "Reviewed connection").connection
+    offered = operations.prepare_collection_import_from_source(
+        vault,
+        archive,
+        staging=tmp_path / "review",
+        import_location=LOCATION,
+        connections=(choice,),
+    )
+    assert _observation(offered, "Reviewed connection").kind == "approved_connection"
+    assert offered.ready, offered.findings
+    selected = select_review_effects(offered.preparation.review)
+    stage = tmp_path / "review"
+    assert {row.path: row.content.data for row in selected.files} == {
+        file.relative_to(stage).as_posix(): file.read_bytes()
+        for file in stage.rglob("*")
+        if file.is_file()
+    }
+    assert not selected.remove_paths
+    assert not (vault / LOCATION).exists()
+
+
 def test_rendered_collection_import_keeps_authored_links_and_revalidates_connection(
     tmp_path,
 ):
@@ -79,7 +117,9 @@ def test_rendered_collection_import_keeps_authored_links_and_revalidates_connect
         source,
         staging=tmp_path / "default",
     )
-    assert default.ready, default
+    assert (
+        default.preparation is not None and not default.preparation.review.blockers
+    ), default
     assert default.preparation.collection_record_path == (
         "Imports/Independent Brain/migration-record.json"
     )
@@ -117,7 +157,9 @@ def test_rendered_collection_import_keeps_authored_links_and_revalidates_connect
         import_location=LOCATION,
         connections=(selected.connection,),
     )
-    assert offer.ready, offer
+    assert offer.preparation is not None and not offer.preparation.review.blockers, (
+        offer
+    )
     selected = _observation(offer, "Reviewed connection")
     assert selected.kind == "approved_connection"
     assert _observation(offer, "Leave this unresolved").after.status == "missing"
@@ -142,10 +184,29 @@ def test_rendered_collection_import_keeps_authored_links_and_revalidates_connect
     assert unapproved.import_link_impact.blockers == (
         "import_connection_approval_missing",
     )
+    assert offer.ready, offer.findings
     saved = before.save_update(offer.preparation)
     assert saved.code == "saved", saved
     resumed = Operations().resume_update(vault)
     assert resumed.code == "resumed", resumed
+    rogue_base = vault / "New view.base"
+    rogue_target = LOCATION + "/Notes/Clear.md"
+    base_bytes = f"formulas:\n  open: 'link(\"{rogue_target}\")'\n".encode()
+    rogue_base.write_bytes(base_bytes)
+    prepared = resumed.preparation
+    association = prepared.locator.association
+    refused = Operations().apply_reviewed_update(
+        vault,
+        prepared.payload_directory,
+        review=prepared.review,
+        vault_id=association.vault_id,
+        import_id=association.import_id,
+        source_binding=prepared.source_binding,
+        observed_source=prepared.observed_source,
+    )
+    assert refused.status == "refused" and not (vault / LOCATION).exists(), refused
+    assert rogue_base.read_bytes() == base_bytes
+    rogue_base.unlink()
     path = "Journal/Author.md"
     edited = authored[path] + b"New user writing.\r\n"
     _write(vault, path, edited)

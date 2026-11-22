@@ -308,10 +308,55 @@ def known_result_document(facts, change):
     )
 
 
+def collection_asset_effect(facts, change):
+    """Bind a first-import binary to its absent path and its exact incoming value."""
+    context = facts.link_context
+    if (
+        facts.format_operation.kind != "collection_import"
+        or context is None
+        or context.inventory != "complete"
+        or change.facet != "asset"
+        or change.original is not None
+        or change.current is not None
+        or change.incoming is None
+        or not same_content(change.result, change.incoming)
+        or change.path != change.target_path
+    ):
+        return None
+    current = tuple(
+        t for t in context.current_targets if t.canonical_path == change.path
+    )
+    incoming = tuple(
+        t for t in context.incoming_targets if t.canonical_path == change.path
+    )
+    if len(current) != 1 or current != incoming:
+        return None
+    (target,) = current
+    if target.kind != "resource" or target.status != "safe" or target.target is None:
+        return None
+    old = tuple(
+        row for row in context.current_target_facts if row.target_id == target.target_id
+    )
+    new = tuple(
+        row
+        for row in context.incoming_target_facts
+        if row.target_id == target.target_id
+    )
+    if (
+        len(old) == len(new) == 1
+        and old[0].existence == "missing"
+        and old[0].content is None
+        and new[0].existence == "present"
+        and same_content(new[0].content, change.incoming)
+    ):
+        return target, new[0]
+    return None
+
+
 def compatible_result_eligible(facts, change):
-    return (
-        facts.link_context is not None
-        and known_result_document(facts, change) is not None
+    return facts.link_context is not None and (
+        known_result_document(facts, change) is not None
+        or collection_asset_effect(facts, change) is not None
     )
 
 

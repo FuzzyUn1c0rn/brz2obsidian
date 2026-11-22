@@ -66,7 +66,9 @@ def validate_link_target_state(state, targets):
                 raise ValueError("link_membership_invalid")
 
 
-def _validated_baseline(baseline, document, expected_path):
+def _validated_baseline(
+    baseline, document, expected_path, *, allow_existing_unsupported=False
+):
     if baseline is None:
         return None
     prior = baseline.document
@@ -76,7 +78,13 @@ def _validated_baseline(baseline, document, expected_path):
         or prior.path_mode != document.path_mode
         or baseline.inventory != "complete"
         or prior.inventory != "complete"
-        or prior.status != "supported"
+        or (
+            prior.status != "supported"
+            and not (
+                allow_existing_unsupported
+                and same_content(prior.content, document.content)
+            )
+        )
     ):
         raise ValueError("link_unbound")
     if (
@@ -277,6 +285,7 @@ def _validate_link_document(
     baseline: LinkValidationBaseline | None = None,
     affected_target_ids: tuple[str, ...] = (),
     _inline_only: bool = False,
+    allow_existing_unsupported: bool = False,
 ) -> LinkDocumentValidation:
     findings = []
     document_id = getattr(document, "document_id", "unknown")
@@ -317,7 +326,7 @@ def _validate_link_document(
         add("link_unbound")
     if inventory != "complete" or document.inventory != "complete":
         add("link_inventory_uncertain")
-    if document.status != "supported":
+    if document.status != "supported" and not allow_existing_unsupported:
         add("link_unsupported")
     if len({t.target_id for t in targets}) != len(targets) or len(
         {s.target_id for s in target_facts}
@@ -325,7 +334,12 @@ def _validate_link_document(
         add("link_facts_invalid")
         return result()
     try:
-        baseline = _validated_baseline(baseline, document, expected_path)
+        baseline = _validated_baseline(
+            baseline,
+            document,
+            expected_path,
+            allow_existing_unsupported=allow_existing_unsupported,
+        )
     except ValueError as error:
         add(
             str(error)

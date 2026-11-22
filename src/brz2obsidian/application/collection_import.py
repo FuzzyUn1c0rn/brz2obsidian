@@ -14,14 +14,13 @@ from brz2obsidian.contracts import (
     SourceIdentity,
 )
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
-from brz2obsidian.publication.vault_admission import _safe_relative, _walk
-from brz2obsidian.publication.vault_history import _Git, _read, collection_baselines
-from brz2obsidian.publication.vault_native import available_memory, observe_file
-
-from .collection_placement import (
+from brz2obsidian.publication.collection_placement import (
     collection_connection_choices,
     observe_collection_placement,
+    read_rendered_collection,
 )
+from brz2obsidian.publication.vault_history import _Git, _read, collection_baselines
+
 from .update_contracts import UpdatePreparation, UpdateResult, update_application_status
 from .update_facts import CollectionImportConflict, output_identity, record
 from .update_lifecycle import (
@@ -44,30 +43,6 @@ def _refused(code, *, history=None, action="inspect_history", kind="collection_i
         next_actions=(action,),
         history_retained=history is not None and history.status == "intact",
     )
-
-
-def _read_rendered(root, record_path):
-    directory, _, name = record_path.rpartition("/")
-    if name != "migration-record.json" or not _safe_relative(record_path):
-        raise ValueError("Invalid collection record path")
-    available = available_memory() // 4
-    payload = {}
-    for parent, _, filenames in _walk(root):
-        for name in filenames:
-            path = Path(parent) / name
-            relative = path.relative_to(root).as_posix()
-            if (
-                not _safe_relative(relative)
-                or directory
-                and not relative.startswith(directory + "/")
-            ):
-                raise ValueError("Rendered output is outside the import scope")
-            info, _, raw, _ = observe_file(root, path, prefix_limit=available + 1)
-            if info.st_size > available or info.st_size != len(raw):
-                raise OSError("Rendered collection exceeds the review resources")
-            payload[relative] = raw
-            available -= len(raw)
-    return payload
 
 
 def _baseline(operations, history, observed, record_path):
@@ -140,6 +115,29 @@ def _collection_facts(
     )
 
 
+def _bind_placement(facts, impact, choices):
+    if impact is None:
+        return facts
+    context = facts.link_context
+    warnings = tuple(
+        sorted(
+            (row.source_path, row.content.identity.sha256)
+            for row in context.current_documents
+            if row.status == "unsupported" and row.source_path in impact.warnings
+        )
+    )
+    return facts.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    "import_link_connections": choices,
+                    "import_unrelated_documents": warnings,
+                }
+            )
+        }
+    )
+
+
 def _placement_refused(history, impact, *, current=False):
     return _refused(
         "import_link_meanings_changed" if current else "import_link_review_required",
@@ -204,7 +202,7 @@ def prepare_collection_import(
             return unavailable
         if not update and "/" not in record_path:
             return _refused("collection_scope_required", history=history)
-        incoming = _read_rendered(source, record_path)
+        incoming = read_rendered_collection(source, record_path)
         if rendered is not None and not _rendered_receipt_matches(incoming, rendered):
             return _refused("source_payload_changed", history=history, kind=kind)
         observed = SourceIdentity.model_validate(
@@ -231,8 +229,8 @@ def prepare_collection_import(
             None
             if update
             else observe_collection_placement(
-                operations,
-                history,
+                history.admission,
+                history.checkpoint,
                 incoming,
                 record_path,
                 connections=choices,
@@ -240,6 +238,7 @@ def prepare_collection_import(
         )
         if impact is not None and not impact.safe:
             return _placement_refused(history, impact)
+        facts = _bind_placement(facts, impact, choices)
         history = _scoped(operations, history, facts)
         review = prepare_review(facts, preflight=history.admission.preflight)
         binding = _bind_payload(operations, source, review, incoming)
@@ -286,7 +285,7 @@ def _review_source_inputs(operations, prepared, replacement):
         != prepared.source_binding
     ):
         raise CollectionImportConflict("source_payload_changed")
-    incoming = _read_rendered(source, prepared.collection_record_path)
+    incoming = read_rendered_collection(source, prepared.collection_record_path)
     observed = SourceIdentity.model_validate(
         record(incoming, prepared.collection_record_path)["source_identity"]
     )
@@ -330,8 +329,8 @@ def _observe_review(operations, preparation, *, replacement=None):
     )
     impact = (
         observe_collection_placement(
-            operations,
-            history,
+            history.admission,
+            history.checkpoint,
             incoming,
             prepared.collection_record_path,
             connections=prepared.import_link_connections,
@@ -341,6 +340,7 @@ def _observe_review(operations, preparation, *, replacement=None):
     )
     if impact is not None and not impact.safe:
         return history, _placement_refused(history, impact, current=True)
+    facts = _bind_placement(facts, impact, prepared.import_link_connections)
     history = _scope_review(operations, history, facts, plan)
     changed = (
         facts != plan.producer_facts or history.admission.preflight != plan.preflight
@@ -433,6 +433,7 @@ def _capture_review(operations, history, current, *, progress):
             review_source=prepared.payload_directory,
             observed_source=prepared.observed_source,
             collection_record_path=prepared.collection_record_path,
+            import_link_connections=prepared.import_link_connections,
             progress=progress,
         )
     if captured.locator is None:

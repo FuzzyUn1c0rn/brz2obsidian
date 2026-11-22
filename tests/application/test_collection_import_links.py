@@ -178,3 +178,38 @@ def test_operations_preview_renders_real_scope_from_a_verified_source_session(
     assert (tmp_path / "staging" / observed.connection.target_path).is_file()
     assert (tmp_path / "staging/Imports/Graph/migration-record.json").is_file()
     assert manual.read_bytes() == authored
+
+
+def test_authored_base_fixed_targets_reserve_and_review_only_the_changed_links():
+    from brz2obsidian.obsidian.import_links import (
+        inspect_import_links,
+        reserved_import_names,
+    )
+
+    existing = {
+        "Index.base": (
+            b"formulas:\n"
+            b'  open: \'link("Imports/B/Notes/Future.md", "Open future")\'\n'
+            b"  old: 'file(\"Old/Owned.md\")'\n"
+            b'  elsewhere: \'file("Elsewhere/" + note.basename + ".md")\'\n'
+            b"views: []\n"
+        ),
+        "Old/Owned.md": b"# Owned\n",
+    }
+    incoming = {"Imports/B/Notes/Future.md": b"# Future\n"}
+    assert "future" in reserved_import_names(existing, "Imports/B")
+    offered = inspect_import_links(existing, incoming)
+    rows = {row.after.display_text: row for row in offered.observations}
+    assert offered.blockers == ("connection_required",)
+    assert rows["Old/Owned.md"].before == rows["Old/Owned.md"].after
+    choice = rows["Open future"].connection
+    assert choice.document_path == "Index.base"
+    assert choice.target_path == "Imports/B/Notes/Future.md"
+    assert inspect_import_links(existing, incoming, connections=(choice,)).safe
+
+    relevant = existing | {
+        "Index.base": existing["Index.base"].replace(b"Elsewhere/", b"Imports/B/Notes/")
+    }
+    assert (
+        "affected_link_uncertain" in inspect_import_links(relevant, incoming).blockers
+    )

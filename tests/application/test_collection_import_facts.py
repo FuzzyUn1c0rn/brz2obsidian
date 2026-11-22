@@ -1200,3 +1200,132 @@ def test_public_import_reports_retained_identity_before_target_occupancy():
     )
     assert offered.code == "retained_source_identity_conflict"
     assert retained.read_bytes() == authored
+
+
+def _placement_fixture():
+    vault, stage = fixture_case()
+    git(vault, "init", "-q")
+    path, record_path, incoming = _incoming_brain()
+    new_path = "Imports/Brain B/Notes/Opening.md"
+    record = json.loads(incoming[record_path])
+    record["item_targets"][0]["relative_path"] = new_path
+    return vault, stage, new_path, record_path, incoming[path], record
+
+
+def _stage_placement(stage, path, record_path, note, record):
+    for relative, raw in (
+        (path, note),
+        (record_path, json.dumps(record).encode()),
+    ):
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+
+
+def test_public_collection_review_preserves_relative_links_and_binds_one_connection():
+    from brz2obsidian.core import select_review_effects
+    from brz2obsidian.obsidian.import_links import inspect_import_links
+
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    authored = (
+        b"[[../Old/Twin|Existing]]\r\n"
+        b"[[Imports/Brain B/Notes/Opening|Review connection]]\r\n"
+        b"[existing unrelated][label]\r\n\r\n[label]: Other.md\r\n"
+    )
+    existing = {"Journal/Author.md": authored, "Old/Twin.md": b"# Twin\n"}
+    for relative, raw in existing.items():
+        target = vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    impact = inspect_import_links(existing, {path: note})
+    (choice,) = tuple(row.connection for row in impact.observations if row.connection)
+    record["import_link_connections"] = [choice.model_dump()]
+    _stage_placement(stage, path, record_path, note, record)
+
+    operations = Operations()
+    result = operations.prepare_collection_import(vault, stage, record_path=record_path)
+    assert result.import_link_impact.blockers == ("import_connection_approval_missing",)
+    result = operations.prepare_collection_import(
+        vault,
+        stage,
+        record_path=record_path,
+        connections=(choice,),
+    )
+    assert result.ready, result.findings
+    selected = select_review_effects(result.preparation.review)
+    assert {row.path: row.content.data for row in selected.files}[path] == note
+    assert result.import_link_impact.warnings == ("Journal/Author.md",)
+    assert (vault / "Journal/Author.md").read_bytes() == authored
+
+
+def test_public_collection_review_checks_empty_physical_parents():
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    _stage_placement(stage, path, record_path, note, record)
+    conflicting = vault / "Imports/Brain B/notes"
+    conflicting.mkdir(parents=True)
+    operations = Operations()
+    refused = operations.prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert refused.import_link_impact.blockers == ("import_target_occupied",)
+    assert not tuple(conflicting.iterdir())
+    conflicting.rmdir()
+    (vault / "Imports/Brain B/Notes").mkdir()
+    accepted = operations.prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert accepted.ready, accepted.findings
+
+
+def test_native_collection_capture_reobserves_new_base_target_before_saving(tmp_path):
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    _stage_placement(stage, path, record_path, note, record)
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert offered.ready, offered.findings
+    prepared = offered.preparation
+    base = vault / "New view.base"
+    base.write_text(f"formulas:\n  open: 'link(\"{path}\")'\n", encoding="utf-8")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    captured = operations.capture_checkpoint(
+        vault,
+        empty,
+        vault_id="owned",
+        import_id="import",
+        identity=prepared.review.facts.baseline_identity,
+        admission=operations.inspect_history(vault).admission,
+        review=prepared.review,
+        source_binding=prepared.source_binding,
+        review_source=stage,
+        observed_source=prepared.observed_source,
+        collection_record_path=record_path,
+    )
+    assert captured.code == "connection_required", captured
+    assert operations.inspect_history(vault).status == "absent"
+    assert not (vault / path).exists()
+
+
+def test_saved_collection_review_resumes_with_its_source_still_inactive():
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    _stage_placement(stage, path, record_path, note, record)
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert offered.ready
+    saved = operations.save_update(offered.preparation)
+    assert saved.code == "saved", saved.code
+    resumed = Operations().resume_update(vault)
+    assert resumed.code == "resumed" and resumed.ready, resumed.code
+    assert (
+        next(
+            row.incoming.data
+            for row in resumed.preparation.review.facts.subjects
+            if row.path == path
+        )
+        == note
+    )
+    assert not (vault / path).exists()

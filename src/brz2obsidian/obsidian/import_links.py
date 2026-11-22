@@ -19,6 +19,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.import_placement import import_name_key
 from brz2obsidian.core.link_meanings import resolve_occurrence
 
+from .base_import_links import BaseDocument, inspect_base_document
 from .links import interpret_link_target, interpret_links
 
 
@@ -82,7 +83,9 @@ def _link_state(path, existence, value):
 def _authored_documents(files, catalog):
     targets, states = catalog
     return tuple(
-        interpret_links(
+        inspect_base_document(path, raw, catalog)
+        if path.lower().endswith(".base")
+        else interpret_links(
             ExactContent(data=raw),
             document_id=path,
             source_path=path,
@@ -152,7 +155,36 @@ def _observation(document, occurrence, after_catalog, incoming, approved):
     )
 
 
-def _may_reach_import(document, incoming_names):
+def _base_may_reach_import(document, incoming):
+    if document.unreadable:
+        return True
+    for token in document.uncertain:
+        if not token:
+            continue
+        value = _key(token.removeprefix("[[").removesuffix("]]").lstrip("/"))
+        for path in incoming:
+            normalized = _key(path)
+            if "/" in value and any(
+                suffix.startswith(value)
+                for suffix in (
+                    normalized,
+                    *(
+                        normalized[i + 1 :]
+                        for i, char in enumerate(normalized)
+                        if char == "/"
+                    ),
+                )
+            ):
+                return True
+            if "/" not in value and import_name_key(value) == import_name_key(path):
+                return True
+    return False
+
+
+def _may_reach_import(document, incoming):
+    if isinstance(document, BaseDocument):
+        return _base_may_reach_import(document, incoming)
+    incoming_names = {import_name_key(path) for path in incoming}
     raw = bytearray(document.content.data)
     for row in document.occurrences:
         if row.query is not None or row.meaning.status == "external":
@@ -229,10 +261,9 @@ def inspect_import_links(
             blockers.add(row.kind)
         elif row.kind == "preexisting_warning":
             warnings.add(row.document_path)
-    names = {import_name_key(path) for path in incoming}
     for document in documents:
         if document.status == "unsupported":
-            if _may_reach_import(document, names):
+            if _may_reach_import(document, incoming):
                 blockers.add("affected_link_uncertain")
             else:
                 warnings.add(document.source_path)

@@ -2893,6 +2893,7 @@ class _CaptureRequest(NamedTuple):
     owned_export: object
     owners: object
     collection_record_path: str | None
+    import_link_connections: tuple
 
 
 class _CaptureBase(NamedTuple):
@@ -3921,6 +3922,24 @@ def _capture_spool_capacity(request, base, saved, included_paths):
     return proposed, temp_base
 
 
+def _qualify_local_collection_import(request, base, review_source):
+    if not _first_collection_review(request):
+        return
+    from .collection_placement import collection_write_refusal
+
+    refusal = collection_write_refusal(
+        base.current,
+        base.prior,
+        review_source,
+        base.collection_record_path,
+        request.review,
+        choices=request.import_link_connections,
+        git=base.git,
+    )
+    if refusal is not None:
+        raise _CaptureDecision(result("refused", refusal))
+
+
 def _prepare_checkpoint_capture(request, writes):
     _validate_capture_export(request)
     subjects = _capture_subjects(request)
@@ -3934,6 +3953,7 @@ def _prepare_checkpoint_capture(request, writes):
     review_source, reviewed_source, review_source_rows = _capture_local_source(
         request, base, saved
     )
+    _qualify_local_collection_import(request, base, review_source)
     retaining_prepared = request.boundary == "result"
     saved = _retain_prepared_review(request, base, saved, retaining_prepared)
     retained_recovery_incoming = _capture_recovery_inputs(lineage, saved)
@@ -4887,6 +4907,7 @@ def capture_checkpoint(
     _owned_export=None,
     _owners=None,
     collection_record_path=None,
+    import_link_connections=(),
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     request = _CaptureRequest(
@@ -4914,6 +4935,7 @@ def capture_checkpoint(
         _owned_export,
         _owners,
         collection_record_path,
+        import_link_connections,
     )
     writes = _CaptureWrites()
     try:
