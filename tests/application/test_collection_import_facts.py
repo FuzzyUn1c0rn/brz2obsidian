@@ -291,6 +291,197 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
         reversed_note()
 
 
+def test_undo_lease_uses_reviewed_collection_lineage_even_at_vault_root(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import collection_publication, vault_apply
+
+    held = SimpleNamespace(
+        boundary="prepared",
+        collection_record_path=None,
+        collection_preparation_owner="a" * 32,
+    )
+    origin = SimpleNamespace(operation_id="a" * 32, prepared_commit="b" * 40)
+    target = SimpleNamespace(
+        receipt_commit="c" * 40,
+        intent=origin,
+        observation=SimpleNamespace(owned={origin.prepared_commit: (held, None)}),
+    )
+    checkpoint = SimpleNamespace(manifest=SimpleNamespace(), locator=object())
+    acquisitions = []
+    monkeypatch.setattr(
+        vault_apply, "_acquire", lambda *args: acquisitions.append(args)
+    )
+    monkeypatch.setattr(
+        collection_publication,
+        "acquire_collection_apply",
+        lambda *args, **kwargs: acquisitions.append((args, kwargs)),
+    )
+    root = Path("vault").absolute()
+    assert vault_apply._acquire_reviewed_apply(root, "d" * 32, checkpoint, target)
+    assert acquisitions.pop() == (
+        (root, "d" * 32, checkpoint.locator),
+        {"undo_receipt": target.receipt_commit},
+    )
+    held.collection_preparation_owner = None
+    assert not vault_apply._acquire_reviewed_apply(root, "d" * 32, checkpoint, target)
+    assert acquisitions == [(root, "d" * 32)]
+
+
+def test_root_undo_locator_proof_requires_exact_owned_receipt(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import (
+        collection_result_locator,
+        vault_apply,
+        vault_history,
+    )
+
+    association = "a" * 64
+    apply_operation = "b" * 32
+    undo_operation = "c" * 32
+    apply_prepared = "d" * 40
+    undo_prepared = "e" * 40
+    apply_receipt = "f" * 40
+    apply_intent = SimpleNamespace(
+        kind="apply",
+        association_id=association,
+        operation_id=apply_operation,
+        prepared_commit=apply_prepared,
+    )
+    undo_intent = SimpleNamespace(
+        kind="undo",
+        association_id=association,
+        operation_id=undo_operation,
+        prepared_commit=undo_prepared,
+        undo_of_receipt_commit=apply_receipt,
+    )
+    marker = SimpleNamespace(
+        operation_id=undo_operation,
+        collection_saved_checkpoint=undo_prepared,
+        collection_undo_receipt=apply_receipt,
+    )
+    manifests = {
+        apply_prepared: SimpleNamespace(
+            boundary="prepared",
+            collection_record_path=None,
+            collection_preparation_owner=apply_operation,
+        ),
+        undo_prepared: SimpleNamespace(
+            previous="0" * 40,
+            undo_of_receipt_commit=apply_receipt,
+            collection_record_path=None,
+            collection_preparation_owner=None,
+        ),
+    }
+    monkeypatch.setattr(
+        collection_result_locator, "read_native_marker", lambda root: marker
+    )
+    monkeypatch.setattr(
+        vault_apply,
+        "_operation_graph",
+        lambda git, commit: SimpleNamespace(
+            receipt=SimpleNamespace(status="applied"),
+            authorities=((None, apply_intent),),
+        ),
+    )
+    monkeypatch.setattr(
+        vault_history,
+        "_checkpoint_graph",
+        lambda git, commit, *args: (None, None, manifests[commit], None),
+    )
+    graph = SimpleNamespace(intent=undo_intent, authorities=((None, undo_intent),))
+    git = SimpleNamespace(call=lambda *args: apply_receipt.encode())
+
+    def qualified():
+        return collection_result_locator._scoped_result_owner(
+            Path("vault").absolute(), git, graph, manifests[undo_prepared]
+        )
+
+    assert qualified()
+    marker.collection_saved_checkpoint = "1" * 40
+    assert not qualified()
+    marker.collection_saved_checkpoint = undo_prepared
+    marker.collection_undo_receipt = "2" * 40
+    assert not qualified()
+
+
+def test_scoped_terminal_receipt_offers_cleanup_after_later_edit(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import (
+        collection_publication,
+        vault_apply,
+        vault_history,
+    )
+
+    operation = "a" * 32
+    saved = "b" * 40
+    prepared = "c" * 40
+    commit = "d" * 40
+    intent = SimpleNamespace(
+        operation_id=operation,
+        kind="apply",
+        direction="finish",
+        generation=4,
+        affected_paths=("Brain B/Opening.md",),
+        prepared_commit=prepared,
+    )
+    receipt = SimpleNamespace(
+        status="applied",
+        published_paths=intent.affected_paths,
+        intent_commit="e" * 40,
+        result_commit="f" * 40,
+    )
+    owner = SimpleNamespace(
+        operation_id=operation,
+        collection_saved_checkpoint=saved,
+        collection_undo_receipt=None,
+    )
+    manifest = SimpleNamespace(
+        boundary="prepared",
+        previous=saved,
+        collection_preparation_owner=operation,
+        collection_record_path="Brain B/migration-record.json",
+    )
+    (tmp_path / ".git/brz2obsidian").mkdir(parents=True)
+    monkeypatch.setattr(vault_apply, "_terminal_result_in_history", lambda *args: True)
+    monkeypatch.setattr(vault_apply, "_terminal_files_match", lambda *args: False)
+    monkeypatch.setattr(
+        collection_publication, "read_native_marker", lambda root: owner
+    )
+    monkeypatch.setattr(
+        vault_apply,
+        "_operation_graph",
+        lambda git, commit: SimpleNamespace(authorities=((None, intent),)),
+    )
+    monkeypatch.setattr(
+        vault_history, "_checkpoint_graph", lambda *args: (None, None, manifest, None)
+    )
+
+    def status():
+        return vault_apply._terminal_operation_status(
+            tmp_path,
+            object(),
+            SimpleNamespace(status="valid"),
+            intent,
+            receipt,
+            commit,
+            0,
+            None,
+        )
+
+    assert status().code == "terminal_cleanup_required"
+    owner.collection_saved_checkpoint = "0" * 40
+    assert status().code == "terminal_requires_recovery"
+    monkeypatch.setattr(vault_apply, "_terminal_files_match", lambda *args: True)
+    assert status().code == "terminal_requires_recovery"
+    owner.collection_saved_checkpoint = None
+    assert status().code == "terminal_cleanup_required"
+
+
 def test_interrupted_scoped_apply_start_releases_marker_without_checkpoint_write():
     from brz2obsidian.publication import vault_apply
 

@@ -1865,6 +1865,13 @@ def _observe_operation_checkpoint(
     return None
 
 
+def _terminal_cleanup_matches(root, git, commit, intent):
+    from .collection_publication import scoped_terminal_marker
+
+    scoped = scoped_terminal_marker(root, git, commit, intent.operation_id)
+    return _terminal_files_match(root, intent) if scoped is None else scoped
+
+
 def _terminal_operation_status(
     root, git, checkpoint, intent, receipt, commit, start, review_generation
 ):
@@ -1896,7 +1903,7 @@ def _terminal_operation_status(
     if (
         complete_history
         and _lock_path(root).exists()
-        and _terminal_files_match(root, intent)
+        and _terminal_cleanup_matches(root, git, commit, intent)
     ):
         return _outcome(
             "content_complete",
@@ -3493,14 +3500,20 @@ def _execute_staged_apply(name, publication, paths, observed, state):
         publication.owners,
     )
     if tip is None:
-        manifest = observed.checkpoint.manifest
-        scoped = publication.undo_target is None and (
-            manifest.collection_record_path is not None
-            or manifest.collection_baseline_commit is not None
+        from .collection_undo_publication import SCOPED_UNDO_PENDING
+
+        code = (
+            (
+                SCOPED_UNDO_PENDING
+                if publication.undo_target is not None
+                else "unpublished_collection_prepared"
+            )
+            if state.scoped
+            else "cancelled_before_intent"
         )
         return publication.outcome(
             "cancelled",
-            "unpublished_collection_prepared" if scoped else "cancelled_before_intent",
+            code,
             start=publication.start,
             operation_id=publication.operation_id,
             generation=state.operation_generation,
@@ -3509,7 +3522,7 @@ def _execute_staged_apply(name, publication, paths, observed, state):
             history="prepared",
             planned=len(changed),
             checkpoint=state.prepared_commit,
-            recovery=scoped,
+            recovery=state.scoped,
             message="Cancellation retained preparation without publishing files.",
         )
     manifest = tip.checkpoint.manifest
@@ -3591,12 +3604,23 @@ def _publish_staged_apply(publication, paths, observed, state):
 
 
 def _acquire_reviewed_apply(root, operation_id, checkpoint, undo_target):
-    from .collection_publication import acquire_collection_apply
+    from .collection_publication import acquire_collection_apply, scoped_undo_target
     from .vault_history import _scoped_saved_checkpoint
 
-    scoped = undo_target is None and _scoped_saved_checkpoint(checkpoint.manifest)
+    scoped = (
+        _scoped_saved_checkpoint(checkpoint.manifest)
+        if undo_target is None
+        else scoped_undo_target(undo_target)
+    )
     if scoped:
-        acquire_collection_apply(root, operation_id, checkpoint.locator)
+        acquire_collection_apply(
+            root,
+            operation_id,
+            checkpoint.locator,
+            undo_receipt=undo_target.receipt_commit
+            if undo_target is not None
+            else None,
+        )
     else:
         _acquire(root, operation_id)
     return scoped

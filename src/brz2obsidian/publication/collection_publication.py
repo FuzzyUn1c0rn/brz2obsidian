@@ -94,7 +94,81 @@ def read_native_marker(root):
     return owner
 
 
-def acquire_collection_apply(root, operation, locator):
+def _scoped_apply_preparation(prepared, operation_id):
+    return prepared.boundary == "prepared" and (
+        prepared.collection_preparation_owner == operation_id
+        or prepared.collection_preparation_owner is None
+        and prepared.collection_record_path is not None
+    )
+
+
+def scoped_undo_target(target):
+    origin = target.intent
+    prepared, _ = target.observation.owned[origin.prepared_commit]
+    return _scoped_apply_preparation(prepared, origin.operation_id)
+
+
+def scoped_undo_receipt(git, receipt_commit, association_id):
+    from .vault_apply import _operation_graph
+    from .vault_history import _checkpoint_graph
+
+    graph = _operation_graph(git, receipt_commit)
+    origin = graph.authorities[-1][1]
+    if (
+        graph.receipt is None
+        or graph.receipt.status != "applied"
+        or origin.kind != "apply"
+        or origin.association_id != association_id
+    ):
+        return False
+    ref = f"refs/brz2obsidian/imports/{association_id}/operations/{origin.operation_id}"
+    if git.call("rev-parse", "--verify", ref).decode().strip() != receipt_commit:
+        return False
+    _, _, manifest, _ = _checkpoint_graph(git, origin.prepared_commit, {}, None)
+    return _scoped_apply_preparation(manifest, origin.operation_id)
+
+
+def scoped_operation_marker(git, graph, owner):
+    from .vault_history import _checkpoint_graph
+
+    origin = graph.authorities[-1][1]
+    if (
+        owner.collection_saved_checkpoint is None
+        or owner.operation_id != origin.operation_id
+    ):
+        return False
+    _, _, manifest, _ = _checkpoint_graph(git, origin.prepared_commit, {}, None)
+    if origin.kind == "apply":
+        return (
+            owner.collection_undo_receipt is None
+            and owner.collection_saved_checkpoint == manifest.previous
+            and _scoped_apply_preparation(manifest, origin.operation_id)
+        )
+    if (
+        owner.collection_undo_receipt is None
+        or owner.collection_undo_receipt != origin.undo_of_receipt_commit
+        or manifest.undo_of_receipt_commit != owner.collection_undo_receipt
+        or owner.collection_saved_checkpoint
+        not in (manifest.previous, origin.prepared_commit)
+    ):
+        return False
+    return scoped_undo_receipt(
+        git, owner.collection_undo_receipt, origin.association_id
+    )
+
+
+def scoped_terminal_marker(root, git, receipt_commit, operation_id):
+    from .vault_apply import _operation_graph
+
+    owner = read_native_marker(root)
+    if owner is None or owner.collection_saved_checkpoint is None:
+        return None
+    return owner.operation_id == operation_id and scoped_operation_marker(
+        git, _operation_graph(git, receipt_commit), owner
+    )
+
+
+def acquire_collection_apply(root, operation, locator, *, undo_receipt=None):
     from .vault_apply import _adopt, _lock_path
     from .vault_history import _Git, _validate_locator_association
 
@@ -121,6 +195,7 @@ def acquire_collection_apply(root, operation, locator):
                 vault_anchor=locator.association.vault_anchor,
                 git_anchor=locator.association.git_anchor,
                 collection_saved_checkpoint=locator.commit,
+                collection_undo_receipt=undo_receipt,
             )
             with (staged / "owner.json").open("xb") as stream:
                 stream.write(owner.model_dump_json().encode())

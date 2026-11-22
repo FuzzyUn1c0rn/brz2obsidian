@@ -1695,11 +1695,17 @@ def _locator_at_owned_tip(root, git, locator, trusted_association):
         return locator
     if trusted_association is None:
         from .collection_result_locator import locator_after_scoped_result
+        from .collection_undo_publication import locator_after_scoped_undo_preparation
         from .unpublished_collection import locator_after_unpublished_preparation
 
         advanced = locator_after_unpublished_preparation(root, git, locator, tip, names)
         if advanced is not None:
             return advanced
+        undo_locator = locator_after_scoped_undo_preparation(
+            root, git, locator, tip, names
+        )
+        if undo_locator is not None:
+            return undo_locator
         result_locator = locator_after_scoped_result(root, git, locator, tip, names)
         if result_locator is not None:
             return result_locator

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
 
-from .unpublished_collection import _owned_marker_matches
+from .collection_publication import read_native_marker, scoped_operation_marker
 from .vault_history import (
     _checkpoint_graph,
     _persist_checkpoint_locator,
@@ -18,11 +18,7 @@ RESULT_LOCATOR_PENDING = "scoped_result_locator_pending"
 
 def _result_locator_matches(manifest, prepared, intent):
     return (
-        (
-            prepared.collection_record_path is not None
-            or prepared.collection_preparation_owner is not None
-        )
-        and manifest.collection_record_path == prepared.collection_record_path
+        manifest.collection_record_path == prepared.collection_record_path
         and manifest.identity == prepared.identity
         and manifest.source == prepared.source
         and manifest.association_id == intent.association_id
@@ -34,6 +30,18 @@ def _result_locator_matches(manifest, prepared, intent):
             prepared.collection_preparation_owner is None
             or prepared.collection_preparation_owner == intent.operation_id
         )
+    )
+
+
+def _scoped_result_owner(root, git, graph, prepared):
+    owner = read_native_marker(root)
+    if owner is None or owner.operation_id != graph.intent.operation_id:
+        return False
+    if owner.collection_saved_checkpoint is not None:
+        return scoped_operation_marker(git, graph, owner)
+    return (
+        prepared.collection_record_path is not None
+        or prepared.collection_preparation_owner is not None
     )
 
 
@@ -66,13 +74,7 @@ def locator_after_scoped_result(root, git, saved_locator, tip, names):
         or git.call("rev-parse", "--verify", ref).decode().strip()
         != graph.intent_commit
         or not _result_locator_matches(manifest, prepared, intent)
-        or not _owned_marker_matches(
-            root,
-            intent.operation_id,
-            saved_checkpoint=prepared.previous
-            if prepared.collection_preparation_owner
-            else None,
-        )
+        or not _scoped_result_owner(root, git, graph, prepared)
     ):
         return None
     return saved_locator.model_copy(

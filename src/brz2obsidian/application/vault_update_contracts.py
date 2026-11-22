@@ -17,6 +17,18 @@ class VaultOperationLock(ReconciliationContract):
     collection_saved_checkpoint: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
     )
+    collection_undo_receipt: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def undo_parent_is_bound(self):
+        if (
+            self.collection_undo_receipt is not None
+            and self.collection_saved_checkpoint is None
+        ):
+            raise ValueError("Scoped Undo marker requires the exact parent checkpoint")
+        return self
 
 
 class VaultPathMetadata(ReconciliationContract):

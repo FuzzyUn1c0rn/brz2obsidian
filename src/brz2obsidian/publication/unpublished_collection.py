@@ -216,6 +216,7 @@ def _started_apply_outcome(git, checkpoint, previous, start):
     owner = read_native_marker(git.root)
     if (
         owner is None
+        or owner.collection_undo_receipt is not None
         or owner.collection_saved_checkpoint != locator.commit
         or not _keeps_previous_operation(
             git, checkpoint, previous, owner.operation_id, manifest.generation

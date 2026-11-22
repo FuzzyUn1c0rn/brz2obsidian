@@ -2431,8 +2431,13 @@ def prepare_recovery(vault, *, direction=None, _owner=None):
     observed, authority = _inspect_update_observation(root)
     from .collection_publication import LOCAL_LOCATOR_PENDING
     from .collection_result_locator import RESULT_LOCATOR_PENDING
+    from .collection_undo_publication import pending_scoped_undo
     from .unpublished_collection import UNPUBLISHED_RECOVERY_CODES
 
+    if direction in (None, "finish", "restore"):
+        pending = pending_scoped_undo(root, authority)
+        if pending is not None:
+            return pending
     if observed.code == RESULT_LOCATOR_PENDING and direction in (
         None,
         "finish",
@@ -2655,6 +2660,8 @@ def _cleanup_verified_terminal(root, saved, *, start, _owners=None):
         or not _marker_valid(root, saved.operation_id)
     ):
         return _outcome("refused", "terminal_cleanup_stale", start=start)
+    from .collection_publication import read_native_marker, scoped_operation_marker
+
     try:
         _adopt(root, saved.operation_id)
         held, held_authority = _inspect_update_observation(root, _owners=_owners)
@@ -2665,10 +2672,20 @@ def _cleanup_verified_terminal(root, saved, *, start, _owners=None):
         ):
             _park(root, saved.operation_id)
             return _outcome("refused", "terminal_cleanup_changed", start=start)
+        marker = read_native_marker(root)
+        scoped = (
+            marker is not None
+            and marker.collection_saved_checkpoint is not None
+            and scoped_operation_marker(_Git(root), held_authority.graph, marker)
+        )
         release_native_operation(root, saved.operation_id)
         final = _inspect_update_observation(root, _owners=_owners)[0]
         if final.status not in ("applied", "no_content_change", "undone", "restored"):
             raise OSError("Verified terminal status was not rediscovered")
+        if scoped:
+            return final.model_copy(
+                update={"published_files": 0, "authored_files_changed": False}
+            )
         return final
     except OSError, ValueError, TypeError:
         _park(root, saved.operation_id)
@@ -3658,7 +3675,13 @@ def _publish_staged_recovery(
 
 def _execute_recovery_cleanup(root, saved, *, cancel, start, owners):
     from .collection_publication import LOCAL_LOCATOR_PENDING, recover_local_publication
+    from .collection_undo_publication import (
+        SCOPED_UNDO_PENDING,
+        recover_scoped_undo_metadata,
+    )
 
+    if saved.code == SCOPED_UNDO_PENDING and saved.unpublished_checkpoint is not None:
+        return recover_scoped_undo_metadata(root, saved, cancel=cancel)
     if saved.code == LOCAL_LOCATOR_PENDING and saved.unpublished_checkpoint is not None:
         return recover_local_publication(root, saved, cancel=cancel)
     if saved.unpublished_checkpoint is not None:
