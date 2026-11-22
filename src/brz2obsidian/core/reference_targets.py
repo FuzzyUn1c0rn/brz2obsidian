@@ -36,32 +36,39 @@ def _register_target_path(record, paths):
     paths.add(target.normalized_path)
 
 
+def _target_meaning(record, paths):
+    if record.kind == "tag":
+        if (
+            record.category_anchor is not None
+            or record.identity is not None
+            or record.canonical_path is not None
+            or record.target is not None
+        ):
+            raise ValueError("structure_conflict")
+        return "tag", record.target_id
+    _register_target_path(record, paths)
+    identity = record.identity
+    if record.category_anchor == "observed_path":
+        if record.kind != "category" or identity is not None:
+            raise ValueError("structure_conflict")
+        return "vault_category", record.target.normalized_path
+    if record.kind in ("category", "relationship") or (
+        record.kind == "note" and identity is not None
+    ):
+        if identity is None:
+            raise ValueError("structure_conflict")
+        return identity.collection_id, identity.module_id, identity.item_id
+    if identity is not None:
+        raise ValueError("structure_conflict")
+    return record.kind, record.target_id
+
+
 def validate_targets(targets):
     ids, meanings, paths = set(), set(), set()
     for record in targets:
         if record.status != "safe" or not record.representations:
             raise ValueError("structure_conflict")
-        if record.kind == "tag":
-            if (
-                record.identity is not None
-                or record.canonical_path is not None
-                or record.target is not None
-            ):
-                raise ValueError("structure_conflict")
-            meaning = ("tag", record.target_id)
-        else:
-            _register_target_path(record, paths)
-            if record.kind in ("category", "relationship") or (
-                record.kind == "note" and record.identity is not None
-            ):
-                if record.identity is None:
-                    raise ValueError("structure_conflict")
-                identity = record.identity
-                meaning = (identity.collection_id, identity.module_id, identity.item_id)
-            else:
-                if record.identity is not None:
-                    raise ValueError("structure_conflict")
-                meaning = (record.kind, record.target_id)
+        meaning = _target_meaning(record, paths)
         if record.target_id in ids or meaning in meanings:
             raise ValueError("structure_conflict")
         ids.add(record.target_id)

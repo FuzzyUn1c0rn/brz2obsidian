@@ -3923,19 +3923,41 @@ def _capture_spool_capacity(request, base, saved, included_paths):
 
 
 def _qualify_local_collection_import(request, base, review_source):
-    if not _first_collection_review(request):
-        return
-    from .collection_placement import collection_write_refusal
-
-    refusal = collection_write_refusal(
-        base.current,
-        base.prior,
-        review_source,
-        base.collection_record_path,
-        request.review,
-        choices=request.import_link_connections,
-        git=base.git,
+    from .collection_placement import (
+        collection_write_refusal,
+        scoped_update_classification_refusal,
     )
+
+    if _first_collection_review(request):
+        refusal = collection_write_refusal(
+            base.current,
+            base.prior,
+            review_source,
+            base.collection_record_path,
+            request.review,
+            choices=request.import_link_connections,
+            git=base.git,
+        )
+    elif (
+        request.boundary == "local"
+        and base.collection_record_path
+        and request.review is not None
+        and request.review.facts.format_operation.kind == "source_update"
+    ):
+        refusal = (
+            scoped_update_classification_refusal(
+                base.current,
+                base.prior,
+                review_source,
+                base.collection_record_path,
+                request.review,
+                git=base.git,
+            )
+            if review_source is not None
+            else "local_review_source_required"
+        )
+    else:
+        refusal = None
     if refusal is not None:
         raise _CaptureDecision(result("refused", refusal))
 

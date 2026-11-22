@@ -79,7 +79,16 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
-    def prepare_collection_import(self, vault, source, *, record_path, connections=()):
+    def prepare_collection_import(
+        self,
+        vault,
+        source,
+        *,
+        record_path,
+        connections=(),
+        category_choices=(),
+        tag_reuse=(),
+    ):
         """Review an exact rendered collection with vault-relative output paths."""
         from .collection_import import prepare_collection_import
 
@@ -89,6 +98,8 @@ class Operations:
             source,
             record_path=record_path,
             connections=connections,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
         )
 
     def prepare_collection_import_from_source(
@@ -100,6 +111,9 @@ class Operations:
         import_location=None,
         connections=(),
         preview_connections=False,
+        category_choices=(),
+        tag_reuse=(),
+        preview_classifications=False,
     ):
         """Render a source into fresh staging and review placement in a Git vault."""
         from .collection_placement import prepare_collection_import_from_source
@@ -114,6 +128,9 @@ class Operations:
             import_location=import_location,
             connections=connections,
             preview_connections=preview_connections,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+            preview_classifications=preview_classifications,
         )
 
     def prepare_collection_update(self, vault, source, *, record_path):
@@ -122,6 +139,52 @@ class Operations:
 
         return prepare_collection_import(
             self, vault, source, record_path=record_path, update=True
+        )
+
+    def prepare_collection_update_from_source(
+        self, vault, source, *, staging, record_path, category_choices=(), tag_reuse=()
+    ):
+        """Render a source update using the selected collection's remembered mappings."""
+        from .collection_classification import prepare_scoped_classification_update
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_scoped_classification_update(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            record_path=record_path,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+        )
+
+    def prepare_collection_remap_from_source(
+        self,
+        vault,
+        source,
+        *,
+        staging,
+        record_path,
+        category_choices=(),
+        tag_reuse=(),
+        separate_tags=(),
+    ):
+        """Review a mapping change for the already-retained source version."""
+        from .collection_classification import prepare_scoped_classification_update
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_scoped_classification_update(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            record_path=record_path,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+            remap=True,
+            separate_tags=separate_tags,
         )
 
     def _new_owned_preparation(self):

@@ -5,10 +5,15 @@ from pathlib import Path
 from brz2obsidian.contracts import ImportLinkConnection, Issue, MigrationRefused
 from brz2obsidian.core.import_placement import validate_import_location
 from brz2obsidian.core.naming import readable_filename
+from brz2obsidian.obsidian.import_classification import (
+    classification_review,
+    require_classification_choices,
+)
 from brz2obsidian.obsidian.import_links import reserved_import_names
 from brz2obsidian.publication.collection_placement import (
     existing_files,
     location_conflict,
+    observe_classification_inventory,
     observe_collection_placement,
     read_rendered_collection,
     uncreated_destinations,
@@ -68,6 +73,9 @@ def prepare_collection_import_from_source(
     import_location,
     connections,
     preview_connections,
+    category_choices=(),
+    tag_reuse=(),
+    preview_classifications=False,
 ):
     from .collection_import import (
         _history_refusal,
@@ -86,10 +94,18 @@ def prepare_collection_import_from_source(
         existing = existing_files(history.admission)
         reserved, gaps = uncreated_destinations(history.admission, history.checkpoint)
         choices = tuple(ImportLinkConnection.model_validate(row) for row in connections)
-        result = workflow.convert_collection(
-            source,
-            staging,
-            placement=lambda snapshot: _placement_inputs(
+        vault_categories, vault_tags = observe_classification_inventory(
+            history.admission, history.checkpoint, existing=existing
+        )
+        reviewed = None
+
+        def placement(snapshot):
+            nonlocal reviewed
+            reviewed = classification_review(snapshot, vault_categories, vault_tags)
+            selected = require_classification_choices(
+                reviewed, category_choices, preview=preview_classifications
+            )
+            return _placement_inputs(
                 existing,
                 reserved + gaps,
                 root,
@@ -97,13 +113,18 @@ def prepare_collection_import_from_source(
                 import_location,
                 choices,
                 preview_connections,
-            ),
-        )
+            ) | {
+                "category_choices": selected,
+                "tag_reuse": tuple(tuple(row) for row in tag_reuse),
+                "existing_vault_tags": vault_tags,
+            }
+
+        result = workflow.convert_collection(source, staging, placement=placement)
         if result.outcome not in ("clean", "warnings") or result.receipt is None:
             codes = tuple(issue.code for issue in result.issues)
             return _refused(
                 codes[0] if codes else "collection_render_unavailable", findings=codes
-            )
+            ).model_copy(update={"classification_review": reviewed})
         record_path = next(
             row.relative_path
             for row in result.receipt.manifest
@@ -129,7 +150,9 @@ def prepare_collection_import_from_source(
             record_path=record_path,
             rendered=result.receipt,
             connections=choices,
-        )
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+        ).model_copy(update={"classification_review": reviewed})
     except MigrationRefused as error:
         return _refused(error.issues[0].code)
     except OSError, ValueError, TypeError, KeyError, StopIteration:

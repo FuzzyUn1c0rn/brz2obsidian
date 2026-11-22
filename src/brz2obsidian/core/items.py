@@ -81,8 +81,12 @@ def _cover_relationships(snapshot, output_format, reasons):
             reasons[chosen] = ("hierarchy",)
 
 
-def _allocate_stems(items, entry_key, reserved):
-    readable = {item.key: _readable(item.title) for item in items}
+def _allocate_stems(items, entry_key, reserved, source_references):
+    readable = {
+        item.key: _readable(item.title)
+        + (" — source reference" if item.original_identity in source_references else "")
+        for item in items
+    }
     widths = {item.key: 0 for item in items}
     seeds = {item.key: item.naming_seed for item in items}
     while True:
@@ -125,6 +129,7 @@ def assign_item_targets(
     output_format,
     import_location=None,
     reserved_names=frozenset(),
+    source_references=frozenset(),
 ):
     snapshot = analysis.snapshot
     items = sorted(
@@ -133,7 +138,9 @@ def assign_item_targets(
     )
     reasons = _creation_reasons(analysis, items, resource_owners)
     _cover_relationships(snapshot, output_format, reasons)
-    stems = _allocate_stems(items, analysis.entry_key, reserved_names)
+    stems = _allocate_stems(
+        items, analysis.entry_key, reserved_names, source_references
+    )
     return tuple(
         ItemTarget(
             item_key=i.key,
@@ -144,6 +151,8 @@ def assign_item_targets(
                 (
                     ""
                     if i.key == analysis.entry_key
+                    else "References/"
+                    if i.original_identity in source_references
                     else "Categories/"
                     if i.role == "definition"
                     else "Notes/"

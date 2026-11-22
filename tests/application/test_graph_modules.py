@@ -472,3 +472,139 @@ def test_analysis_refuses_conflicting_identity_and_content_ownership(defect):
     with pytest.raises(MigrationRefused) as error:
         analyze(altered, POLICY)
     assert error.value.issues[0].code == expected
+
+
+def test_scoped_category_render_preserves_original_and_separately_approved_view():
+    from brz2obsidian.contracts import ClassificationAssignment, OriginalEvidence
+
+    body = "Keep the source category guidance.\r\n"
+    asset_data = {"projects-body": body.encode(), "projects-guide": b"%PDF sample"}
+    assets = tuple(
+        Asset(
+            asset_id=key,
+            owner="projects",
+            naming_seed=key.encode().hex(),
+            original_name=name,
+            role=role,
+            availability="present",
+            actual_length=len(asset_data[key]),
+            actual_sha256=hashlib.sha256(asset_data[key]).hexdigest(),
+        )
+        for key, name, role in (
+            ("projects-body", "Notes.md", "note_original"),
+            ("projects-guide", "Projects guide.pdf", "file"),
+        )
+    )
+    document = Document(
+        key="projects-body",
+        owner="projects",
+        text=body,
+        text_digest=assets[0].actual_sha256,
+        original_asset_id="projects-body",
+    )
+    facts = snapshot(
+        (
+            item(
+                "projects", "Projects", role="definition", document_ids=(document.key,)
+            ),
+            item("topics", "Topics", role="definition"),
+            item("unused", "Unused", role="definition"),
+            item("a", "Alpha"),
+            item("b", "Beta"),
+        ),
+        (
+            edge("project-a", "projects", "a", "classification"),
+            edge("topic-b", "topics", "b", "classification"),
+        ),
+        (document,),
+        assets,
+    ).model_copy(
+        update={
+            "collection_title": "Atlas",
+            "classification_assignments": (
+                ClassificationAssignment(
+                    relationship_key="project-a",
+                    definition_key="projects",
+                    item_key="a",
+                    evidence=("assignment",),
+                ),
+                ClassificationAssignment(
+                    relationship_key="topic-b",
+                    definition_key="topics",
+                    item_key="b",
+                    evidence=("assignment",),
+                ),
+            ),
+            "original_evidence": (
+                OriginalEvidence(key="assignment", kind="records", original_json="[]"),
+            ),
+        }
+    )
+    analysis = analyze(facts, POLICY)
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+    location = "Imports/Atlas"
+    shared = "Categories/Existing Projects.md"
+    choice = {
+        "source_identity": "projects",
+        "destination_path": shared,
+        "destination_sha256": "a" * 64,
+    }
+    separate_view = location + "/Views/Projects — linked members.md"
+    reference = location + "/References/Projects — source reference.md"
+    overview = location + "/Categories.md"
+
+    def proposed(approved):
+        return render(
+            plan(
+                analysis,
+                output_format=9,
+                import_location=location,
+                category_choices=(choice | {"compatible_view": approved},),
+            ),
+            meta,
+        )
+
+    declined = proposed(False)
+    assert separate_view not in declined.manifest
+    assert "Linked members — compatible view" not in generated(declined, reference)
+    approved = proposed(True)
+    assert shared not in approved.manifest
+    assert f'  - "[[{shared}]]"' in generated(approved, location + "/Notes/Alpha.md")
+    overview_text = generated(approved, overview)
+    assert f"[[{shared}|Projects (shared)]]" in overview_text
+    assert f"[[{location}/Categories/Topics.md|Topics (separate)]]" in overview_text
+    assert "Unused" not in overview_text
+    assert f"[[{reference}|Original Projects content and attachments]]" in overview_text
+    reference_text = generated(approved, reference)
+    assert f"[[{shared}|Existing Projects category]]" in reference_text
+    assert body in reference_text
+    copies = {entry.asset_id: entry.relative_path for entry in approved.copies}
+    assert copies["projects-body"].endswith("/Notes.md.original")
+    assert f"[[{copies['projects-guide']}|Projects guide.pdf]]" in reference_text
+    for navigation in (overview_text, reference_text):
+        assert f"[[{separate_view}|Linked members — compatible view]]" in navigation
+    view = generated(approved, location + "/Views/Projects — linked members.base")
+    assert f'link("{shared}")' in view.replace(chr(92) + '"', '"')
+    assert "note.categories" in view
+    assert "Templates" in view and "Attachments" in view
+
+    original = {row.relative_path: row.content for row in approved.generated_files}
+    incoming = {row.relative_path: row.content for row in declined.generated_files}
+    assert {entry.asset_id: entry.relative_path for entry in declined.copies} == copies
+    outputs = {path: asset_data[key] for key, path in copies.items()}
+    original.update(outputs)
+    incoming.update(outputs)
+    external = b'---\ntags: ["categories"]\n---\n# Existing Projects\n'
+    facts = assemble_facts(
+        original,
+        incoming,
+        original | {shared: external},
+        proposal_id="withdraw-view",
+        generation=1,
+        record_path=location + "/migration-record.json",
+        classification_remap=True,
+    )
+    review = prepare_review(facts, preflight=preflight())
+    retired = select_review_effects(review)
+    assert retired.status == "selected", (review.blockers, review.requirements)
+    assert set(retired.remove_paths) == {separate_view, separate_view[:-3] + ".base"}

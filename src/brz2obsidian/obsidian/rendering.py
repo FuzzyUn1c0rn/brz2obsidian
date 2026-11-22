@@ -19,10 +19,16 @@ from brz2obsidian.core import analyze
 from brz2obsidian.core import plan as build_plan
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.appearance import native_icon_limits
+from brz2obsidian.core.import_categories import shared_destinations
 from brz2obsidian.core.references import validate_references
 
 from .bases import CATEGORY_VIEWS, HOME_CATEGORIES, support_files
-from .categories import classification_records
+from .categories import (
+    category_choice_records,
+    classification_records,
+    reference_navigation,
+    scoped_category_outputs,
+)
 from .documents import render_document
 from .gaps import gap_report
 from .markdown import append_boundary
@@ -98,12 +104,18 @@ def _check_plan(plan, run_metadata):
         import_location=plan.import_location,
         reserved_names=plan.reserved_import_names,
         import_link_connections=plan.import_link_connections,
+        existing_vault_tags=plan.existing_vault_tags,
+        tag_reuse=plan.tag_reuse,
+        remembered_tags=plan.remembered_tags,
+        remembered_item_paths=plan.remembered_item_paths,
+        category_choices=plan.category_choices,
     )
     if plan.import_location is not None and (
         plan.import_support_paths != checked_plan.import_support_paths
         or plan.support_artifacts != checked_plan.support_artifacts
         or plan.reserved_support_paths != checked_plan.reserved_support_paths
         or plan.asset_targets != checked_plan.asset_targets
+        or plan.tag_targets != checked_plan.tag_targets
     ):
         raise MigrationRefused(
             (
@@ -344,6 +356,18 @@ def _scope_support_links(plan, text):
     )
 
 
+def _category_note_presentation(plan, item, target, destination):
+    if destination is not None:
+        return (
+            " — source reference",
+            reference_navigation(plan, target, destination),
+            "## Source content\n\n",
+        )
+    if item.role == "definition":
+        return "", "", _scope_support_links(plan, CATEGORY_VIEWS) + "\n"
+    return "", "", ""
+
+
 def _add_notes(
     plan,
     add,
@@ -359,6 +383,7 @@ def _add_notes(
     presentations = {p.presentation.owner: p for p in plan.generated_presentations}
     neighbors_by_item = navigation_index(snapshot.relationships)
     category_links, native_tags = memberships
+    shared = shared_destinations(plan)
     resources_by_owner = defaultdict(list)
     for asset in sorted(snapshot.assets, key=lambda asset: asset.asset_id):
         resources_by_owner[asset.owner].append(asset)
@@ -366,6 +391,9 @@ def _add_notes(
         if not target.created:
             continue
         item = items[target.item_key]
+        suffix, references, category_body = _category_note_presentation(
+            plan, item, target, shared.get(item.original_identity)
+        )
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
         text = (
             property_frontmatter(
@@ -377,7 +405,9 @@ def _add_notes(
             )
             + "# "
             + heading
+            + suffix
             + "\n\n"
+            + references
         )
         neighbors = neighbors_by_item.get(item.key, {})
         presentation = presentations.get(item.key)
@@ -391,8 +421,7 @@ def _add_notes(
             item, icon, neighbors, plan, asset_paths, item_targets, items
         )
         text += _note_icon_warnings(item, icon, plan.source_gaps, items, item_targets)
-        if item.role == "definition":
-            text += _scope_support_links(plan, CATEGORY_VIEWS) + "\n"
+        text += category_body
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):
@@ -428,7 +457,12 @@ def _add_notes(
 
 
 def _add_scoped_support(plan, add):
-    for path, content in support_files() + template_support_files(plan):
+    category_outputs = scoped_category_outputs(plan)
+    ordinary = {
+        path: content
+        for path, content in support_files() + template_support_files(plan)
+    }
+    for path, content in (ordinary | category_outputs).items():
         content = _scope_support_links(plan, content)
         if path.endswith(".base"):
             for folder in ("Categories", "Templates", "Attachments"):
@@ -761,6 +795,17 @@ def _migration_record(
             choice.model_dump() for choice in plan.import_link_connections
         ]
         record["import_support_paths"] = plan.import_support_paths
+        record["category_mappings"] = category_choice_records(plan)
+        reused = {source for source, _, mode in plan.remembered_tags if mode == "reuse"}
+        reused.update(source for source, _ in plan.tag_reuse)
+        record["vault_tag_mappings"] = [
+            {
+                "source_identity": row.original_identity,
+                "vault_tag": row.token,
+                "mode": "reuse" if row.original_identity in reused else "new",
+            }
+            for row in plan.tag_targets
+        ]
     # Embed retained JSON directly: decoding/dumping would round large or
     # high-precision numeric source values. Never reconstruct evidence from facts.
     original_values = ",\n".join(

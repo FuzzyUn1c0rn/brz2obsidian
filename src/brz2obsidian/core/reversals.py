@@ -476,19 +476,35 @@ def _owned_targets_by_path(plan, change, targets, paths):
     return tuple(selected.values())
 
 
-def _owned_targets(plan, change_id, decision_id, selected_effects):
-    approval = next(
-        (
-            a
-            for a in plan.approvals
-            if (a.change_id, a.decision_id) == (change_id, decision_id)
-        ),
-        None,
-    )
-    change = next((c for c in plan.proposal.changes if c.change_id == change_id), None)
-    if change is None:
-        raise ValueError("Origin decision does not own this change")
-    subject = reversal_subject(plan.producer_facts, change)
+def _retired_view_owner(plan, change, decision_id, selected_effects):
+    effects = selected_effects()
+    context = plan.producer_facts.link_context
+    if (
+        decision_id is not None
+        or effects.status != "selected"
+        or change.path not in effects.remove_paths
+        or context is None
+    ):
+        raise ValueError("Retired view lacks its exact selected removal")
+    return _owned_targets_by_path(plan, change, context.current_targets, {change.path})
+
+
+def _require_automatic_owner(change, effects, paths, known, asset):
+    if (
+        effects.status != "selected"
+        or paths != {change.target_path}
+        or any(
+            f.path == change.target_path
+            and not same_content(
+                f.content, asset[1].content if asset is not None else known[0].content
+            )
+            for f in effects.files
+        )
+    ):
+        raise ValueError("Automatic origin lacks its exact selected output")
+
+
+def _automatic_ownership(plan, change, subject, decision_id):
     known = (
         known_result_document(plan.producer_facts, change)
         if decision_id is None
@@ -505,10 +521,29 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         and change.disposition == "compatible"
         and not change.requires_decision
         and subject.attachment is None
-        and not any(a.change_id == change_id for a in plan.approvals)
-        and not any(a.change_id == change_id for a in plan.actions)
+        and not any(a.change_id == change.change_id for a in plan.approvals)
+        and not any(a.change_id == change.change_id for a in plan.actions)
         and (known is not None or asset is not None)
     )
+    return known, asset, automatic
+
+
+def _owned_targets(plan, change_id, decision_id, selected_effects):
+    approval = next(
+        (
+            a
+            for a in plan.approvals
+            if (a.change_id, a.decision_id) == (change_id, decision_id)
+        ),
+        None,
+    )
+    change = next((c for c in plan.proposal.changes if c.change_id == change_id), None)
+    if change is None:
+        raise ValueError("Origin decision does not own this change")
+    subject = reversal_subject(plan.producer_facts, change)
+    if change.provenance.rule == "classification_view_retired":
+        return _retired_view_owner(plan, change, decision_id, selected_effects)
+    known, asset, automatic = _automatic_ownership(plan, change, subject, decision_id)
     if approval is None and not automatic:
         raise ValueError("Origin decision does not own this change")
     if subject.operation_reversal is not None:
@@ -529,22 +564,11 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
     candidate = None if automatic else action.candidate
     if candidate is not None:
         targets = candidate.link_targets + targets
-    if automatic and known is not None:
-        targets = known[1] + targets
+    targets = (known[1] if automatic and known is not None else ()) + targets
     effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
-    if automatic and (
-        effects.status != "selected"
-        or paths != {change.target_path}
-        or any(
-            f.path == change.target_path
-            and not same_content(
-                f.content, asset[1].content if asset is not None else known[0].content
-            )
-            for f in effects.files
-        )
-    ):
-        raise ValueError("Automatic origin lacks its exact selected output")
+    if automatic:
+        _require_automatic_owner(change, effects, paths, known, asset)
     if automatic and asset is not None:
         return (asset[0],)
     if (

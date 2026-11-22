@@ -6,16 +6,22 @@ import unicodedata
 from hashlib import sha256
 from pathlib import Path
 
+from brz2obsidian.application.update_facts import classification_view_paths
 from brz2obsidian.application.update_lifecycle import _read_physical
 from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import (
     ContentIdentity,
+    ImportCategoryChoice,
     ImportLinkConnection,
     ImportLinkImpact,
     InlineExactContent,
     MigrationRefused,
 )
 from brz2obsidian.core.import_placement import validate_import_location
+from brz2obsidian.obsidian.import_classification import (
+    qualify_category_targets,
+    vault_classifications,
+)
 from brz2obsidian.obsidian.import_links import (
     import_links_depend_on,
     inspect_import_links,
@@ -149,6 +155,190 @@ def collection_connection_choices(record):
     )
 
 
+def recorded_classification_choices(record):
+    categories = tuple(
+        ImportCategoryChoice.model_validate(row["destination"])
+        for row in record.get("category_mappings", ())
+        if row.get("destination") is not None
+    )
+    reused = tuple(
+        (row["source_identity"], row["vault_tag"])
+        for row in record.get("vault_tag_mappings", ())
+        if row["mode"] == "reuse"
+    )
+    return categories, reused
+
+
+def classification_approval(record):
+    categories = record.get("category_mappings", ())
+    tags = record.get("vault_tag_mappings", ())
+    if not categories and not tags:
+        return None
+    material = json.dumps((categories, tags), sort_keys=True, ensure_ascii=False)
+    return sha256(material.encode()).hexdigest()
+
+
+def observe_classification_inventory(admission, checkpoint, *, existing=None):
+    collections = (
+        collection_baselines(checkpoint)
+        if checkpoint is not None and checkpoint.status == "valid"
+        else ()
+    )
+    return vault_classifications(
+        existing_files(admission) if existing is None else existing,
+        excluded={row.path for row in admission.inventory if row.excluded},
+        collections=collections,
+    )
+
+
+def classification_target_status(admission, checkpoint, choices, *, existing=None):
+    categories, tags = observe_classification_inventory(
+        admission, checkpoint, existing=existing
+    )
+    try:
+        qualify_category_targets(choices, categories)
+    except MigrationRefused as error:
+        return error.issues[0].code, tags
+    return None, tags
+
+
+def remembered_tag_mappings(record):
+    return tuple(
+        (row["source_identity"], row["vault_tag"], row["mode"])
+        for row in record.get("vault_tag_mappings", ())
+    )
+
+
+def classification_policy(record):
+    categories, _ = recorded_classification_choices(record)
+    return (
+        {
+            row.source_identity: (
+                row.destination_identity or row.destination_path,
+                row.compatible_view,
+            )
+            for row in categories
+        },
+        {
+            source: (token, mode)
+            for source, token, mode in remembered_tag_mappings(record)
+        },
+    )
+
+
+def classification_policy_changed(original, incoming):
+    live_source_ids = {
+        row["original_identity"] for row in incoming.get("item_targets", ())
+    }
+    return any(
+        old[key] != new.get(key)
+        for old, new in zip(
+            classification_policy(original),
+            classification_policy(incoming),
+            strict=True,
+        )
+        for key in old.keys() & live_source_ids
+    )
+
+
+def classification_transition_refusal(
+    admission, checkpoint, original, incoming, approval, *, remap
+):
+    changed = classification_policy_changed(original, incoming)
+    if changed and not remap:
+        return "classification_remap_required"
+    if remap and not changed:
+        return "classification_remap_no_change"
+    if (
+        remap
+        and original["source_identity"]["snapshot_digest"]
+        != incoming["source_identity"]["snapshot_digest"]
+    ):
+        return "classification_remap_source_changed"
+    if approval != classification_approval(incoming):
+        return "import_classification_approval_missing"
+    choices, reused = recorded_classification_choices(incoming)
+    if not choices and not reused:
+        return None
+    refusal, tags = classification_target_status(admission, checkpoint, choices)
+    known = set(recorded_classification_choices(original)[1])
+    if refusal is None and any(
+        row not in known and row[1] not in tags for row in reused
+    ):
+        return "import_tag_reuse_unavailable"
+    return refusal
+
+
+def scoped_update_classification_refusal(
+    admission, checkpoint, source, record_path, review, *, git=None
+):
+    if not record_path or "/" not in record_path:
+        return None
+    if not _safe_relative(record_path):
+        return "collection_scope_changed"
+    root = Path(source)
+    budget = available_memory() // 4
+    info, _, raw, _ = observe_file(root, root / record_path, prefix_limit=budget + 1)
+    if info.st_size > budget or len(raw) != info.st_size:
+        raise OSError("Scoped migration record exceeds the review resources")
+    incoming = json.loads(raw)
+    observed = incoming["source_identity"]
+    baseline = collection_baselines(checkpoint).get(
+        (observed["module_id"], observed["source_id"])
+    )
+    if baseline is None or baseline[1].collection_record_path != record_path:
+        return "collection_not_active"
+    original = _retained_record(git or _Git(admission.vault), baseline[1])
+    context = review.producer_facts.link_context
+    removals = {
+        row.path
+        for row in review.proposal.changes
+        if row.provenance.rule == "classification_view_retired"
+    }
+    if removals and (
+        context is None
+        or not context.import_classification_remap
+        or removals
+        - (classification_view_paths(original) - classification_view_paths(incoming))
+    ):
+        return "classification_view_scope_changed"
+    return classification_transition_refusal(
+        admission,
+        checkpoint,
+        original,
+        incoming,
+        context.import_classification_approval if context is not None else None,
+        remap=context is not None and context.import_classification_remap,
+    )
+
+
+def classification_write_refusal(
+    admission, checkpoint, record, approval, *, existing=None
+):
+    if classification_approval(record) != approval:
+        return "import_classification_approval_missing"
+    if approval is None:
+        return None
+    choices, reused = recorded_classification_choices(record)
+    if len(choices) != len(record["category_mappings"]):
+        return "import_classification_approval_missing"
+    refusal, tags = classification_target_status(
+        admission, checkpoint, choices, existing=existing
+    )
+    if refusal is not None:
+        return refusal
+    if any(token not in tags for _, token in reused):
+        return "import_tag_reuse_unavailable"
+    occupied = {_name_key(token.partition("/")[0]) for token in tags}
+    if any(
+        row["mode"] == "new"
+        and _name_key(row["vault_tag"].partition("/")[0]) in occupied
+        for row in record["vault_tag_mappings"]
+    ):
+        return "import_tag_namespace_changed"
+    return None
+
+
 def _rendered_parents(incoming):
     return {path.rsplit("/", 1)[0] for path in incoming}
 
@@ -246,6 +436,14 @@ def collection_write_refusal(
     if not impact.safe:
         return impact.blockers[0]
     context = review.producer_facts.link_context
+    refusal = classification_write_refusal(
+        admission,
+        checkpoint,
+        json.loads(incoming[record_path]),
+        context.import_classification_approval if context is not None else None,
+    )
+    if refusal is not None:
+        return refusal
     if context is not None and context.import_passive_targets != passive_import_targets(
         admission, impact
     ):
@@ -279,6 +477,35 @@ def prove_ignored_reversal_documents(admission, affected_paths, selected):
 
 class ImportRecoveryLinkChange(ValueError):
     """The journal's remaining import effects need a new link review."""
+
+
+def _qualify_recovery_classifications(
+    admission,
+    checkpoint,
+    record_path,
+    original,
+    produced,
+    existing,
+    published,
+):
+    context = original.producer_facts.link_context
+    approval = context.import_classification_approval if context is not None else None
+    if approval is None:
+        return
+    record = produced.get(record_path)
+    if not isinstance(record, InlineExactContent):
+        raise ImportRecoveryLinkChange("recovery_import_classifications_unavailable")
+    refusal = classification_write_refusal(
+        admission,
+        checkpoint,
+        json.loads(record.data),
+        approval,
+        existing={
+            path: value for path, value in existing.items() if path not in published
+        },
+    )
+    if refusal is not None:
+        raise ImportRecoveryLinkChange("recovery_import_classifications_changed")
 
 
 def require_collection_finish_links(
@@ -333,6 +560,15 @@ def require_collection_finish_links(
         for path, content in (selected if produced is None else produced).items()
         if digests.get(path) == content_sha(content) and path.startswith(scope)
     }
+    _qualify_recovery_classifications(
+        admission,
+        checkpoint,
+        record_path,
+        original,
+        selected if produced is None else produced,
+        existing,
+        unchanged_generated,
+    )
     reserved, gaps = uncreated_destinations(admission, checkpoint)
     choices = tuple(
         row

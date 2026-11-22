@@ -3649,11 +3649,23 @@ def _acquire_reviewed_apply(root, operation_id, checkpoint, undo_target):
 
 
 def _qualify_collection_apply(source, review, selected, observed):
-    if review.facts.format_operation.kind != "collection_import":
-        return None
-    from .collection_placement import collection_write_refusal, reviewed_connections
+    from .collection_placement import (
+        collection_write_refusal,
+        reviewed_connections,
+        scoped_update_classification_refusal,
+    )
 
     checkpoint = observed.checkpoint
+    if review.facts.format_operation.kind == "source_update":
+        return scoped_update_classification_refusal(
+            observed.admission,
+            checkpoint,
+            source,
+            checkpoint.manifest.collection_record_path,
+            review,
+        )
+    if review.facts.format_operation.kind != "collection_import":
+        return None
     retained = checkpoint.review
     if retained is None or checkpoint.manifest.boundary != "local":
         return "current_review_required"

@@ -89,7 +89,10 @@ def combine_memberships(documents, comparison):
     maps = []
     for records in (comparison.prior_mappings, comparison.incoming_mappings):
         index = {m.classification_id: (m.kind, m.target_id) for m in records}
-        if len(index) != len(records) or len(set(index.values())) != len(records):
+        if len(index) != len(records) or (
+            comparison.classification_mode is None
+            and len(set(index.values())) != len(records)
+        ):
             raise ValueError("structure_conflict")
         maps.append(index)
     prior, incoming = used_mappings(comparison)
@@ -97,7 +100,9 @@ def combine_memberships(documents, comparison):
         {m.classification_id: (m.kind, m.target_id) for m in records}
         for records in (prior, incoming)
     ]
-    if any(maps[1].get(key) != value for key, value in maps[0].items()):
+    if comparison.classification_mode != "remap" and any(
+        maps[1].get(key) != value for key, value in maps[0].items()
+    ):
         raise ValueError("structure_conflict")
     replacements, results = {}, {}
     for key, source in source_sets.items():
@@ -109,15 +114,33 @@ def combine_memberships(documents, comparison):
         )
         removed = old_ids - source_ids
         if removed:
-            raise ValueError("structure_conflict")
+            _qualify_remap_removals(comparison, removed, old, local, prior, incoming)
         additions = tuple(
             e for e in source.entries if e.target_id not in old_ids | local_ids
         )
-        prefix = source.prefix if additions and not local.entries else local.prefix
-        result = local.model_copy(
-            update={"entries": local.entries + additions, "prefix": prefix}
+        retained = tuple(e for e in local.entries if e.target_id not in removed)
+        prefix = (
+            source.prefix if (additions or removed) and not retained else local.prefix
         )
-        if additions:
+        result = local.model_copy(
+            update={"entries": retained + additions, "prefix": prefix}
+        )
+        if additions or removed:
             replacements[key] = result.prefix + b"".join(e.raw for e in result.entries)
         results[key] = result
     return replacements, results
+
+
+def _qualify_remap_removals(comparison, removed, old, local, prior, incoming):
+    if comparison.classification_mode != "remap":
+        raise ValueError("structure_conflict")
+    still_justified = {row.target_id for row in incoming}
+    owned = {row.target_id for row in prior if row.kind == old.kind}
+    original = {row.target_id: row.raw for row in old.entries}
+    observed = {row.target_id: row.raw for row in local.entries}
+    if (
+        removed - owned
+        or removed & still_justified
+        or any(observed.get(target) != original[target] for target in removed)
+    ):
+        raise ValueError("structure_conflict")

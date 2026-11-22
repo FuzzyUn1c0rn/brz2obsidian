@@ -167,6 +167,22 @@ def _findings(facts, subject, subject_id, safety):
     return problems
 
 
+def _view_retirement(subject):
+    if (
+        not subject.classification_view_retirement
+        or subject.incoming is not None
+        or subject.baseline.status != "known"
+        or subject.current.path != subject.path
+        or subject.item_id != "support:" + subject.path
+    ):
+        return None
+    if subject.current.existence == "absent":
+        return "local_deleted", None, "local_deleted", False
+    if _bytes(subject.current.content) == _bytes(subject.baseline.content):
+        return "compatible", None, "classification_view_retired", False
+    return None
+
+
 def _proposal(subject, *, automatic=False):
     original = _bytes(subject.baseline.content)
     current = _bytes(subject.current.content)
@@ -363,6 +379,7 @@ def _reconcile_subject(
             if retained_import_output(facts, subject)
             else None
         )
+        or _view_retirement(subject)
         or (policy.proposal if policy_allowed else None)
         or format_choice
         or _proposal(subject, automatic=facts.format_operation.automatic_merge)

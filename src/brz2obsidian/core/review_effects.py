@@ -359,6 +359,19 @@ def _apply_reversal_outputs(
         )
 
 
+def _apply_retired_classification_views(proposal, registry, document_effects, add):
+    targets = {row.canonical_path: row for row in registry.targets.values()}
+    for change in proposal.changes:
+        if change.provenance.rule != "classification_view_retired":
+            continue
+        target = targets.get(change.path)
+        if target is None:
+            add("selected_link_context_conflict")
+            continue
+        registry.write(target, None, change.path, None, add)
+        document_effects.documents.pop(target.target_id, None)
+
+
 def _apply_selected_reversals(
     facts, proposal, approved, action_by_id, registry, document_effects, add
 ):
@@ -1149,6 +1162,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     ) and not current_lookup_coverage(facts):
         add("current_link_coverage_unavailable")
 
+    _apply_retired_classification_views(proposal, registry, document_effects, add)
     _apply_selected_reversals(
         facts, proposal, approved, action_by_id, registry, document_effects, add
     )

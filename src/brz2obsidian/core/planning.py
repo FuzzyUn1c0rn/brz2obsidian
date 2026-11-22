@@ -10,6 +10,7 @@ from brz2obsidian.contracts import (
 )
 
 from .appearance import icon_snapshots, native_icon_limits
+from .import_categories import checked_choices, view_artifacts
 from .import_placement import (
     import_name_key,
     scoped_support_paths,
@@ -19,7 +20,7 @@ from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
 from .source_gaps import source_gap_targets
 from .support import SUPPORT_NAMESPACE, support_artifacts
-from .tags import assign_tags
+from .tags import assign_tags, scoped_tags
 
 
 def plan(
@@ -29,17 +30,37 @@ def plan(
     import_location: str | None = None,
     reserved_names: tuple[str, ...] = (),
     import_link_connections: tuple[ImportLinkConnection, ...] = (),
+    existing_vault_tags: tuple[str, ...] = (),
+    tag_reuse: tuple[tuple[str, str], ...] = (),
+    remembered_tags=(),
+    remembered_item_paths=(),
+    category_choices=(),
 ) -> MigrationPlan:
     if import_location is not None:
         import_location = validate_import_location(import_location)
     reserved = frozenset(import_name_key(name) for name in reserved_names)
+    retained_paths = _remembered_paths(import_location, remembered_item_paths)
     snapshot = analysis.snapshot
+    category_choices = checked_choices(snapshot, import_location, category_choices)
+    shared = {row.source_identity for row in category_choices if row.destination_path}
     targets = assign_item_targets(
         analysis,
         resource_owners(snapshot),
         output_format=output_format,
         import_location=import_location,
-        reserved_names=reserved,
+        reserved_names=reserved
+        | {import_name_key(path) for path in retained_paths.values()},
+        source_references=shared,
+    )
+    targets = tuple(
+        row.model_copy(
+            update={
+                "relative_path": retained_paths.get(
+                    row.original_identity, row.relative_path
+                )
+            }
+        )
+        for row in targets
     )
     isolated, related_pairs = select_fallbacks(snapshot, targets)
     asset_targets = assign_asset_targets(
@@ -49,11 +70,15 @@ def plan(
     snapshots = icon_snapshots(snapshot, created)
     definitions = {i.key for i in snapshot.items if i.role == "definition"}
     tag_targets, tag_memberships, listing_path = assign_tags(snapshot, targets)
+    if import_location is not None:
+        tag_targets = scoped_tags(
+            snapshot, tag_targets, existing_vault_tags, tag_reuse, remembered_tags
+        )
     supporting = support_artifacts(
         bool(isolated or related_pairs),
         listing_path,
         tuple(t for t in targets if t.item_key in definitions),
-    )
+    ) + view_artifacts(snapshot, targets, category_choices)
     reserved_support = tuple(a for a in SUPPORT_NAMESPACE if a not in supporting)
     scoped_paths = {}
     if import_location is not None:
@@ -112,6 +137,11 @@ def plan(
         reserved_import_names=tuple(sorted(reserved)),
         import_link_connections=import_link_connections,
         import_support_paths=scoped_paths,
+        existing_vault_tags=existing_vault_tags,
+        tag_reuse=tag_reuse,
+        remembered_tags=remembered_tags,
+        remembered_item_paths=remembered_item_paths,
+        category_choices=category_choices,
         tag_targets=tag_targets,
         tag_memberships=tag_memberships,
         tag_memberships_path=listing_path,
@@ -309,6 +339,25 @@ def plan(
             ),
         }
     )
+
+
+def _remembered_paths(location, remembered):
+    paths = dict(remembered)
+    if (
+        len(paths) != len(remembered)
+        or len({path.casefold() for path in paths.values()}) != len(paths)
+        or any(
+            location is None
+            or not path.startswith(location + "/")
+            or not path.casefold().endswith(".md")
+            for path in paths.values()
+        )
+    ):
+        raise ValueError("Retained item paths do not uniquely belong to the collection")
+    for path in paths.values():
+        for part in path.split("/"):
+            validate_import_location(part)
+    return paths
 
 
 def _scoped_support(artifacts, paths):

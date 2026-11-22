@@ -9,16 +9,21 @@ from brz2obsidian.application.checkpoint_payload_contracts import (
     CheckpointPayloadRequest,
 )
 from brz2obsidian.contracts import (
+    ImportCategoryChoice,
     ImportLinkConnection,
     MigrationRefused,
     SourceIdentity,
 )
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
 from brz2obsidian.publication.collection_placement import (
+    classification_approval,
+    classification_transition_refusal,
+    classification_write_refusal,
     collection_connection_choices,
     observe_collection_placement,
     passive_import_targets,
     read_rendered_collection,
+    recorded_classification_choices,
 )
 from brz2obsidian.publication.vault_history import _Git, _read, collection_baselines
 
@@ -92,7 +97,7 @@ def _baseline_review(history, baseline):
 
 
 def _collection_facts(
-    history, baseline, incoming, record_path, proposal_id, generation
+    history, baseline, incoming, record_path, proposal_id, generation, *, remap=False
 ):
     retained = _baseline_review(history, baseline)
     memory = (
@@ -113,13 +118,23 @@ def _collection_facts(
         record_path=record_path,
         source_memory=memory,
         retained_review=retained,
+        classification_remap=remap,
     )
 
 
-def _bind_placement(facts, admission, impact, choices):
-    if impact is None:
-        return facts
+def _bind_placement(facts, admission, impact, choices, approval, *, remap=False):
     context = facts.link_context
+    if impact is None:
+        return facts.model_copy(
+            update={
+                "link_context": context.model_copy(
+                    update={
+                        "import_classification_approval": approval,
+                        "import_classification_remap": remap,
+                    }
+                )
+            }
+        )
     warnings = tuple(
         sorted(
             (row.source_path, row.content.identity.sha256)
@@ -132,6 +147,7 @@ def _bind_placement(facts, admission, impact, choices):
             "link_context": context.model_copy(
                 update={
                     "import_link_connections": choices,
+                    "import_classification_approval": approval,
                     "import_unrelated_documents": warnings,
                     "import_passive_targets": passive_import_targets(admission, impact),
                 }
@@ -183,6 +199,26 @@ def _history_refusal(history):
     return None
 
 
+def _initial_classification_approval(
+    history, rendered_record, category_choices, tag_reuse
+):
+    categories, reused = recorded_classification_choices(rendered_record)
+    selected = tuple(
+        ImportCategoryChoice.model_validate(row) for row in category_choices
+    )
+    if sorted(categories, key=lambda row: row.source_identity) != sorted(
+        selected, key=lambda row: row.source_identity
+    ) or sorted(reused) != sorted(tuple(row) for row in tag_reuse):
+        raise CollectionImportConflict("import_classification_approval_missing")
+    approval = classification_approval(rendered_record)
+    refusal = classification_write_refusal(
+        history.admission, history.checkpoint, rendered_record, approval
+    )
+    if refusal is not None:
+        raise CollectionImportConflict(refusal)
+    return approval
+
+
 def prepare_collection_import(
     operations,
     vault,
@@ -192,6 +228,9 @@ def prepare_collection_import(
     update=False,
     rendered=None,
     connections=(),
+    category_choices=(),
+    tag_reuse=(),
+    remap=False,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     kind = "source_update" if update else "collection_import"
@@ -207,8 +246,14 @@ def prepare_collection_import(
         incoming = read_rendered_collection(source, record_path)
         if rendered is not None and not _rendered_receipt_matches(incoming, rendered):
             return _refused("source_payload_changed", history=history, kind=kind)
-        observed = SourceIdentity.model_validate(
-            record(incoming, record_path)["source_identity"]
+        rendered_record = record(incoming, record_path)
+        observed = SourceIdentity.model_validate(rendered_record["source_identity"])
+        approval = (
+            None
+            if update
+            else _initial_classification_approval(
+                history, rendered_record, category_choices, tag_reuse
+            )
         )
         occupied = _collection_review_slot(history, observed, update)
         if occupied is not None:
@@ -223,8 +268,11 @@ def prepare_collection_import(
         baseline = (
             _baseline(operations, history, observed, record_path) if update else None
         )
+        approval = _initial_or_updated_approval(
+            approval, history, baseline, rendered_record, record_path, remap=remap
+        )
         facts = _collection_facts(
-            history, baseline, incoming, record_path, uuid4().hex, 1
+            history, baseline, incoming, record_path, uuid4().hex, 1, remap=remap
         )
         choices = tuple(ImportLinkConnection.model_validate(row) for row in connections)
         impact = (
@@ -240,7 +288,9 @@ def prepare_collection_import(
         )
         if impact is not None and not impact.safe:
             return _placement_refused(history, impact)
-        facts = _bind_placement(facts, history.admission, impact, choices)
+        facts = _bind_placement(
+            facts, history.admission, impact, choices, approval, remap=remap
+        )
         history = _scoped(operations, history, facts)
         review = prepare_review(facts, preflight=history.admission.preflight)
         binding = _bind_payload(operations, source, review, incoming)
@@ -252,7 +302,12 @@ def prepare_collection_import(
             observed,
             collection_record_path=record_path,
             import_link_connections=choices,
-        ).model_copy(update={"import_link_impact": impact})
+        ).model_copy(
+            update={
+                "import_link_impact": impact,
+                **({"code": "classification_remap_prepared"} if remap else {}),
+            }
+        )
     except MigrationRefused as error:
         return _refused(
             error.issues[0].code, action="review_import_placement", kind=kind
@@ -261,6 +316,36 @@ def prepare_collection_import(
         return _refused(str(error), action="resolve_import_conflict", kind=kind)
     except OSError, ValueError, TypeError, AttributeError, KeyError, StopIteration:
         return _refused("collection_review_unavailable", kind=kind)
+
+
+def _initial_or_updated_approval(
+    approval, history, baseline, rendered_record, record_path, *, remap
+):
+    if baseline is None:
+        return approval
+    return _update_classification_approval(
+        history, baseline, rendered_record, record_path, remap=remap
+    )
+
+
+def _update_classification_approval(
+    history, baseline, rendered_record, record_path, *, remap, prior_approval=None
+):
+    original = record(baseline[0], record_path)
+    approval = classification_approval(rendered_record)
+    if remap and prior_approval is not None and prior_approval != approval:
+        raise CollectionImportConflict("classification_remap_choices_changed")
+    refusal = classification_transition_refusal(
+        history.admission,
+        history.checkpoint,
+        original,
+        rendered_record,
+        approval,
+        remap=remap,
+    )
+    if refusal is not None:
+        raise CollectionImportConflict(refusal)
+    return approval
 
 
 def _bind_payload(operations, source, plan, incoming):
@@ -321,6 +406,8 @@ def _observe_review(operations, preparation, *, replacement=None):
         if prepared.kind == "collection_import"
         else _baseline(operations, history, observed, prepared.collection_record_path)
     )
+    context = plan.producer_facts.link_context
+    remap = context is not None and context.import_classification_remap
     facts = _collection_facts(
         history,
         baseline,
@@ -328,6 +415,7 @@ def _observe_review(operations, preparation, *, replacement=None):
         prepared.collection_record_path,
         plan.proposal.proposal_id,
         plan.proposal.generation,
+        remap=remap,
     )
     impact = (
         observe_collection_placement(
@@ -342,8 +430,39 @@ def _observe_review(operations, preparation, *, replacement=None):
     )
     if impact is not None and not impact.safe:
         return history, _placement_refused(history, impact, current=True)
+    approval = None
+    if prepared.kind == "collection_import":
+        approval = (
+            context.import_classification_approval if context is not None else None
+        )
+        refusal = classification_write_refusal(
+            history.admission,
+            history.checkpoint,
+            record(incoming, prepared.collection_record_path),
+            approval,
+        )
+        if refusal is not None:
+            return history, _refused(
+                refusal, history=history, action="review_import_classifications"
+            )
+    else:
+        approval = _update_classification_approval(
+            history,
+            baseline,
+            record(incoming, prepared.collection_record_path),
+            prepared.collection_record_path,
+            remap=remap,
+            prior_approval=context.import_classification_approval
+            if context is not None
+            else None,
+        )
     facts = _bind_placement(
-        facts, history.admission, impact, prepared.import_link_connections
+        facts,
+        history.admission,
+        impact,
+        prepared.import_link_connections,
+        approval,
+        remap=remap,
     )
     history = _scope_review(operations, history, facts, plan)
     changed = (

@@ -126,6 +126,10 @@ def interpret_link_target(
             path=source_path,
             existence=existence,
             reference_query=reference_query,
+            scoped_category=any(
+                row.kind == "category" and row.canonical_path == source_path
+                for row in membership_targets
+            ),
         )
         if (output_format in QUALIFIED_OUTPUT_FORMATS or qualify_roles)
         and source_path is not None

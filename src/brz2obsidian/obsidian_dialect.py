@@ -130,10 +130,20 @@ def frontmatter(text):
     raise ValueError("Frontmatter has no closing delimiter")
 
 
-def category(properties, artifact):
+def category(properties, artifact, *, scoped=False):
     parts = artifact.split("/")
     return (
-        parts[0] == "Categories"
+        (
+            parts[0] == "Categories"
+            or scoped
+            and (
+                "Categories" in parts[:-1]
+                or all(
+                    isinstance(properties.get(key), str) and properties[key]
+                    for key in ("source_collection_id", "source_item_id")
+                )
+            )
+        )
         and not any(part in {"Templates", "Attachments"} for part in parts[:-1])
         and isinstance(properties.get("tags"), list)
         and "categories" in properties["tags"]
@@ -166,7 +176,7 @@ def native_properties(content):
         return None
 
 
-def file_roles(content, *, path, existence, reference_query):
+def file_roles(content, *, path, existence, reference_query, scoped_category=False):
     note = path.lower().endswith(".md")
     properties = native_properties(content) if existence == "present" and note else {}
 
@@ -203,7 +213,9 @@ def file_roles(content, *, path, existence, reference_query):
     return FileRoleFacts(
         path=path,
         content_sha256=None if content is None else sha256(content.data).hexdigest(),
-        category=note and existence == "present" and category(properties or {}, path),
+        category=note
+        and existence == "present"
+        and category(properties or {}, path, scoped=scoped_category),
         image_path=image_path(path),
         category_memberships=MembershipDeclarationFacts(status=status, queries=queries),
         provider=declaration("appearance_category"),

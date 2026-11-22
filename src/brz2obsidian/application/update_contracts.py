@@ -12,6 +12,7 @@ from brz2obsidian.application.source_payload_contracts import ReviewedSourceBind
 from brz2obsidian.application.vault_contracts import VaultFile
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from brz2obsidian.contracts import (
+    ImportClassificationReview,
     ImportLinkConnection,
     ImportLinkImpact,
     LoadedReview,
@@ -145,6 +146,9 @@ class UpdateResult(ReconciliationContract):
     next_actions: tuple[str, ...] = ()
     findings: tuple[str, ...] = ()
     import_link_impact: ImportLinkImpact | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    classification_review: ImportClassificationReview | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     diagnostic_omission: bool = True

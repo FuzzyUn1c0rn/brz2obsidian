@@ -58,6 +58,7 @@ def validate_link_target_state(state, targets):
             if (
                 not compatible
                 or target.identity != entry.target.identity
+                or target.category_anchor != entry.target.category_anchor
                 or target.canonical_path != entry.target.canonical_path
                 or target.target != entry.target.target
                 or target.status != entry.target.status
