@@ -983,6 +983,15 @@ class SupportedFormatBaseline(ReconciliationContract):
         return self
 
 
+ReviewedOperationKind = Literal[
+    "source_update",
+    "onboarding",
+    "format_transition",
+    "attachment_cleanup",
+    "collection_import",
+]
+
+
 class FormatOperation(ReconciliationContract):
     """Normalized generation capability and source-version facts from outer validation.
 
@@ -993,9 +1002,7 @@ class FormatOperation(ReconciliationContract):
     automatic_merge: bool = Field(default=False, exclude_if=lambda value: not value)
     schema_id: Literal["brz2obsidian.format-operation"]
     schema_version: Literal[1]
-    kind: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ]
+    kind: ReviewedOperationKind
     recorded_generation: Literal["supported", "unavailable", "unknown"]
     baseline_source_version: str | None = Field(min_length=1)
     target_source_version: str | None = Field(min_length=1)
@@ -1667,9 +1674,7 @@ class UpdateProposal(ReconciliationContract):
     proposal_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     changes: tuple[ProposedChange, ...]
-    operation: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ]
+    operation: ReviewedOperationKind
     findings: tuple[ReconciliationFinding, ...]
     readiness: Literal["ready", "review_required", "refused"]
     ready: bool

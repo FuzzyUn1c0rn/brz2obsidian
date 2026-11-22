@@ -241,7 +241,7 @@ class _ExcludedDependency(ValueError):
 
 
 def _managed_observation_paths(baseline, incoming, retained_ownership, inventory):
-    managed = set(baseline) | set(incoming)
+    managed = set(baseline or ()) | set(incoming)
     if retained_ownership is not None:
         owned = {proof.source_path for proof in retained_ownership}
         assets = {
@@ -325,7 +325,7 @@ def _observed_facts(
     _owner=None,
     **identity,
 ):
-    if retained_review is None:
+    if retained_review is None and "record_path" not in identity:
         retained_review = (
             getattr(_owner, "_tip", None)
             if _owner is not None
@@ -333,7 +333,7 @@ def _observed_facts(
         )
     retired_note_ids = (
         retained_review.saved.plan.producer_facts.retired_note_ids
-        if retained_review is not None
+        if retained_review is not None and baseline is not None
         else ()
     )
     inventory = history.admission.inventory
@@ -710,6 +710,7 @@ def _prepared(
     *,
     source_ref=None,
     original_source_ref=None,
+    collection_record_path=None,
     status="prepared_review",
     code="prepared",
     stale=0,
@@ -719,7 +720,8 @@ def _prepared(
         next(
             subject.incoming.data
             for subject in review.facts.subjects
-            if subject.item_id == "support:migration-record.json"
+            if subject.item_id
+            == "support:" + (collection_record_path or "migration-record.json")
         )
     )
     gaps = tuple(
@@ -750,6 +752,7 @@ def _prepared(
         payload_directory=str(directory),
         source_ref=source_ref,
         original_source_ref=original_source_ref,
+        collection_record_path=collection_record_path,
         source_binding=binding,
         observed_source=observed_source,
         retained_source_provenance=retained_provenance,
@@ -868,6 +871,13 @@ def _memory(plan):
 
 
 def _producer_memory(checkpoint, proposal_id=None, *, _owner=None):
+    if checkpoint.manifest.discarded_review is not None:
+        discarded = (
+            _owner._load_discarded_review(checkpoint)
+            if _owner is not None
+            else checkpoint._discarded_review
+        )
+        return discarded.saved.plan.producer_facts.source_version_memory
     retained = _owner._tip if _owner is not None else checkpoint.review
     if retained is None:
         return ()
@@ -1503,6 +1513,13 @@ def _resume_update(operations, vault, observed):
         loaded = checkpoint.review
         binding = checkpoint.manifest.reviewed_source
         plan = loaded.saved.plan
+        if (
+            plan.facts.format_operation.kind == "collection_import"
+            or checkpoint.manifest.collection_baseline_commit is not None
+        ):
+            from .collection_import import resume_collection_review
+
+            return resume_collection_review(operations, history)
         if plan.facts.format_operation.kind == "onboarding":
             from .onboarding import resume_onboarding
 

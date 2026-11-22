@@ -14,6 +14,7 @@ from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from brz2obsidian.contracts import (
     LoadedReview,
     ReconciliationContract,
+    ReviewedOperationKind,
     ReviewPlan,
     SourceGapDiagnostic,
     SourceIdentity,
@@ -43,14 +44,15 @@ def update_application_status(applied):
 class UpdatePreparation(ReconciliationContract):
     schema_id: Literal["brz2obsidian.update-preparation"]
     schema_version: Literal[1]
-    kind: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ] = "source_update"
+    kind: ReviewedOperationKind = "source_update"
     vault: str
     locator: CheckpointLocator | None
     payload_directory: str
     source_ref: str | None = None
     original_source_ref: str | None = None
+    collection_record_path: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     source_binding: ReviewedSourceBinding
     observed_source: SourceIdentity
     retained_source_provenance: bool
@@ -63,15 +65,22 @@ class UpdatePreparation(ReconciliationContract):
     def same_review_association(self):
         if self.kind != self.review.facts.format_operation.kind:
             raise ValueError("Preparation kind differs from its review")
-        if self.locator is None and self.kind != "onboarding":
+        if self.locator is None and self.kind not in (
+            "onboarding",
+            "collection_import",
+        ):
             raise ValueError("Ordinary updates require retained history")
         if self.original_source_ref is not None and self.kind != "onboarding":
             raise ValueError("Historical reference qualification belongs to onboarding")
         identity = self.review.facts.incoming_identity
         association = self.locator.association if self.locator is not None else None
+        if self.kind == "collection_import" and self.collection_record_path is None:
+            raise ValueError(
+                "A collection import must name its scoped migration record"
+            )
         scope = (
             (association.collection_id, association.module_id)
-            if association is not None
+            if association is not None and self.collection_record_path is None
             else (identity.collection_id, identity.module_id)
         )
         for facts in (self.review.facts, self.review.producer_facts):
@@ -114,9 +123,7 @@ class UpdateResult(ReconciliationContract):
     ]
     code: str
     operation_id: str | None = None
-    kind: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ] = "source_update"
+    kind: ReviewedOperationKind = "source_update"
     generation: int | None = Field(default=None, ge=1)
     preparation: UpdatePreparation | None = None
     loaded: LoadedReview | None = None

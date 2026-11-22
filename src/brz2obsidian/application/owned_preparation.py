@@ -172,6 +172,15 @@ class _OwnedPreparation:
             checkpoint.manifest, checkpoint.locator.commit
         )
 
+    def _load_discarded_review(self, checkpoint):
+        tip_commit = self._tip_commit
+        try:
+            return self._load_manifest_review(
+                checkpoint.discarded_manifest, checkpoint.manifest.discarded_review
+            )
+        finally:
+            self._tip_commit = tip_commit
+
     def _load_manifest_review(self, manifest, commit):
         if manifest.review_object is None:
             return None
@@ -1041,9 +1050,7 @@ class _OwnedPreparation:
                 != history.checkpoint.manifest.identity
             ):
                 raise OSError("baseline_identity_mismatch")
-            memory = (
-                () if self._tip is None else lifecycle._memory(self._tip.saved.plan)
-            )
+            memory = lifecycle._producer_memory(history.checkpoint, _owner=self)
             facts = lifecycle._observed_facts(
                 history,
                 baseline,
@@ -1764,7 +1771,7 @@ class _OwnedPreparation:
             return stopped.model_copy(update={"kind": preparation.kind})
         if history.checkpoint.locator.association != preparation.locator.association:
             raise OSError("association_mismatch")
-        tip = self._load_tip(history.checkpoint)
+        tip = self._tip = self._load_tip(history.checkpoint)
         with self._session._operation():
             old = self._session._admit_values(preparation.review)
             self._session._coadmit()
@@ -1784,16 +1791,9 @@ class _OwnedPreparation:
                 directory=self._directory / ("incoming-" + uuid4().hex),
                 _owner=self,
             )
-            if tip is None:
-                memory = ()
-            elif (
-                history.checkpoint.manifest.boundary == "local"
-                and history.checkpoint.manifest.reviewed_source is not None
-                and tip.saved.plan.proposal.proposal_id == old.proposal.proposal_id
-            ):
-                memory = tip.saved.plan.facts.source_version_memory
-            else:
-                memory = lifecycle._memory(tip.saved.plan)
+            memory = lifecycle._producer_memory(
+                history.checkpoint, old.proposal.proposal_id, _owner=self
+            )
             if maintenance:
                 from .format_transition import transition_facts
 

@@ -2632,6 +2632,17 @@ def _apply_admission_refusal(
         return "current_review_required"
     if first.status != "intact" or first.admission.status != "supported":
         return "scoped_admission_required"
+    pending = first.checkpoint.manifest
+    if (
+        pending.boundary == "local"
+        and pending.reviewed_source is not None
+        and pending.reviewed_source.proposal_id != review.proposal.proposal_id
+        and (
+            pending.collection_record_path is not None
+            or pending.collection_baseline_commit is not None
+        )
+    ):
+        return "saved_review_pending"
     baseline_identity = (
         format_parent.identity
         if format_parent is not None

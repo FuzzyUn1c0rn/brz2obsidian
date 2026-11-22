@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointFile
-from brz2obsidian.contracts import ReconciliationContract
+from brz2obsidian.contracts import ReconciliationContract, ReviewedOperationKind
 
 
 class VaultOperationLock(ReconciliationContract):
@@ -174,12 +174,9 @@ class VaultApplyResult(ReconciliationContract):
     code: str
     operation_id: str | None
     kind: Literal["apply", "undo"]
-    origin_role: (
-        Literal[
-            "source_update", "onboarding", "format_transition", "attachment_cleanup"
-        ]
-        | None
-    ) = Field(default=None, exclude_if=lambda value: value is None)
+    origin_role: ReviewedOperationKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     direction: Literal["finish", "restore"] | None = None
     review_generation: int | None = Field(default=None, ge=1)
     generation: int | None = Field(ge=1)

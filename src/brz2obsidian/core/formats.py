@@ -209,7 +209,7 @@ def _new_source_output(facts, subject):
     """An absent new output needs byte approval, not an invented old original."""
     operation = facts.format_operation
     baseline = operation.established_baseline
-    return (
+    established = (
         operation.kind in ("source_update", "onboarding")
         and operation.recorded_generation == "supported"
         and baseline is not None
@@ -219,6 +219,22 @@ def _new_source_output(facts, subject):
         and output_semantics(facts.baseline_identity)
         == output_semantics(facts.incoming_identity)
         and baseline.source_version == operation.baseline_source_version
+        and all(
+            (output.item_id, output.facet) != (subject.item_id, subject.facet)
+            for output in baseline.outputs
+        )
+    )
+    first_import = (
+        operation.kind == "collection_import"
+        and baseline is None
+        and operation.baseline_source_version is None
+        and operation.recorded_generation == "unknown"
+        and facts.baseline_identity == facts.incoming_identity
+        and facts.incoming_identity.output_format in REVIEWABLE_OUTPUT_FORMATS
+        and subject.output_role != "configuration"
+    )
+    return (
+        (established or first_import)
         and operation.target_source_version is not None
         and facts.inventory == "complete"
         and (subject.output_role != "configuration" or operation.automatic_merge)
@@ -228,10 +244,6 @@ def _new_source_output(facts, subject):
         and subject.baseline.unavailable_digest is None
         and subject.current.existence == "absent"
         and subject.incoming is not None
-        and all(
-            (output.item_id, output.facet) != (subject.item_id, subject.facet)
-            for output in baseline.outputs
-        )
     )
 
 

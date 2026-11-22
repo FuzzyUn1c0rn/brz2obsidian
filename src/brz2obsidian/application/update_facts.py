@@ -60,8 +60,8 @@ def target(path):
     )
 
 
-def record(payload):
-    raw = payload["migration-record.json"]
+def record(payload, record_path="migration-record.json"):
+    raw = payload[record_path]
     value = json.loads(raw.data if isinstance(raw, InlineExactContent) else raw)
     if value.get("schema") != "brz2obsidian.migration":
         raise ValueError("association_record_invalid")
@@ -351,7 +351,16 @@ def _established_output_paths(old, historical):
     return established
 
 
-def _observed_identity_inventory(current, content, established, old_identity, identity):
+def _observed_identity_inventory(
+    current,
+    content,
+    established,
+    old_identity,
+    identity,
+    *,
+    import_outputs=None,
+    current_inventory=(),
+):
     inventory = []
     for path, raw in sorted(current.items()):
         current_content = content(
@@ -377,6 +386,10 @@ def _observed_identity_inventory(current, content, established, old_identity, id
                 ),
                 target=target(path),
             )
+        )
+    if import_outputs is not None:
+        _validate_import_destinations(
+            identity, import_outputs, current, current_inventory, inventory
         )
     return inventory
 
@@ -438,6 +451,7 @@ def assemble_facts(
     onboarding=False,
     retained_ownership=None,
     retired_note_ids=(),
+    record_path="migration-record.json",
     _owner=None,
 ):
     def content(raw, *, semantic):
@@ -452,7 +466,15 @@ def assemble_facts(
             else value
         )
 
-    old_record, new_record = record(baseline), record(incoming)
+    first_import = baseline is None
+    new_record = record(incoming, record_path)
+    old_record = (
+        new_record | {"item_targets": (), "asset_targets": (), "relationships": ()}
+        if first_import
+        else record(baseline, record_path)
+    )
+    baseline = baseline or {}
+    originals_known = originals_known and not first_import
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
     qualified_scope = (
@@ -473,7 +495,13 @@ def assemble_facts(
         )
     established = _established_output_paths(old, historical)
     inventory = _observed_identity_inventory(
-        current, content, established, old_identity, identity
+        current,
+        content,
+        established,
+        old_identity,
+        identity,
+        import_outputs=new if first_import else None,
+        current_inventory=current_inventory,
     )
     membership_views = (
         _membership_targets((old_record,)),
@@ -619,7 +647,13 @@ def assemble_facts(
         format_operation=FormatOperation(
             schema_id="brz2obsidian.format-operation",
             schema_version=1,
-            kind="onboarding" if onboarding else "source_update",
+            kind=(
+                "collection_import"
+                if first_import
+                else "onboarding"
+                if onboarding
+                else "source_update"
+            ),
             automatic_merge=True,
             recorded_generation="supported" if originals_known else "unknown",
             baseline_source_version=old_record["source_identity"]["snapshot_digest"]
@@ -649,6 +683,34 @@ def assemble_facts(
     if qualified_scope:
         facts = _bind_moved_navigation(facts, old_record, new_record)
     return automatic_merge_facts(facts, _owner=_owner)
+
+
+class CollectionImportConflict(ValueError):
+    """The incoming collection would claim existing authored vault content."""
+
+
+def _validate_import_destinations(identity, outputs, current, physical, observed):
+    if any(
+        row.identity_state == "valid"
+        and row.identity.collection_id == identity.collection_id
+        and row.identity.module_id == identity.module_id
+        and (row.identity.item_id, row.facet) in outputs
+        for row in observed
+    ):
+        raise CollectionImportConflict("retained_source_identity_conflict")
+    occupied = tuple(
+        target(path).normalized_path
+        for path in current.keys() | {row.path for row in physical}
+    )
+    for path, _, _ in outputs.values():
+        proposed = target(path).normalized_path
+        if any(
+            existing == proposed
+            or existing.startswith(proposed + "/")
+            or proposed.startswith(existing + "/")
+            for existing in occupied
+        ):
+            raise CollectionImportConflict("import_target_occupied")
 
 
 def _navigation_edges(source_record):

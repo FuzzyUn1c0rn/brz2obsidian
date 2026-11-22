@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from brz2obsidian.application.source_payload_contracts import ReviewedSourceBinding
 from brz2obsidian.application.vault_contracts import VaultAdmission
@@ -95,6 +95,56 @@ class CheckpointManifest(ReconciliationContract):
     reviewed_source: ReviewedSourceBinding | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    discarded_review: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+    collection_record_path: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    collection_baseline_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def collection_lineage(self):
+        if self.collection_baseline_commit is not None and (
+            self.boundary != "local"
+            or self.reviewed_source is None
+            or not self.source
+            or self.discarded_review is not None
+        ):
+            raise ValueError("A collection selection must retain its reviewed source")
+        if self.collection_record_path is not None:
+            directory, _, filename = self.collection_record_path.rpartition("/")
+            if (
+                not directory
+                or filename != "migration-record.json"
+                or self.relative_vault_path(self.collection_record_path)
+                != self.collection_record_path
+                or self.source
+                and (
+                    self.collection_record_path not in {row.path for row in self.source}
+                    or any(
+                        not row.path.startswith(directory + "/") for row in self.source
+                    )
+                )
+            ):
+                raise ValueError(
+                    "Collection source files must belong to the record's scope"
+                )
+        if self.discarded_review is not None and (
+            self.boundary != "local"
+            or self.previous != self.discarded_review
+            or self.review_object is not None
+            or self.reviewed_source is not None
+            or self.observed_source is not None
+            or self.proposed
+            or self.vault != self.preimage
+        ):
+            raise ValueError(
+                "A review discard must reference its immediate saved review"
+            )
+        return self
 
     @model_validator(mode="after")
     def inventories(self):
@@ -186,6 +236,8 @@ class CheckpointRead(ReconciliationContract):
     manifest: CheckpointManifest | None
     review: LoadedReview | None
     message: str
+    _discarded_review: LoadedReview | None = PrivateAttr(default=None)
+    _collection_baselines: dict = PrivateAttr(default_factory=dict)
 
 
 class VaultHistoryInspection(ReconciliationContract):

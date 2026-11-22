@@ -69,6 +69,20 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def prepare_collection_import(self, vault, source, *, record_path):
+        """Review an exact rendered collection with vault-relative output paths."""
+        from .collection_import import prepare_collection_import
+
+        return prepare_collection_import(self, vault, source, record_path=record_path)
+
+    def prepare_collection_update(self, vault, source, *, record_path):
+        """Review a rendered update against the selected collection's baseline."""
+        from .collection_import import prepare_collection_import
+
+        return prepare_collection_import(
+            self, vault, source, record_path=record_path, update=True
+        )
+
     def _new_owned_preparation(self):
         from .owned_preparation import _OwnedPreparation
 
@@ -100,6 +114,12 @@ class Operations:
 
     def apply_update(self, preparation, *, cancel=None, progress=None):
         """Reobserve and apply exactly one complete current source review."""
+        if getattr(preparation, "collection_record_path", None) is not None:
+            from .collection_import import save_collection_review
+
+            return save_collection_review(
+                self, preparation, cancel=cancel, progress=progress, apply=True
+            )
         from .update_lifecycle import apply_update
 
         return apply_update(self, preparation, cancel=cancel, progress=progress)
@@ -173,6 +193,12 @@ class Operations:
 
     def save_update(self, preparation, *, cancel=None, progress=None):
         """Retain a current unresolved or complete review in owned Git history."""
+        if getattr(preparation, "collection_record_path", None) is not None:
+            from .collection_import import save_collection_review
+
+            return save_collection_review(
+                self, preparation, cancel=cancel, progress=progress
+            )
         from .update_lifecycle import save_update
 
         return save_update(self, preparation, cancel=cancel, progress=progress)
@@ -182,6 +208,12 @@ class Operations:
         from .update_lifecycle import load_update
 
         return load_update(self, vault)
+
+    def discard_saved_review(self, vault, *, expected_commit):
+        """Discard the exact saved review selected by the caller."""
+        from brz2obsidian.publication.vault_history import discard_saved_review
+
+        return discard_saved_review(vault, expected_commit=expected_commit)
 
     def resume_update(self, vault):
         """Materialize saved inputs and revalidate against fresh physical facts."""

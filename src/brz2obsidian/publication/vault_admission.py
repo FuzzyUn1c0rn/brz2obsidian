@@ -2371,6 +2371,16 @@ class _Inspection:
                     or self._saved_format_parent(
                         role, parent, memo_tip, admission, observations
                     )
+                    or (
+                        role.review_kind == "collection_import"
+                        or role.collection_baseline_commit is not None
+                    )
+                    and parent.boundary in ("local", "result")
+                    and not self.policy_probe
+                    and admission is not None
+                    and self._current_role_policy_matches(
+                        role.policy_context, admission, observations
+                    )
                     or parent.boundary in ("local", "result")
                     and self._qualified_policy_context(
                         role, parent, memo_tip, admission, observations

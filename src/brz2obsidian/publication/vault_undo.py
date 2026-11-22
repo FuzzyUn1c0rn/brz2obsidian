@@ -90,16 +90,20 @@ def _target_from_graph(graph, observation):
 
 
 def _unused_preparations(current, completed, target, roles):
-    """Only same-target, unpublished Undo preparations may separate attempts."""
+    """Allow only discarded reviews and unused preparations for this Undo."""
     by_commit = {row.commit: row for row in roles}
+    discarded = _discarded_memos(roles)
     while current != completed:
         row = by_commit.get(current)
         if (
             row is None
-            or row.boundary != "prepared"
-            or row.undo_of_receipt_commit != target
-            or row.operation_intent_commit is not None
-            or row.recovery_origin_intent_commit is not None
+            or current not in discarded
+            and not (
+                row.boundary == "prepared"
+                and row.undo_of_receipt_commit == target
+                and row.operation_intent_commit is None
+                and row.recovery_origin_intent_commit is None
+            )
         ):
             return False
         current = row.previous
@@ -109,7 +113,7 @@ def _unused_preparations(current, completed, target, roles):
 def _target_history_known(graph, observation):
     """No unknown maintenance boundary can be hidden behind a later role."""
     target = graph.commit
-    allowed = set()
+    allowed = _discarded_memos(observation.checkpoint_roles)
     recovery_origins = set()
     for operation in observation.graphs:
         if operation.authorities[-1][1].undo_of_receipt_commit != target:
@@ -137,6 +141,24 @@ def _target_history_known(graph, observation):
             return False
         current = row.previous
     return False
+
+
+def _discarded_memos(roles):
+    allowed = set()
+    expected = proposal = None
+    for row in roles:
+        if row.discarded_review is not None:
+            expected = row.discarded_review
+            allowed.add(row.commit)
+        elif row.commit == expected:
+            expected = None
+            proposal = row.saved_proposal_id
+            allowed.add(row.commit)
+        elif proposal is not None and row.saved_proposal_id == proposal:
+            allowed.add(row.commit)
+        else:
+            proposal = None
+    return allowed
 
 
 def _terminal_target_graph(observation):
@@ -226,7 +248,11 @@ def _qualify_undo_target(graph, observation):
     if not _target_history_known(graph, observation):
         return "unsupported", "maintenance_eligibility_unavailable", None
     target = _target_from_graph(graph, observation)
-    if target.plan.facts.format_operation.kind not in ("source_update", "onboarding"):
+    if target.plan.facts.format_operation.kind not in (
+        "source_update",
+        "onboarding",
+        "collection_import",
+    ):
         return "none", "latest_operation_is_maintenance", None
     return (
         "offered",
