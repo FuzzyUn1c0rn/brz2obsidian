@@ -220,6 +220,7 @@ def test_first_import_undo_keeps_later_bytes_and_blocks_duplicate_identity():
 @pytest.mark.parametrize("direction", ["finish", "restore"])
 def test_interrupted_second_import_resolves_without_changing_first_collection(
     direction,
+    monkeypatch,
 ):
     vault = _vault(established=True)
     before = _user_git(vault)
@@ -251,6 +252,10 @@ def test_interrupted_second_import_resolves_without_changing_first_collection(
     offered_recovery = operations.prepare_recovery(vault, direction=direction)
     assert offered_recovery.status == "offered", offered_recovery
     offered_recovery = _choose_recovery(operations, vault, offered_recovery)
+    if direction == "finish":
+        _assert_scoped_recovery_rechecks_lease(
+            vault, operations, offered_recovery, monkeypatch
+        )
     recovered = operations.execute_recovery(vault, offered_recovery)
     if direction == "finish":
         assert recovered.status == "applied", recovered
@@ -265,6 +270,34 @@ def test_interrupted_second_import_resolves_without_changing_first_collection(
     assert _source_note(vault, "brain-a", "Opening.md").chunks[0].data == note_a
     assert (vault / ".obsidian/app.json").read_bytes() == settings
     assert _user_git(vault) == before
+
+
+def _assert_scoped_recovery_rechecks_lease(vault, operations, offered, monkeypatch):
+    from brz2obsidian.publication import vault_recovery
+
+    marker = vault / ".git/brz2obsidian/owner.json"
+    original = marker.read_bytes()
+    original_adopt = vault_recovery._adopt
+    wrong = json.loads(original)
+    wrong["collection_saved_checkpoint"] = "0" * 40
+
+    def tamper_after_adopt(root, operation):
+        original_adopt(root, operation)
+        marker.write_bytes(json.dumps(wrong).encode())
+
+    try:
+        with monkeypatch.context() as injection:
+            injection.setattr(vault_recovery, "_adopt", tamper_after_adopt)
+            refused = operations.execute_recovery(vault, offered)
+        assert refused.code == "operation_marker_invalid", refused
+        assert refused.recovery_required
+        assert marker.exists()
+        assert (
+            operations.prepare_recovery(vault, direction="finish").code
+            == "operation_marker_invalid"
+        )
+    finally:
+        marker.write_bytes(original)
 
 
 def test_alternating_updates_use_each_exact_baseline_and_keep_the_moved_location():

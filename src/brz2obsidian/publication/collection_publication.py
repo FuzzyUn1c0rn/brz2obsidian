@@ -128,32 +128,57 @@ def scoped_undo_receipt(git, receipt_commit, association_id):
     return _scoped_apply_preparation(manifest, origin.operation_id)
 
 
-def scoped_operation_marker(git, graph, owner):
+def _scoped_operation_origin(git, graph, *, owned=None):
     from .vault_history import _checkpoint_graph
 
     origin = graph.authorities[-1][1]
-    if (
-        owner.collection_saved_checkpoint is None
-        or owner.operation_id != origin.operation_id
-    ):
-        return False
-    _, _, manifest, _ = _checkpoint_graph(git, origin.prepared_commit, {}, None)
+    if owned is None:
+        _, _, manifest, _ = _checkpoint_graph(git, origin.prepared_commit, {}, None)
+    else:
+        manifest = owned[origin.prepared_commit][0]
     if origin.kind == "apply":
-        return (
-            owner.collection_undo_receipt is None
-            and owner.collection_saved_checkpoint == manifest.previous
-            and _scoped_apply_preparation(manifest, origin.operation_id)
-        )
-    if (
-        owner.collection_undo_receipt is None
-        or owner.collection_undo_receipt != origin.undo_of_receipt_commit
-        or manifest.undo_of_receipt_commit != owner.collection_undo_receipt
-        or owner.collection_saved_checkpoint
-        not in (manifest.previous, origin.prepared_commit)
-    ):
-        return False
-    return scoped_undo_receipt(
-        git, owner.collection_undo_receipt, origin.association_id
+        if _scoped_apply_preparation(manifest, origin.operation_id):
+            return (manifest.previous,), None
+        return None
+    receipt = origin.undo_of_receipt_commit
+    if receipt is None or not scoped_undo_receipt(git, receipt, origin.association_id):
+        return None
+    if manifest.undo_of_receipt_commit != receipt:
+        raise OSError("Scoped Undo preparation does not match its retained receipt")
+    return (manifest.previous, origin.prepared_commit), receipt
+
+
+def _matches_scoped_origin(owner, operation_id, scope):
+    checkpoints, receipt = scope
+    return (
+        owner is not None
+        and owner.operation_id == operation_id
+        and owner.collection_saved_checkpoint is not None
+        and owner.collection_saved_checkpoint in checkpoints
+        and owner.collection_undo_receipt == receipt
+    )
+
+
+def scoped_operation_marker(git, graph, owner):
+    scope = _scoped_operation_origin(git, graph)
+    return scope is not None and _matches_scoped_origin(
+        owner, graph.intent.operation_id, scope
+    )
+
+
+def recovery_operation_marker(root, authority):
+    from .vault_history import _Git
+
+    owner = read_native_marker(root)
+    graph = authority.graph
+    scope = _scoped_operation_origin(_Git(root), graph, owned=authority.owned)
+    operation_id = graph.intent.operation_id
+    if scope is not None:
+        return _matches_scoped_origin(owner, operation_id, scope)
+    return owner is None or (
+        owner.operation_id == operation_id
+        and owner.collection_saved_checkpoint is None
+        and owner.collection_undo_receipt is None
     )
 
 
@@ -161,11 +186,13 @@ def scoped_terminal_marker(root, git, receipt_commit, operation_id):
     from .vault_apply import _operation_graph
 
     owner = read_native_marker(root)
-    if owner is None or owner.collection_saved_checkpoint is None:
-        return None
-    return owner.operation_id == operation_id and scoped_operation_marker(
-        git, _operation_graph(git, receipt_commit), owner
-    )
+    graph = _operation_graph(git, receipt_commit)
+    scope = _scoped_operation_origin(git, graph)
+    if scope is not None:
+        return _matches_scoped_origin(owner, operation_id, scope)
+    if owner is not None and owner.collection_saved_checkpoint is not None:
+        return False
+    return None
 
 
 def acquire_collection_apply(root, operation, locator, *, undo_receipt=None):

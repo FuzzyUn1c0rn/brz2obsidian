@@ -33,16 +33,8 @@ def _result_locator_matches(manifest, prepared, intent):
     )
 
 
-def _scoped_result_owner(root, git, graph, prepared):
-    owner = read_native_marker(root)
-    if owner is None or owner.operation_id != graph.intent.operation_id:
-        return False
-    if owner.collection_saved_checkpoint is not None:
-        return scoped_operation_marker(git, graph, owner)
-    return (
-        prepared.collection_record_path is not None
-        or prepared.collection_preparation_owner is not None
-    )
+def _scoped_result_owner(root, git, graph):
+    return scoped_operation_marker(git, graph, read_native_marker(root))
 
 
 def locator_after_scoped_result(root, git, saved_locator, tip, names):
@@ -74,7 +66,7 @@ def locator_after_scoped_result(root, git, saved_locator, tip, names):
         or git.call("rev-parse", "--verify", ref).decode().strip()
         != graph.intent_commit
         or not _result_locator_matches(manifest, prepared, intent)
-        or not _scoped_result_owner(root, git, graph, prepared)
+        or not _scoped_result_owner(root, git, graph)
     ):
         return None
     return saved_locator.model_copy(

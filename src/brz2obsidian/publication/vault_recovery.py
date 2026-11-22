@@ -63,7 +63,10 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
-from brz2obsidian.publication.collection_publication import release_native_operation
+from brz2obsidian.publication.collection_publication import (
+    recovery_operation_marker,
+    release_native_operation,
+)
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,
@@ -2389,7 +2392,7 @@ def _prepare_recovery_observed(
             "unavailable" if observed.recovery_required else "refused", observed.code
         )
     try:
-        if not _marker_valid(root, observed.operation_id):
+        if not recovery_operation_marker(root, authority):
             raise ValueError("Operation marker is torn or belongs to another owner")
     except OSError, ValueError, TypeError, UnicodeError:
         return _recovery_preparation("unavailable", "operation_marker_invalid")
@@ -2908,6 +2911,21 @@ def _select_recovery_publication(
     )
 
 
+def _recheck_held_recovery_marker(publication, state):
+    root = publication.root
+    operation = publication.saved.operation_id
+    try:
+        if owns_operation(root, operation) and recovery_operation_marker(
+            root, publication.authority
+        ):
+            return True
+    except OSError, ValueError, TypeError, UnicodeError:
+        pass
+    _park(root, operation)
+    state.acquired = False
+    return False
+
+
 def _adopt_recovery(publication, state):
     before_lease = _inspect_vault_for_recovery(
         publication.root, publication.authority, subjects=publication.subjects
@@ -2932,8 +2950,10 @@ def _adopt_recovery(publication, state):
         )
     _adopt(publication.root, publication.saved.operation_id)
     state.acquired = True
-    if not owns_operation(publication.root, publication.saved.operation_id):
-        raise OSError("Recovery operation lease is unavailable")
+    if not _recheck_held_recovery_marker(publication, state):
+        return _refuse_known_recovery(
+            publication.observed, "operation_marker_invalid", start=publication.start
+        )
     return before_lease
 
 
@@ -3646,6 +3666,12 @@ def _publish_staged_recovery(
             stage = _stage_recovery(publication, paths, proposed_root)
             if isinstance(stage, VaultApplyResult):
                 return stage
+            if not _recheck_held_recovery_marker(publication, state):
+                return _refuse_known_recovery(
+                    publication.observed,
+                    "operation_marker_invalid",
+                    start=publication.start,
+                )
             stopped = _retain_recovery_preparation(
                 publication, lineage, stage, state, source, cancel_requested
             )

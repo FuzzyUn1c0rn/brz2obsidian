@@ -397,7 +397,7 @@ def test_root_undo_locator_proof_requires_exact_owned_receipt(monkeypatch):
 
     def qualified():
         return collection_result_locator._scoped_result_owner(
-            Path("vault").absolute(), git, graph, manifests[undo_prepared]
+            Path("vault").absolute(), git, graph
         )
 
     assert qualified()
@@ -455,7 +455,9 @@ def test_scoped_terminal_receipt_offers_cleanup_after_later_edit(tmp_path, monke
     monkeypatch.setattr(
         vault_apply,
         "_operation_graph",
-        lambda git, commit: SimpleNamespace(authorities=((None, intent),)),
+        lambda git, commit: SimpleNamespace(
+            authorities=((None, intent),), intent=intent
+        ),
     )
     monkeypatch.setattr(
         vault_history, "_checkpoint_graph", lambda *args: (None, None, manifest, None)
@@ -479,7 +481,113 @@ def test_scoped_terminal_receipt_offers_cleanup_after_later_edit(tmp_path, monke
     monkeypatch.setattr(vault_apply, "_terminal_files_match", lambda *args: True)
     assert status().code == "terminal_requires_recovery"
     owner.collection_saved_checkpoint = None
+    assert status().code == "terminal_requires_recovery"
+    manifest.collection_preparation_owner = None
+    manifest.collection_record_path = None
     assert status().code == "terminal_cleanup_required"
+
+
+def test_active_recovery_rejects_wrong_or_incomplete_scoped_marker(monkeypatch):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.vault_update_contracts import VaultOperationLock
+    from brz2obsidian.publication import (
+        collection_publication,
+        vault_apply,
+        vault_recovery,
+    )
+    from brz2obsidian.publication.vault_native import verify_directory
+
+    vault, _ = fixture_case()
+    git(vault, "init", "-q")
+    operation = "a" * 32
+    commit = "b" * 40
+    saved = "c" * 40
+    prepared = SimpleNamespace(
+        boundary="prepared",
+        previous=saved,
+        collection_record_path=None,
+        collection_preparation_owner=operation,
+    )
+    origin = SimpleNamespace(
+        kind="apply", operation_id=operation, prepared_commit=commit
+    )
+    graph = SimpleNamespace(receipt=None, authorities=((None, origin),), intent=origin)
+    authority = SimpleNamespace(graph=graph, owned={commit: (prepared, None)})
+    observed = SimpleNamespace(
+        status="incomplete",
+        recovery_required=True,
+        intent_commit=commit,
+        operation_id=operation,
+        generation=4,
+    )
+    marker = vault / ".git/brz2obsidian"
+    marker.mkdir()
+    (marker / "held").write_bytes(b"1")
+
+    def write_owner(checkpoint, undo_receipt=None):
+        owner = VaultOperationLock(
+            schema_id="brz2obsidian.vault-operation-lock",
+            schema_version=1,
+            operation_id=operation,
+            vault_anchor=verify_directory(vault),
+            git_anchor=verify_directory(vault / ".git"),
+            collection_saved_checkpoint=checkpoint,
+            collection_undo_receipt=undo_receipt,
+        )
+        (marker / "owner.json").write_text(owner.model_dump_json(), encoding="utf-8")
+
+    offered = object()
+    monkeypatch.setattr(
+        vault_recovery, "_build_recovery_review", lambda *a, **kw: offered
+    )
+    write_owner(saved)
+    assert (
+        vault_recovery._prepare_recovery_observed(vault, observed, authority) is offered
+    )
+
+    for wrong in (None, "d" * 40):
+        write_owner(wrong)
+        refused = vault_recovery._prepare_recovery_observed(vault, observed, authority)
+        assert (refused.status, refused.code) == (
+            "unavailable",
+            "operation_marker_invalid",
+        )
+    write_owner(saved, "e" * 40)
+    refused = vault_recovery._prepare_recovery_observed(vault, observed, authority)
+    assert refused.code == "operation_marker_invalid"
+
+    prepared.collection_preparation_owner = None
+    write_owner(None)
+    assert (
+        vault_recovery._prepare_recovery_observed(vault, observed, authority) is offered
+    )
+
+    origin.kind = "undo"
+    origin.undo_of_receipt_commit = "f" * 40
+    origin.association_id = "0" * 64
+    prepared.undo_of_receipt_commit = origin.undo_of_receipt_commit
+    monkeypatch.setattr(
+        collection_publication,
+        "scoped_undo_receipt",
+        lambda git, receipt, association: receipt == origin.undo_of_receipt_commit,
+    )
+    write_owner(saved, origin.undo_of_receipt_commit)
+    assert (
+        vault_recovery._prepare_recovery_observed(vault, observed, authority) is offered
+    )
+    vault_apply._adopt(vault, operation)
+    publication = SimpleNamespace(
+        root=vault, saved=SimpleNamespace(operation_id=operation), authority=authority
+    )
+    state = SimpleNamespace(acquired=True)
+    assert vault_recovery._recheck_held_recovery_marker(publication, state)
+    write_owner(saved, "e" * 40)
+    assert not vault_recovery._recheck_held_recovery_marker(publication, state)
+    assert not state.acquired
+    assert (marker / "held").read_bytes() == b"1"
+    refused = vault_recovery._prepare_recovery_observed(vault, observed, authority)
+    assert refused.code == "operation_marker_invalid"
 
 
 def test_interrupted_scoped_apply_start_releases_marker_without_checkpoint_write():
