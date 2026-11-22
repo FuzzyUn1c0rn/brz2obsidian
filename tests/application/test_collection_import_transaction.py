@@ -160,12 +160,15 @@ def _choose_recovery(operations, vault, offered):
         offered = operations.resolve_recovery(
             vault,
             offered,
-            action(
+            text_choice_action(
                 review,
-                change,
-                domain=requirement.domain,
-                choice="reverse" if requirement.domain == "reversal" else "current",
-                decision_id="recover:" + change.change_id,
+                action(
+                    review,
+                    change,
+                    domain=requirement.domain,
+                    choice="reverse" if requirement.domain == "reversal" else "current",
+                    decision_id="recover:" + change.change_id,
+                ),
             ),
         )
         assert offered.status == "offered", offered

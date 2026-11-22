@@ -291,6 +291,179 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
         reversed_note()
 
 
+def test_finish_rebinds_already_published_imported_undo_to_active_intent(monkeypatch):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.update_lifecycle import text_choice_action
+    from brz2obsidian.content_values import content_sha, content_size
+    from brz2obsidian.contracts import OperationReversalOutput, OperationReversalTarget
+    from brz2obsidian.core import resolve_review, select_review_effects
+    from brz2obsidian.publication import vault_recovery
+    from tests.reconciliation.test_resolution import action
+
+    path, record_path, previous = _incoming_brain(scoped=False)
+    moved = "Moved/Opening.md"
+    rendered = json.loads(previous[record_path])
+    rendered["source_identity"]["snapshot_digest"] = "reviewed-update"
+    updated = previous | {
+        path: previous[path].replace(b"New B text.", b"Updated note."),
+        record_path: json.dumps(rendered).encode(),
+    }
+
+    def facts(current_note, generation):
+        return assemble_facts(
+            updated,
+            previous,
+            {moved: current_note, record_path: previous[record_path]},
+            record_path=record_path,
+            proposal_id="undo-collection-update",
+            generation=generation,
+        )
+
+    before = facts(updated[path], 1)
+    subject = next(row for row in before.subjects if row.item_id == "opening")
+    reference = next(
+        row
+        for row in before.link_context.current_targets
+        if row.canonical_path == moved
+    )
+    proof = OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id="a" * 32,
+        operation_kind="apply",
+        direction="restore",
+        operation_generation=4,
+        history_fingerprint="original-apply",
+        origin_change_id="prior-apply-note",
+        owned_targets=(reference,),
+        outputs=(
+            OperationReversalOutput(
+                path=moved,
+                target_id=reference.target_id,
+                produced_existence="present",
+                produced=subject.current.content,
+                current=subject.current,
+                target_existence="present",
+                target=subject.incoming,
+            ),
+        ),
+    )
+    undo_subject = subject.model_copy(
+        update={"path": moved, "structure": None, "operation_reversal": proof}
+    )
+    undo = prepare_review(
+        before.model_copy(update={"subjects": (undo_subject,)}), preflight=preflight()
+    )
+    change = next(
+        row for row in undo.proposal.changes if row.item_id == subject.item_id
+    )
+    decision = text_choice_action(
+        undo, action(undo, change, domain="reversal", choice="reverse")
+    )
+    chosen = resolve_review(undo, decision)
+    assert chosen.status == "accepted", chosen.code
+    undo = chosen.plan
+    assert undo.ready, undo.blockers
+
+    after = facts(previous[path], undo.proposal.generation + 1)
+    observed = next(
+        row.current for row in after.identity_inventory if row.current.path == moved
+    )
+    fresh = after.model_copy(
+        update={"subjects": (undo_subject.model_copy(update={"current": observed}),)}
+    )
+    retained = SimpleNamespace(
+        owned={
+            "prepared": (
+                None,
+                SimpleNamespace(historical_effects=select_review_effects(undo)),
+            )
+        }
+    )
+
+    def exact(value):
+        return SimpleNamespace(
+            path=moved,
+            size=content_size(value),
+            sha256=content_sha(value),
+            content=value,
+        )
+
+    intent = SimpleNamespace(
+        kind="undo",
+        operation_id="b" * 32,
+        generation=7,
+        association_id="c" * 64,
+        undo_of_receipt_commit="d" * 40,
+        prepared_commit="prepared",
+        affected_paths=(moved,),
+        before=(exact(undo_subject.current.content),),
+        proposed=(exact(observed.content),),
+    )
+    monkeypatch.setattr(
+        vault_recovery,
+        "_review_observation",
+        lambda *a, **kw: (
+            undo,
+            intent,
+            "e" * 40,
+            None,
+            fresh,
+            undo.preflight,
+            {moved: observed},
+            retained,
+        ),
+    )
+    monkeypatch.setattr(
+        vault_recovery, "_owned_content", lambda git, row, **kw: row.content
+    )
+    result = vault_recovery._finish_review(None, None)
+    assert result.ready, (result.blockers, result.requirements)
+    active = result.facts.subjects[0].operation_reversal
+    assert (active.operation_id, active.direction) == (intent.operation_id, "finish")
+    assert (
+        active.outputs[0].current.content
+        == active.outputs[0].target
+        == observed.content
+    )
+
+    later = previous[path] + b"Authored after the interruption.\r\n"
+    after = facts(later, undo.proposal.generation + 1)
+    observed = next(
+        row.current for row in after.identity_inventory if row.current.path == moved
+    )
+    fresh = after.model_copy(
+        update={"subjects": (undo_subject.model_copy(update={"current": observed}),)}
+    )
+    result = vault_recovery._finish_review(None, None)
+    assert result.blockers == () and len(result.requirements) == 1
+    requirement = result.requirements[0]
+    assert requirement.domain == "reversal" and "current" in requirement.choices
+    change = next(row for row in result.proposal.changes if row.path == moved)
+    retained_edit = resolve_review(
+        result,
+        action(
+            result,
+            change,
+            domain="reversal",
+            choice="current",
+            decision_id="recovery:preserve-later",
+        ),
+    )
+    assert retained_edit.status == "accepted", retained_edit.code
+    assert retained_edit.plan.ready, retained_edit.plan.blockers
+    selection = select_review_effects(retained_edit.plan)
+    assert not selection.remove_paths
+    assert all(
+        row.content.data == later for row in selection.files if row.path == moved
+    )
+
+    intent.proposed = (exact(undo_subject.current.content),)
+    with pytest.raises(OSError, match="exact selected recovery versions"):
+        vault_recovery._finish_review(None, None)
+
+
 def test_undo_lease_uses_reviewed_collection_lineage_even_at_vault_root(monkeypatch):
     from pathlib import Path
     from types import SimpleNamespace

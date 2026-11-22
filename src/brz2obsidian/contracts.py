@@ -1327,9 +1327,10 @@ class OperationReversalTarget(ReconciliationContract):
                 or target.kind != "note"
                 or target.identity is not None
                 and self.direction != "restore"
+                and self.operation_kind != "undo"
             ):
                 raise ValueError(
-                    "A byte reversal requires one identityless document or imported note restore"
+                    "A byte reversal requires one identityless document or imported note operation"
                 )
         return self
 

@@ -1157,6 +1157,131 @@ def _document_preflight(root, retained, original, intent, facts, *, _owner=None)
     )
 
 
+def _imported_byte_reversal(subject):
+    proof = subject.operation_reversal
+    return (
+        proof is not None
+        and len(proof.outputs) == len(proof.owned_targets) == 1
+        and proof.owned_targets[0].kind == "note"
+        and proof.owned_targets[0].identity is not None
+        and proof.outputs[0].produced_existence == "present"
+        and proof.outputs[0].target_existence == "present"
+    )
+
+
+def _finish_imported_undo_note(subject, evidence, change, decision, owned, *, _owner):
+    path = subject.path
+    selected = evidence.selected.get(path)
+    retained_target = subject.operation_reversal.owned_targets[0]
+    previous = _owned_content(evidence.git, evidence.before.get(path), _owner=_owner)
+    proposed = _owned_content(evidence.git, evidence.proposed.get(path), _owner=_owner)
+    if (
+        path != subject.current.path
+        or selected is None
+        or selected.subject_id != change.subject_id
+        or owned != (retained_target,)
+        or previous is None
+        or proposed is None
+        or not same_content(proposed, selected.content)
+    ):
+        raise OSError("Imported Undo note lacks exact selected recovery versions")
+    intent = evidence.intent
+    proof = OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id=intent.operation_id,
+        operation_kind=intent.kind,
+        direction="finish",
+        operation_generation=intent.generation,
+        history_fingerprint=_operation_history_fingerprint(
+            evidence.origin_commit, intent
+        ),
+        origin_change_id=change.change_id,
+        origin_decision_id=decision,
+        owned_targets=owned,
+        outputs=(
+            OperationReversalOutput(
+                path=path,
+                target_id=retained_target.target_id,
+                produced_existence="present",
+                produced=previous,
+                current=subject.current,
+                target_existence="present",
+                target=proposed,
+            ),
+        ),
+    )
+    return subject.model_copy(
+        update={"operation_reversal": proof, "incoming": proposed}
+    )
+
+
+@dataclass(frozen=True)
+class _UndoFinishEvidence:
+    git: _Git
+    intent: VaultOperationIntent
+    origin_commit: str
+    selected: dict
+    before: dict
+    proposed: dict
+
+
+def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, _owner):
+    if intent.kind != "undo" or intent.undo_of_receipt_commit is None:
+        return facts
+    imported = tuple(
+        subject for subject in facts.subjects if _imported_byte_reversal(subject)
+    )
+    if not imported:
+        return facts
+    affected = tuple(
+        subject for subject in imported if subject.path in intent.affected_paths
+    )
+    changes = {(row.item_id, row.facet): row for row in original.proposal.changes}
+    decisions = {row.change_id: row.decision_id for row in original.approvals}
+    queries = tuple(
+        (
+            changes[subject.item_id, subject.facet].change_id,
+            decisions.get(changes[subject.item_id, subject.facet].change_id),
+        )
+        for subject in affected
+    )
+    owned = (
+        review_owned_outputs(original, queries)
+        if _owner is None
+        else _owner._history_owned_outputs(original, queries)
+    )
+    evidence = _UndoFinishEvidence(
+        git,
+        intent,
+        origin_commit,
+        {row.path: row for row in owned.effects.files},
+        {row.path: row for row in intent.before},
+        {row.path: row for row in intent.proposed},
+    )
+    rebound = tuple(
+        _finish_imported_undo_note(
+            subject,
+            evidence,
+            changes[subject.item_id, subject.facet],
+            decision,
+            targets,
+            _owner=_owner,
+        )
+        for subject, (_, decision), targets in zip(
+            affected, queries, owned.target_groups, strict=True
+        )
+    )
+    return facts.model_copy(
+        update={
+            "subjects": tuple(
+                subject for subject in facts.subjects if subject not in imported
+            )
+            + rebound
+        }
+    )
+
+
 def _finish_review(root, observed, *, previous=None, authority=None, _owner=None):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
@@ -1167,6 +1292,9 @@ def _finish_review(root, observed, *, previous=None, authority=None, _owner=None
             next_generation=(previous.proposal.generation + 1 if previous else None),
             _owner=_owner,
         )
+    )
+    facts = _finish_imported_undo_notes(
+        facts, original, intent, origin_commit, git, _owner=_owner
     )
     document_keys = {
         (subject.item_id, subject.facet)
