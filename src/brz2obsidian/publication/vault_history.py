@@ -210,6 +210,7 @@ def _semantic(
     reviewed_source=None,
     collection_record_path=None,
     collection_baseline_commit=None,
+    collection_preparation_owner=None,
 ):
     return _semantic_meaning(
         association,
@@ -231,6 +232,7 @@ def _semantic(
         reviewed_source,
         collection_record_path=collection_record_path,
         collection_baseline_commit=collection_baseline_commit,
+        collection_preparation_owner=collection_preparation_owner,
     )
 
 
@@ -255,6 +257,8 @@ def _semantic_meaning(
     discarded_review=None,
     collection_record_path=None,
     collection_baseline_commit=None,
+    collection_preparation_owner=None,
+    abandoned_collection_preparation=None,
 ):
     parts = (
         association.model_dump(mode="json"),
@@ -284,6 +288,10 @@ def _semantic_meaning(
         parts += ("collection-record", collection_record_path)
     if collection_baseline_commit is not None:
         parts += ("collection-baseline", collection_baseline_commit)
+    if collection_preparation_owner is not None:
+        parts += ("collection-preparation-owner", collection_preparation_owner)
+    if abandoned_collection_preparation is not None:
+        parts += ("abandoned-collection-preparation", abandoned_collection_preparation)
     if undo_of_receipt_commit is not None:
         return digest((*parts, "undo-prepared", undo_of_receipt_commit))
     if recovery_origin_intent_commit is not None:
@@ -1406,6 +1414,8 @@ class _CheckpointRole(NamedTuple):
     collection_baseline_commit: str | None = None
     discarded_review: str | None = None
     saved_proposal_id: str | None = None
+    collection_preparation_owner: str | None = None
+    abandoned_collection_preparation: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1661,13 +1671,6 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
             raise OSError("Association physical context does not match")
     elif association != trusted_association:
         raise OSError("Copied association differs from the target-owned association")
-    if set(os.listdir(root / ".brz2obsidian")) != {"locator.json"}:
-        raise OSError("Unknown converter operation metadata")
-    if (
-        git.call("rev-parse", "--verify", association.ref).decode().strip()
-        != locator.commit
-    ):
-        raise OSError("Owned checkpoint root is missing or changed")
     expected_id = digest(
         (
             association.vault_id,
@@ -1679,7 +1682,21 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
     expected_ref = "refs/brz2obsidian/imports/" + expected_id + "/checkpoints"
     if association.association_id != expected_id or association.ref != expected_ref:
         raise OSError("Invalid stable checkpoint association")
-    return locator
+    return _locator_at_owned_tip(root, git, locator, trusted_association)
+
+
+def _locator_at_owned_tip(root, git, locator, trusted_association):
+    names = set(os.listdir(root / ".brz2obsidian"))
+    tip = git.call("rev-parse", "--verify", locator.association.ref).decode().strip()
+    if tip == locator.commit and names == {"locator.json"}:
+        return locator
+    if trusted_association is None:
+        from .unpublished_collection import locator_after_unpublished_preparation
+
+        advanced = locator_after_unpublished_preparation(root, git, locator, tip, names)
+        if advanced is not None:
+            return advanced
+    raise OSError("Owned checkpoint root or locator metadata changed")
 
 
 class _CheckpointChain(NamedTuple):
@@ -1811,6 +1828,14 @@ def _accumulate_checkpoint_claims(
 
 
 def _check_checkpoint_meaning(association, manifest, review_metadata, meaning):
+    if (
+        manifest.collection_record_path is not None
+        and manifest.boundary == "local"
+        and not manifest.source
+        and manifest.discarded_review is None
+        and (review_metadata is None or review_metadata[10] != "collection_import")
+    ):
+        raise OSError("Empty collection baseline lacks a retained import review")
     if manifest.reviewed_source is not None and (
         manifest.review_object is None
         or review_metadata[5] != _binding_signature(manifest.reviewed_source)
@@ -1848,6 +1873,8 @@ def _check_checkpoint_meaning(association, manifest, review_metadata, meaning):
             manifest.discarded_review,
             manifest.collection_record_path,
             manifest.collection_baseline_commit,
+            manifest.collection_preparation_owner,
+            manifest.abandoned_collection_preparation,
         )
         != manifest.semantic_fingerprint
     ):
@@ -1952,6 +1979,8 @@ def _accumulate_checkpoint_role(
                 if manifest.boundary == "local" and manifest.reviewed_source is not None
                 else None
             ),
+            collection_preparation_owner=manifest.collection_preparation_owner,
+            abandoned_collection_preparation=manifest.abandoned_collection_preparation,
         )
     )
     return memo_roles, format_roles
@@ -1963,6 +1992,8 @@ class _CollectionLineage:
         self.demands = {}
         self.discard = None
         self.discarded_review = self.discarded_manifest = None
+        self.restored = None
+        self.restored_parent = None
 
     def check_discard(self, manifest):
         if self.discard is not None and (
@@ -1975,6 +2006,27 @@ class _CollectionLineage:
         ):
             raise OSError("Discarded review lacks its exact saved checkpoint")
         self.discard = manifest if manifest.discarded_review is not None else None
+
+    def check_restoration(self, current, manifest):
+        if self.restored_parent is not None:
+            from .unpublished_collection import restored_roles_match
+
+            if current != self.restored_parent or not restored_roles_match(
+                self.restored, manifest, current
+            ):
+                raise OSError("Restored collection review changed its saved authority")
+            self.restored = self.restored_parent = None
+        elif self.restored is not None:
+            if (
+                manifest.collection_preparation_owner is None
+                or manifest.previous is None
+            ):
+                raise OSError("Abandoned collection preparation lacks its owner")
+            self.restored_parent = manifest.previous
+        if manifest.abandoned_collection_preparation is not None:
+            if self.restored is not None:
+                raise OSError("Overlapping collection preparation restoration")
+            self.restored = manifest
 
     def observe(self, current, manifest, tip_manifest, review_metadata, review):
         if manifest.boundary != "prepared":
@@ -2031,6 +2083,7 @@ def _read_checkpoint_chain(
             association, generation, parents, entries, manifest, actual_association
         )
         collections.check_discard(manifest)
+        collections.check_restoration(current, manifest)
         for role in (
             "source",
             "vault",
@@ -2094,7 +2147,7 @@ def _read_checkpoint_chain(
             target_records[current] = manifest, review
         controls = {}
         current, generation = manifest.previous, generation - 1
-    if generation != 0 or collections.demands:
+    if generation != 0 or collections.demands or collections.restored is not None:
         raise OSError("Retained checkpoint chain is incomplete")
     return _CheckpointChain(
         tip_manifest,
@@ -4168,6 +4221,7 @@ def _describe_capture(request, base, lineage, plan, spooled, directory, writes):
         else base.prior.manifest.reviewed_source,
         collection_record_path=base.collection_record_path,
         collection_baseline_commit=base.selected_baseline_commit,
+        collection_preparation_owner=_collection_preparation_owner(request, base),
     )
     # Duplicate meaning omits proof identities. An owned prepared
     # export must retain the complete plan its result capture checks.
@@ -4387,6 +4441,7 @@ def _capture_manifest(
         identity=base.identity,
         collection_record_path=base.collection_record_path,
         collection_baseline_commit=base.selected_baseline_commit,
+        collection_preparation_owner=_collection_preparation_owner(request, base),
         observed_source=plan.observed_source,
         reviewed_source=described.reviewed_source
         if request.boundary != "result"
@@ -4413,6 +4468,23 @@ def _capture_manifest(
         policy_continuity_fingerprint=base.current.policy_continuity_fingerprint,
     )
     return manifest
+
+
+def _collection_preparation_owner(request, base):
+    if (
+        request.boundary == "prepared"
+        and request.undo_of_receipt_commit is None
+        and request.recovery_direction is None
+        and base.prior.status == "valid"
+        and base.prior.manifest.boundary == "local"
+        and base.prior.manifest.reviewed_source is not None
+        and (
+            base.prior.manifest.collection_record_path is not None
+            or base.prior.manifest.collection_baseline_commit is not None
+        )
+    ):
+        return request.active_operation
+    return None
 
 
 def _write_capture_metadata(git, association, manifest, review_oid, writes):

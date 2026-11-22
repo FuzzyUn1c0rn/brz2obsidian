@@ -52,6 +52,16 @@ from brz2obsidian.publication.filesystem import (
 )
 
 
+def _collection_preparation(value):
+    from .update_contracts import UpdatePreparation
+
+    try:
+        preparation = UpdatePreparation.model_validate(value)
+    except ValueError, TypeError:
+        return None
+    return preparation if preparation.collection_record_path is not None else None
+
+
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
@@ -114,11 +124,12 @@ class Operations:
 
     def apply_update(self, preparation, *, cancel=None, progress=None):
         """Reobserve and apply exactly one complete current source review."""
-        if getattr(preparation, "collection_record_path", None) is not None:
+        collection = _collection_preparation(preparation)
+        if collection is not None:
             from .collection_import import save_collection_review
 
             return save_collection_review(
-                self, preparation, cancel=cancel, progress=progress, apply=True
+                self, collection, cancel=cancel, progress=progress, apply=True
             )
         from .update_lifecycle import apply_update
 
@@ -193,11 +204,12 @@ class Operations:
 
     def save_update(self, preparation, *, cancel=None, progress=None):
         """Retain a current unresolved or complete review in owned Git history."""
-        if getattr(preparation, "collection_record_path", None) is not None:
+        collection = _collection_preparation(preparation)
+        if collection is not None:
             from .collection_import import save_collection_review
 
             return save_collection_review(
-                self, preparation, cancel=cancel, progress=progress
+                self, collection, cancel=cancel, progress=progress
             )
         from .update_lifecycle import save_update
 

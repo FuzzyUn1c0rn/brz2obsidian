@@ -41,9 +41,13 @@ def canonical_player_ranges(text):
     return [(match.start(), match.end()) for match in _CANONICAL_PLAYER.finditer(text)]
 
 
+def is_migration_record_path(path):
+    return path.rsplit("/", 1)[-1] == "migration-record.json"
+
+
 def migration_record_data(text, source_path, *, record_format=8):
     """Recognize a supported data envelope, without validating its authority."""
-    if source_path != "migration-record.json":
+    if not is_migration_record_path(source_path):
         return False
 
     def unique_members(pairs):

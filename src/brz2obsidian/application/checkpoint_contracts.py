@@ -104,6 +104,31 @@ class CheckpointManifest(ReconciliationContract):
     collection_baseline_commit: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
     )
+    collection_preparation_owner: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{32}$", exclude_if=lambda value: value is None
+    )
+    abandoned_collection_preparation: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def collection_preparation(self):
+        if self.collection_preparation_owner is not None and (
+            self.boundary != "prepared"
+            or self.previous is None
+            or self.reviewed_source is None
+            or self.recovery_direction is not None
+            or self.undo_of_receipt_commit is not None
+        ):
+            raise ValueError("A collection preparation must name its owned Apply")
+        if self.abandoned_collection_preparation is not None and (
+            self.boundary != "local"
+            or self.abandoned_collection_preparation != self.previous
+            or self.reviewed_source is None
+            or self.discarded_review is not None
+        ):
+            raise ValueError("Restored collection review must follow its preparation")
+        return self
 
     @model_validator(mode="after")
     def collection_lineage(self):

@@ -1376,7 +1376,15 @@ class _Inspection:
                 if line.split(b" ", 1)[0].startswith(b"refs/brz2obsidian/imports/")
                 and b"/operations/" in line.split(b" ", 1)[0]
             ]
-            if operation_refs or self.linked_intents:
+            if (
+                operation_refs
+                or self.linked_intents
+                or (
+                    self.history is not None
+                    and self.history.status == "valid"
+                    and self.history.manifest.collection_preparation_owner is not None
+                )
+            ):
                 from brz2obsidian.publication.vault_apply import inspect_update_status
 
                 status = terminal_status
@@ -2334,6 +2342,7 @@ class _Inspection:
         recorded = self._recorded_preparations(roles) if verify_retry else ()
         memo_tips = self._format_memo_tips(roles) if verify_retry else {}
         parent = physical_parent = context = prepared_baseline = None
+        collection_parent = None
         for role in reversed(roles):
             actual = locator.model_copy(
                 update={"commit": role.commit, "generation": role.generation}
@@ -2341,7 +2350,18 @@ class _Inspection:
             selected = actual
             memo_tip = memo_tips.get(role.commit, tip)
             next_prepared_baseline = None
+            if role.collection_preparation_owner is not None:
+                collection_parent = context
             if (
+                role.abandoned_collection_preparation is not None
+                and collection_parent is not None
+                and admission is not None
+                and self._current_role_policy_matches(
+                    role.policy_context, admission, observations
+                )
+            ):
+                selected = collection_parent
+            elif (
                 verify_retry
                 and self._format_preparation_follows(role, parent)
                 and role.commit not in recorded

@@ -33,6 +33,7 @@ def _incoming_brain():
         "item_targets": [
             {
                 "original_identity": "opening",
+                "item_key": "opening",
                 "original_title": "Opening",
                 "relative_path": path,
                 "created": True,
@@ -51,6 +52,9 @@ def _incoming_brain():
 def test_first_import_distinguishes_unrelated_and_retained_source_identity():
     path, record_path, incoming = _incoming_brain()
     note = incoming[path]
+    record = json.loads(incoming[record_path])
+    record["original_excerpt"] = "[[Literal source evidence]]"
+    incoming[record_path] = json.dumps(record).encode()
 
     def first_import(current):
         return assemble_facts(
@@ -72,11 +76,152 @@ def test_first_import_distinguishes_unrelated_and_retained_source_identity():
     assert opening.path == path
     assert opening.disposition == "compatible"
     assert opening.result.data == note
+    record_document = next(
+        document
+        for document in facts.link_context.incoming_documents
+        if document.source_path == record_path
+    )
+    assert record_document.status == "supported"
+    assert record_document.occurrences == ()
     assert planned.ready
 
     retained = note.replace(b"New B text.", b"Later authored text.")
     with pytest.raises(ValueError, match="^retained_source_identity_conflict$"):
         first_import({"Moved/Opening.md": retained})
+
+
+def test_first_import_review_inspection_and_refresh_reobserve_current_inputs():
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    path, record_path, incoming = _incoming_brain()
+    for relative, raw in incoming.items():
+        (source / relative).parent.mkdir(parents=True, exist_ok=True)
+        (source / relative).write_bytes(raw)
+    manual = vault / "Manual.md"
+    manual.write_bytes(b"Original writing.\n")
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    assert offered.preparation is not None, offered.code
+    assert offered.ready, offered.preparation.review.blockers
+    prepared = offered.preparation
+    assert prepared.locator is None
+
+    def inspect(value):
+        return operations.inspect_update_review(
+            value,
+            proposal_id=offered.operation_id,
+            generation=value.review.proposal.generation,
+        )
+
+    page = inspect(prepared)
+    assert page.status == "available", page.code
+    refreshed = operations.refresh_update(prepared)
+    assert refreshed.preparation is not None, refreshed.code
+    assert refreshed.generation == offered.generation
+
+    manual.write_bytes(b"Later writing.\r\n")
+    assert inspect(prepared).status == "refused"
+    changed = operations.refresh_update(prepared)
+    assert changed.generation == offered.generation + 1, changed.code
+    assert inspect(changed.preparation).status == "available"
+
+    (source / path).write_bytes(incoming[path] + b"Changed source.\n")
+    assert inspect(changed.preparation).code == "source_payload_changed"
+    assert (
+        operations.refresh_update(changed.preparation).code == "source_payload_changed"
+    )
+    assert operations.read_checkpoint(vault).status == "absent"
+
+
+def test_scoped_update_binds_incoming_bytes_to_the_moved_note():
+    path, record_path, original = _incoming_brain()
+    record = json.loads(original[record_path])
+    record["source_identity"]["snapshot_digest"] = "next-b"
+    updated = original | {
+        path: original[path].replace(b"New B text.", b"Latest B text."),
+        record_path: json.dumps(record).encode(),
+    }
+    moved = "Moved/Opening.md"
+    current = {moved: original[path], record_path: original[record_path]}
+    facts = assemble_facts(
+        original,
+        updated,
+        current,
+        record_path=record_path,
+        proposal_id="update-b",
+        generation=1,
+    )
+    review = prepare_review(facts, preflight=preflight())
+    assert review.ready, review.blockers
+    from brz2obsidian.core import select_review_effects
+
+    selected = select_review_effects(review)
+    assert {row.path: row.content.data for row in selected.files} == {
+        moved: updated[path],
+        record_path: updated[record_path],
+    }
+
+
+def test_prepared_collection_without_intent_exposes_exact_recovery_authority():
+    from brz2obsidian.publication.vault_apply import _acquire, _release
+
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    path, record_path, incoming = _incoming_brain()
+    for relative, raw in incoming.items():
+        (source / relative).parent.mkdir(parents=True, exist_ok=True)
+        (source / relative).write_bytes(raw)
+    operations = Operations()
+    prepared = operations.prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    saved = operations.save_update(prepared.preparation)
+    assert saved.code == "saved", saved
+    association = saved.checkpoint.association
+    plan = saved.preparation.review
+    operation_id = "b" * 32
+    _acquire(vault, operation_id)
+    try:
+        snapshot = operations.capture_checkpoint(
+            vault,
+            source,
+            vault_id=association.vault_id,
+            import_id=association.import_id,
+            identity=plan.facts.incoming_identity,
+            admission=operations.inspect_history(
+                vault, active_operation=operation_id
+            ).admission,
+            review=plan,
+            boundary="prepared",
+            proposed=source,
+            active_operation=operation_id,
+            source_binding=saved.preparation.source_binding,
+            observed_source=saved.preparation.observed_source,
+        )
+        assert snapshot.status == "captured", snapshot.code
+    finally:
+        _release(vault, operation_id)
+    offered = Operations().prepare_recovery(vault, direction="restore")
+    assert (offered.status, offered.code) == (
+        "cleanup",
+        "unpublished_collection_prepared",
+    )
+    assert offered.operation_id == operation_id
+    assert offered.unpublished_checkpoint == snapshot.commit
+    assert offered.intent_commit is None
+    assert Operations().inspect_history(vault).admission.status == "recovery_first"
+    assert not (vault / path).exists()
+    restored = Operations().execute_recovery(vault, offered)
+    assert restored.code == "saved_collection_review_restored", restored
+    assert not restored.authored_files_changed
+    resumed = Operations().resume_update(vault)
+    assert resumed.code == "resumed", resumed
+    assert resumed.operation_id == plan.proposal.proposal_id
+    assert not (vault / record_path).exists()
 
 
 def test_saved_unrelated_review_keeps_the_established_source_available():
@@ -92,9 +237,18 @@ def test_saved_unrelated_review_keeps_the_established_source_available():
     record_a["source_identity"]["source_id"] = "brain-a"
     record_a["source_identity"]["snapshot_digest"] = "original-a"
     record_a["item_targets"][0]["relative_path"] = "Opening.md"
-    (source_a / "migration-record.json").write_text(
-        json.dumps(record_a), encoding="utf-8"
-    )
+    asset_a = "Assets/shared.bin"
+    asset_b = "Imports/Brain B/Assets/shared.bin"
+    record_a["asset_targets"] = [{"asset_id": "shared", "relative_path": asset_a}]
+    (source_a / "migration-record.json").write_bytes(json.dumps(record_a).encode())
+    (vault / "migration-record.json").write_bytes(json.dumps(record_a).encode())
+    for directory in (vault, source_a):
+        (directory / asset_a).parent.mkdir()
+        (directory / asset_a).write_bytes(b"Historical A resource\x00")
+    record_b = json.loads(incoming[record_path])
+    record_b["asset_targets"] = [{"asset_id": "shared", "relative_path": asset_b}]
+    incoming[record_path] = json.dumps(record_b).encode()
+    incoming[asset_b] = b"Distinct B resource\xff"
     operations = Operations()
     first = operations.capture_checkpoint(
         vault,
@@ -121,7 +275,7 @@ def test_saved_unrelated_review_keeps_the_established_source_available():
         vault, source_b, record_path=record_path
     )
     assert offered.ready, offered
-    saved = operations.save_update(offered.preparation)
+    saved = operations.save_update(offered.preparation.model_dump())
     assert saved.code == "saved", saved
     reopened = operations.read_checkpoint(vault)
     assert reopened.status == "valid"
@@ -149,6 +303,13 @@ def test_saved_unrelated_review_keeps_the_established_source_available():
         byte_limit=64,
     )
     assert absent.code == "collection_not_active", absent
+    with operations.inspect_update_inputs(vault) as observed:
+        (owner,) = observed.read_attachment_ownership(
+            locator=reopened.locator, paths=(asset_a,)
+        )
+    assert owner.checkpoint_commit == first.commit
+    assert owner.identity.collection_id == "brain-a"
+    assert owner.source_path == asset_a
     resumed = Operations().resume_update(vault)
     assert resumed.code == "resumed", resumed
     assert resumed.operation_id == offered.operation_id
@@ -166,13 +327,17 @@ def test_saved_unrelated_review_keeps_the_established_source_available():
         json.dumps(record_a), encoding="utf-8"
     )
     (source_a_next / "Opening.md").write_bytes(b"Next A.\n")
+    (source_a_next / asset_a).parent.mkdir()
+    (source_a_next / asset_a).write_bytes(b"Historical A resource\x00")
     next_a = operations.prepare_collection_update(
         vault, source_a_next, record_path="migration-record.json"
     )
     assert next_a.preparation is not None, next_a
+    refreshed = operations.refresh_update(next_a.preparation)
+    assert refreshed.preparation is not None, refreshed.code
     note = next(
         subject
-        for subject in next_a.preparation.review.facts.subjects
+        for subject in refreshed.preparation.review.facts.subjects
         if subject.item_id == "opening"
     )
     assert note.baseline.content.data == original

@@ -1252,6 +1252,10 @@ def resolve_update(operations, preparation, action, *, edited=None):
 def refresh_update(operations, preparation, *, source=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
+        if preparation.collection_record_path is not None:
+            from .collection_import import refresh_collection_review
+
+            return refresh_collection_review(operations, preparation, source=source)
         if source is None:
             result = _reobserve(operations, preparation)[1]
             # Explicit Refresh may expose a newly complete review. Internal
@@ -1432,7 +1436,7 @@ def load_update(operations, vault):
     if stopped is not None:
         return stopped
     checkpoint = history.checkpoint
-    if checkpoint.review is None or checkpoint.manifest.reviewed_source is None:
+    if not _saved_review_available(checkpoint):
         return _refused("saved_update_unavailable", history)
     plan = checkpoint.review.saved.plan
     return UpdateResult(
@@ -1458,6 +1462,14 @@ def resume_update(operations, vault):
             return _resume_update(operations, vault, observed)
     except OSError, ValueError, TypeError, AttributeError:
         return _refused("current_inputs_unavailable", action="refresh_update")
+
+
+def _saved_review_available(checkpoint):
+    return (
+        checkpoint.manifest.boundary != "result"
+        and checkpoint.review is not None
+        and checkpoint.manifest.reviewed_source is not None
+    )
 
 
 def _resume_input_facts(operations, history, vault, observed, plan, incoming):
@@ -1508,7 +1520,7 @@ def _resume_update(operations, vault, observed):
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
-        if checkpoint.review is None or checkpoint.manifest.reviewed_source is None:
+        if not _saved_review_available(checkpoint):
             return _refused("saved_update_unavailable", history)
         loaded = checkpoint.review
         binding = checkpoint.manifest.reviewed_source
@@ -1610,29 +1622,16 @@ def inspect_update_review(
             or generation != plan.proposal.generation
         ):
             return refused("review_identity_changed")
-        checkpoint = operations.read_checkpoint(preparation.vault)
-        if preparation.kind == "onboarding" and preparation.locator is None:
-            history = operations.inspect_history(preparation.vault)
-            if (
-                checkpoint.status != "absent"
-                or checkpoint.locator is not None
-                or history.status != "absent"
-                or history.admission.status != "supported"
-                or not history.admission.inventory_complete
-                or history.admission.inventory != preparation.current_inventory
-            ):
-                return refused("association_or_history_changed")
-            directory = Path(preparation.payload_directory).absolute()
-            if (
-                directory.name != "incoming"
-                or directory.parent.parent != Path(tempfile.gettempdir())
-                or not directory.parent.name.startswith("brz2obsidian-update-")
-                or operations.observe_reviewed_source(directory, plan)
-                != preparation.source_binding
-            ):
-                return refused("source_payload_changed")
-        elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
-            return refused("association_or_history_changed")
+        if preparation.collection_record_path is not None:
+            from .collection_import import inspect_collection_authority
+
+            code = inspect_collection_authority(operations, preparation)
+            if code is not None:
+                return refused(code)
+        else:
+            code = _legacy_review_authority(operations, preparation)
+            if code is not None:
+                return refused(code)
         return review_plan_page(
             plan,
             proposal_id=proposal_id,
@@ -1643,8 +1642,35 @@ def inspect_update_review(
             byte_limit=byte_limit,
             queue=queue,
         )
-    except OSError, ValueError, TypeError, AttributeError:
+    except OSError, ValueError, TypeError, AttributeError, KeyError, StopIteration:
         return refused("invalid_review")
+
+
+def _legacy_review_authority(operations, preparation):
+    checkpoint = operations.read_checkpoint(preparation.vault)
+    if preparation.kind == "onboarding" and preparation.locator is None:
+        history = operations.inspect_history(preparation.vault)
+        if (
+            checkpoint.status != "absent"
+            or checkpoint.locator is not None
+            or history.status != "absent"
+            or history.admission.status != "supported"
+            or not history.admission.inventory_complete
+            or history.admission.inventory != preparation.current_inventory
+        ):
+            return "association_or_history_changed"
+        directory = Path(preparation.payload_directory).absolute()
+        if (
+            directory.name != "incoming"
+            or directory.parent.parent != Path(tempfile.gettempdir())
+            or not directory.parent.name.startswith("brz2obsidian-update-")
+            or operations.observe_reviewed_source(directory, preparation.review)
+            != preparation.source_binding
+        ):
+            return "source_payload_changed"
+    elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
+        return "association_or_history_changed"
+    return None
 
 
 def _slice_comparison_versions(versions, byte_offset, remaining, unread, *, _owner):

@@ -1,5 +1,6 @@
 """Application review of a rendered collection within an existing vault."""
 
+import hashlib
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +23,7 @@ from .update_lifecycle import (
     _prepared,
     _scope_review,
     _scoped,
+    _stale_slots,
     _subjects,
 )
 
@@ -178,7 +180,7 @@ def prepare_collection_import(operations, vault, source, *, record_path, update=
         )
         history = _scoped(operations, history, facts)
         review = prepare_review(facts, preflight=history.admission.preflight)
-        binding = operations.observe_reviewed_source(source, review)
+        binding = _bind_payload(operations, source, review, incoming)
         return _prepared(
             history,
             source,
@@ -193,7 +195,45 @@ def prepare_collection_import(operations, vault, source, *, record_path, update=
         return _refused("collection_review_unavailable", kind=kind)
 
 
-def _observe_review(operations, preparation):
+def _bind_payload(operations, source, plan, incoming):
+    binding = operations.observe_reviewed_source(source, plan)
+    expected = tuple(
+        (path, len(raw), hashlib.sha256(raw).hexdigest())
+        for path, raw in sorted(incoming.items())
+    )
+    if tuple((row.path, row.size, row.sha256) for row in binding.files) != expected:
+        raise CollectionImportConflict("source_payload_changed")
+    return binding
+
+
+def _review_source_inputs(operations, prepared, replacement):
+    source = Path(
+        prepared.payload_directory if replacement is None else replacement
+    ).absolute()
+    root = Path(prepared.vault).absolute()
+    if source == root or root in source.parents or source in root.parents:
+        raise CollectionImportConflict("distinct_source_required")
+    if (
+        replacement is None
+        and operations.observe_reviewed_source(source, prepared.review)
+        != prepared.source_binding
+    ):
+        raise CollectionImportConflict("source_payload_changed")
+    incoming = _read_rendered(source, prepared.collection_record_path)
+    observed = SourceIdentity.model_validate(
+        record(incoming, prepared.collection_record_path)["source_identity"]
+    )
+    if (observed.module_id, observed.source_id) != (
+        prepared.observed_source.module_id,
+        prepared.observed_source.source_id,
+    ):
+        raise CollectionImportConflict("association_mismatch")
+    if replacement is None and observed != prepared.observed_source:
+        raise CollectionImportConflict("source_observation_mismatch")
+    return source, incoming, observed
+
+
+def _observe_review(operations, preparation, *, replacement=None):
     prepared = UpdatePreparation.model_validate(preparation)
     plan = prepared.review
     history = operations.inspect_history(prepared.vault)
@@ -205,16 +245,9 @@ def _observe_review(operations, preparation):
         return history, _refused("current_history_changed", history=history)
     if validate_review(plan).status != "accepted":
         return history, _refused("invalid_review", history=history)
-    source = Path(prepared.payload_directory).absolute()
-    actual = operations.observe_reviewed_source(source, plan)
-    if actual != prepared.source_binding:
-        return history, _refused("source_payload_changed", history=history)
-    incoming = _read_rendered(source, prepared.collection_record_path)
-    observed = SourceIdentity.model_validate(
-        record(incoming, prepared.collection_record_path)["source_identity"]
+    source, incoming, observed = _review_source_inputs(
+        operations, prepared, replacement
     )
-    if observed != prepared.observed_source:
-        return history, _refused("source_observation_mismatch", history=history)
     baseline = (
         None
         if prepared.kind == "collection_import"
@@ -232,6 +265,7 @@ def _observe_review(operations, preparation):
     changed = (
         facts != plan.producer_facts or history.admission.preflight != plan.preflight
     )
+    stale = 0
     if changed:
         transition = refresh_review(
             plan,
@@ -240,18 +274,51 @@ def _observe_review(operations, preparation):
         )
         if transition.status != "accepted":
             return history, _refused(transition.code, history=history)
+        stale = _stale_slots(plan, transition.plan)
         plan = transition.plan
-        actual = operations.observe_reviewed_source(source, plan)
+    actual = _bind_payload(operations, source, plan, incoming)
+    if replacement is None and actual != prepared.source_binding.model_copy(
+        update={"generation": plan.proposal.generation}
+    ):
+        return history, _refused("source_payload_changed", history=history)
     return history, _prepared(
         history,
         source,
         actual,
         plan,
-        prepared.observed_source,
+        observed,
         collection_record_path=prepared.collection_record_path,
         status="stale_review" if changed else "prepared_review",
         code="current_facts_changed" if changed else "current",
+        stale=stale,
     )
+
+
+def refresh_collection_review(operations, preparation, *, source=None):
+    try:
+        _, result = _observe_review(operations, preparation, replacement=source)
+        if result.status == "stale_review" and result.ready and not result.stale:
+            return result.model_copy(update={"status": "prepared_review"})
+        return result.model_copy(update={"kind": preparation.kind})
+    except CollectionImportConflict as error:
+        return _refused(str(error), kind=preparation.kind)
+    except OSError, ValueError, TypeError, AttributeError, KeyError, StopIteration:
+        return _refused("current_inputs_unavailable", kind=preparation.kind)
+
+
+def inspect_collection_authority(operations, preparation):
+    try:
+        history, current = _observe_review(operations, preparation)
+    except CollectionImportConflict as error:
+        return str(error)
+    if current.code != "current":
+        return current.code
+    if (
+        not history.admission.inventory_complete
+        or history.admission.inventory != preparation.current_inventory
+    ):
+        return "current_inventory_changed"
+    return None
 
 
 def _capture_review(operations, history, current, *, progress):

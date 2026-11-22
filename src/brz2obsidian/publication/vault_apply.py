@@ -294,6 +294,14 @@ def _terminal_result_in_history(git, checkpoint, intent, receipt):
             return False
         current = manifest.previous
         generation -= 1
+        if manifest.abandoned_collection_preparation is not None:
+            prepared = CheckpointManifest.model_validate_json(
+                git.call("show", f"{current}:manifest.json")
+            )
+            if prepared.collection_preparation_owner is None:
+                return False
+            current = prepared.previous
+            generation -= 1
         if current is None or generation <= receipt.generation:
             return False
     result = CheckpointManifest.model_validate_json(
@@ -1701,7 +1709,7 @@ def _validate_operation_preparations(
 
 def _validate_operation_result(graph, owned):
     candidate, terminal = graph.intent, graph.receipt
-    _prepared, _saved = owned[candidate.prepared_commit]
+    prepared, _saved = owned[candidate.prepared_commit]
     if terminal is not None:
         result, _ = owned[terminal.result_commit]
         if not (
@@ -1713,6 +1721,13 @@ def _validate_operation_result(graph, owned):
             and result.preimage == candidate.before
             and result.proposed == candidate.proposed
             and result.vault == candidate.proposed
+            and (
+                result.collection_record_path is None
+                and prepared.collection_record_path is None
+                or result.collection_record_path == prepared.collection_record_path
+                and result.identity == prepared.identity
+                and result.source == prepared.source
+            )
         ):
             raise OSError("Terminal receipt lacks its exact result checkpoint")
 
@@ -2019,36 +2034,52 @@ def _unfinished_operation_status(
     )
 
 
+def _inspect_without_operations(root, git, *, trusted_association, owners, start):
+    from .unpublished_collection import unpublished_outcome
+
+    linked_intents = []
+    checkpoint = _read(
+        root,
+        git,
+        linked_intents=linked_intents,
+        trusted_association=trusted_association,
+        ownership_demands_out=[],
+        _owners=owners,
+    )
+    if linked_intents:
+        return _outcome(
+            "unknown",
+            "operation_record_missing",
+            start=start,
+            publication="unknown",
+            history="unknown",
+            changed=None,
+            recovery=True,
+        )
+    return unpublished_outcome(git, checkpoint, start) or _outcome(
+        "refused", "operation_absent", start=start
+    )
+
+
 def _inspect_update_status(
     vault, *, observations, trusted_association=None, _owners=None
 ):
     """Discover the latest owned intent independently of the current locator."""
     start = time.monotonic()
     root = Path(vault).absolute()
+    from .unpublished_collection import unpublished_outcome
+
     try:
         git = _Git(root)
         operations = _operation_refs(git)
         if not operations:
-            linked_intents = []
-            _read(
+            return _inspect_without_operations(
                 root,
                 git,
-                linked_intents=linked_intents,
                 trusted_association=trusted_association,
-                ownership_demands_out=[],
-                _owners=_owners,
+                owners=_owners,
+                start=start,
             )
-            if linked_intents:
-                return _outcome(
-                    "unknown",
-                    "operation_record_missing",
-                    start=start,
-                    publication="unknown",
-                    history="unknown",
-                    changed=None,
-                    recovery=True,
-                )
-            return _outcome("refused", "operation_absent", start=start)
         records, graphs = _ordered_operation_graphs(git, operations)
         targets, origins = _operation_checkpoints(git, graphs, records)
         linked_intents = []
@@ -2076,6 +2107,9 @@ def _inspect_update_status(
         )
         _, intent, receipt, stopped, commit = records[-1]
         active_graph = next(graph for graph in graphs if graph.commit == commit)
+        orphan = unpublished_outcome(git, checkpoint, start, previous=active_graph)
+        if orphan is not None:
+            return orphan
         observation = _OperationObservation(
             active_graph,
             checkpoint,
@@ -3441,9 +3475,14 @@ def _execute_staged_apply(name, publication, paths, observed, state):
         publication.owners,
     )
     if tip is None:
+        manifest = observed.checkpoint.manifest
+        scoped = publication.undo_target is None and (
+            manifest.collection_record_path is not None
+            or manifest.collection_baseline_commit is not None
+        )
         return publication.outcome(
             "cancelled",
-            "cancelled_before_intent",
+            "unpublished_collection_prepared" if scoped else "cancelled_before_intent",
             start=publication.start,
             operation_id=publication.operation_id,
             generation=state.operation_generation,
@@ -3452,7 +3491,7 @@ def _execute_staged_apply(name, publication, paths, observed, state):
             history="prepared",
             planned=len(changed),
             checkpoint=state.prepared_commit,
-            recovery=False,
+            recovery=scoped,
             message="Cancellation retained preparation without publishing files.",
         )
     manifest = tip.checkpoint.manifest

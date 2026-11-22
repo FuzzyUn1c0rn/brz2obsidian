@@ -160,7 +160,9 @@ def _lease_free(root, operation_id):
 
 def _current_record_format(facts, path, content):
     """Use the bound before-image role, otherwise this operation's output role."""
-    if path == "migration-record.json" and facts.link_context is not None:
+    from brz2obsidian.obsidian_dialect import is_migration_record_path
+
+    if is_migration_record_path(path) and facts.link_context is not None:
         documents = tuple(
             row
             for row in facts.link_context.current_documents
@@ -169,7 +171,7 @@ def _current_record_format(facts, path, content):
         subjects = tuple(
             row
             for row in facts.subjects
-            if row.item_id == "support:migration-record.json"
+            if row.item_id == "support:" + path
             and row.facet == "content"
             and row.current.path == path
         )
@@ -630,11 +632,20 @@ def _refresh_recovery_link_context(
         and target.canonical_path in intent.affected_paths
         and target.canonical_path in selected_files
     }
+    from brz2obsidian.obsidian_dialect import is_migration_record_path
+
+    owned_records = {
+        subject.path
+        for subject in original_facts.subjects
+        if subject.path in operation_owned_notes
+        and subject.item_id == "support:" + subject.path
+        and is_migration_record_path(subject.path)
+    }
     for path in sorted(
         row.path
         for row in admission.inventory
         if (selected_removal or row.path in operation_owned_notes)
-        and row.path.casefold().endswith(".md")
+        and (row.path.casefold().endswith(".md") or row.path in owned_records)
         and row.path not in known_document_paths
     ):
         observed_document = current[path]
@@ -2267,6 +2278,23 @@ def prepare_recovery(vault, *, direction=None, _owner=None):
         except OSError, ValueError, TypeError, UnicodeError:
             return _recovery_preparation("unavailable", "recovery_review_unavailable")
     observed, authority = _inspect_update_observation(root)
+    if observed.code == "unpublished_collection_prepared" and direction in (
+        None,
+        "restore",
+    ):
+        return VaultRecoveryPreparation(
+            schema_id="brz2obsidian.vault-recovery-preparation",
+            schema_version=1,
+            status="cleanup",
+            code=observed.code,
+            operation_id=observed.operation_id,
+            kind="apply",
+            generation=observed.generation,
+            intent_commit=None,
+            unpublished_checkpoint=observed.checkpoint_commit,
+            available_directions=(),
+            review=None,
+        )
     return _prepare_recovery_observed(root, observed, authority, direction=direction)
 
 
@@ -3482,6 +3510,10 @@ def _execute_recovery(
     except OSError, ValueError, TypeError, UnicodeError:
         return _outcome("refused", "invalid_recovery_preparation", start=start)
     root = Path(vault).absolute()
+    if saved.unpublished_checkpoint is not None:
+        from .unpublished_collection import restore_unpublished_collection
+
+        return restore_unpublished_collection(root, saved, cancel=cancel)
     if saved.status == "cleanup":
         return _cleanup_verified_terminal(root, saved, start=start, _owners=_owners)
     if saved.status != "offered" or saved.direction is None or saved.review is None:

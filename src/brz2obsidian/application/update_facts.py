@@ -675,7 +675,12 @@ def assemble_facts(
     facts = facts.model_copy(
         update={
             "link_context": _link_context(
-                facts, old_record, new_record, current_inventory, _owner=_owner
+                facts,
+                old_record,
+                new_record,
+                current_inventory,
+                scoped_collection=record_path != "migration-record.json",
+                _owner=_owner,
             )
         }
     )
@@ -1131,7 +1136,13 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
 
 
 def _link_context(
-    facts, baseline_record, incoming_record, physical_inventory, *, _owner=None
+    facts,
+    baseline_record,
+    incoming_record,
+    physical_inventory,
+    *,
+    scoped_collection=False,
+    _owner=None,
 ):
     subjects = {
         (_identity(facts.incoming_identity, s.item_id), s.facet): s
@@ -1210,7 +1221,13 @@ def _link_context(
             intended = None
         future = (
             actual
-            if subject is None or subject.source_still_reserved
+            if subject is None
+            or subject.source_still_reserved
+            or scoped_collection
+            and subject.output_role == "note"
+            and subject.baseline.content is not None
+            and row.identity_state == "valid"
+            and row.current.existence == "present"
             else actual.model_copy(
                 update={
                     "canonical_path": subject.path,

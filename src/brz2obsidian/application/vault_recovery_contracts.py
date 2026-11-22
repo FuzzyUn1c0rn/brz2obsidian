@@ -16,6 +16,9 @@ class VaultRecoveryPreparation(ReconciliationContract):
     kind: Literal["apply", "undo"] | None
     generation: int | None = Field(ge=1)
     intent_commit: str | None = Field(pattern=r"^[0-9a-f]{40}$")
+    unpublished_checkpoint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
     available_directions: tuple[Literal["finish", "restore"], ...]
     direction: Literal["finish", "restore"] | None = None
     review: ReviewPlan | None
@@ -29,12 +32,16 @@ class VaultRecoveryPreparation(ReconciliationContract):
                 self.operation_id,
                 self.kind,
                 self.generation,
-                self.intent_commit,
+                self.intent_commit or self.unpublished_checkpoint,
             )
         ):
             raise ValueError(
                 "Recovery offer requires exact retained operation identity"
             )
+        if self.unpublished_checkpoint is not None and (
+            self.status != "cleanup" or self.intent_commit is not None
+        ):
+            raise ValueError("An unpublished preparation allows only metadata cleanup")
         if (self.status == "offered") != bool(
             self.available_directions
         ) or self.available_directions not in (

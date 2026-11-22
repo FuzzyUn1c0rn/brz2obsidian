@@ -20,6 +20,7 @@ from brz2obsidian.core.link_meanings import resolve_link_meaning
 from brz2obsidian.obsidian_dialect import (
     canonical_player_ranges,
     file_roles,
+    is_migration_record_path,
     migration_record_data,
 )
 
@@ -348,9 +349,8 @@ def interpret_links(
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
-    if (
-        output_format in QUALIFIED_OUTPUT_FORMATS
-        and source_path == "migration-record.json"
+    if output_format in QUALIFIED_OUTPUT_FORMATS and is_migration_record_path(
+        source_path
     ):
         if record_format is None:
             record_format = output_format

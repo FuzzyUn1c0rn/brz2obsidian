@@ -145,7 +145,7 @@ def _target_history_known(graph, observation):
 
 def _discarded_memos(roles):
     allowed = set()
-    expected = proposal = None
+    expected = proposal = abandoned = None
     for row in roles:
         if row.discarded_review is not None:
             expected = row.discarded_review
@@ -153,8 +153,13 @@ def _discarded_memos(roles):
         elif row.commit == expected:
             expected = None
             proposal = row.saved_proposal_id
+            abandoned = row.abandoned_collection_preparation
             allowed.add(row.commit)
         elif proposal is not None and row.saved_proposal_id == proposal:
+            abandoned = row.abandoned_collection_preparation
+            allowed.add(row.commit)
+        elif proposal is not None and row.commit == abandoned:
+            abandoned = None
             allowed.add(row.commit)
         else:
             proposal = None

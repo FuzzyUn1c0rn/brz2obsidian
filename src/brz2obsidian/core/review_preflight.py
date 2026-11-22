@@ -20,7 +20,7 @@ def preflight_blockers(facts, preflight, proposal):
             result.append("state:incomplete_facts")
     elif preflight.state_status == "absent":
         if (
-            facts.format_operation.kind != "onboarding"
+            facts.format_operation.kind not in ("onboarding", "collection_import")
             or preflight.state_schema is not None
             or preflight.state_version is not None
         ):
