@@ -61,7 +61,11 @@ class Workflow:
     def convert(self, source_ref: object, destination: object) -> RunResult:
         return self._run("convert", source_ref, destination)
 
-    def _run(self, operation, source_ref, destination):
+    def convert_collection(self, source_ref, destination, *, placement):
+        """Render an import using vault-aware planning arguments for this source."""
+        return self._run("convert", source_ref, destination, placement=placement)
+
+    def _run(self, operation, source_ref, destination, *, placement=None):
         identity = counts = inspection = receipt = snapshot = None
         issues = ()
         failures = []
@@ -123,8 +127,12 @@ class Workflow:
                                 ),
                             )
                         )
+                    phase = "planning"
+                    planning = {} if placement is None else placement(analysis.snapshot)
                     migration_plan = plan(
-                        analysis, output_format=int(metadata.renderer_version)
+                        analysis,
+                        output_format=int(metadata.renderer_version),
+                        **planning,
                     )
                     counts, issues = migration_plan.counts, migration_plan.issues
                     if operation == "inspect":

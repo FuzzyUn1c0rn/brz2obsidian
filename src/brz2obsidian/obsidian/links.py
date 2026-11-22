@@ -235,8 +235,27 @@ def _relationship_entries(text):
     return entries
 
 
+def _authored_path_mode(target, mode):
+    """Recognize explicit relative paths and native shortest unique paths."""
+    if mode != "vault":
+        return target, mode
+    if target.startswith("/"):
+        return target[1:], "exact"
+    if target.startswith(("./", "../")):
+        return target, "relative"
+    return target, "shortened"
+
+
 def _link_destination(
-    match, wiki, raw_destination, alias, display, source_path, path_mode, output_format
+    match,
+    wiki,
+    raw_destination,
+    alias,
+    display,
+    source_path,
+    path_mode,
+    output_format,
+    authored_links,
 ):
     try:
         angled = (
@@ -290,6 +309,8 @@ def _link_destination(
         external = external or (
             not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
         )
+        if authored_links and not external:
+            target_text, path_mode = _authored_path_mode(target_text, path_mode)
         query = (
             None
             if external
@@ -327,6 +348,7 @@ def interpret_links(
     inventory,
     output_format=7,
     record_format=None,
+    authored_links=False,
 ):
     occurrences, issues = [], []
 
@@ -372,6 +394,7 @@ def interpret_links(
         target_facts,
         inventory,
         output_format,
+        authored_links,
     )
     residue = list(text)
     for start, end in masked + consumed:
@@ -402,6 +425,7 @@ def _scan_links(
     target_facts,
     inventory,
     output_format,
+    authored_links,
 ):
     occurrences, consumed = [], []
     relationship_entries = _relationship_entries(text) if output_format == 9 else {}
@@ -428,6 +452,7 @@ def _scan_links(
             source_path,
             path_mode,
             output_format,
+            authored_links,
         )
         if query is None and not external:
             issues.append("path_unsupported")

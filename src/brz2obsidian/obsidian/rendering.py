@@ -92,7 +92,29 @@ def _check_plan(plan, run_metadata):
             )
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
-    checked_plan = build_plan(checked_analysis, output_format=plan.output_format)
+    checked_plan = build_plan(
+        checked_analysis,
+        output_format=plan.output_format,
+        import_location=plan.import_location,
+        reserved_names=plan.reserved_import_names,
+        import_link_connections=plan.import_link_connections,
+    )
+    if plan.import_location is not None and (
+        plan.import_support_paths != checked_plan.import_support_paths
+        or plan.support_artifacts != checked_plan.support_artifacts
+        or plan.reserved_support_paths != checked_plan.reserved_support_paths
+        or plan.asset_targets != checked_plan.asset_targets
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="import_placement_changed",
+                    phase="rendering",
+                    message="Scoped artifacts no longer match their validated placement.",
+                    guidance="Plan the collection again before rendering.",
+                ),
+            )
+        )
     _check_document_evidence(plan, checked_analysis, checked_plan)
     _check_gap_obligations(plan, checked_analysis, checked_plan)
 
@@ -308,6 +330,20 @@ def _append_note_sections(text, resources, relationships, navigation):
     return text
 
 
+def _support_path(plan, path):
+    return plan.import_support_paths.get(path, path)
+
+
+def _scope_support_links(plan, text):
+    if plan.import_location is None:
+        return text
+    return re.sub(
+        r"\[\[([^\]\n#|]+)(?=[#|\]])",
+        lambda match: "[[" + _support_path(plan, match[1]),
+        text,
+    )
+
+
 def _add_notes(
     plan,
     add,
@@ -346,14 +382,17 @@ def _add_notes(
         neighbors = neighbors_by_item.get(item.key, {})
         presentation = presentations.get(item.key)
         if presentation:
-            text += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+            text += _scope_support_links(
+                plan,
+                "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n",
+            )
         icon = icon_snapshots[item.key].effective_icon_asset_id
         text += _note_appearance(
             item, icon, neighbors, plan, asset_paths, item_targets, items
         )
         text += _note_icon_warnings(item, icon, plan.source_gaps, items, item_targets)
         if item.role == "definition":
-            text += CATEGORY_VIEWS + "\n"
+            text += _scope_support_links(plan, CATEGORY_VIEWS) + "\n"
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):
@@ -379,12 +418,31 @@ def _add_notes(
             if item.role == "definition"
             else ("Parents", "Children", "Related"),
         )
-        navigation = HOME_CATEGORIES if item.key == plan.analysis.entry_key else ""
+        navigation = (
+            _scope_support_links(plan, HOME_CATEGORIES)
+            if item.key == plan.analysis.entry_key
+            else ""
+        )
         text = _append_note_sections(text, resources, relationships, navigation)
         add(target.relative_path, text.encode("utf-8"))
 
 
+def _add_scoped_support(plan, add):
+    for path, content in support_files() + template_support_files(plan):
+        content = _scope_support_links(plan, content)
+        if path.endswith(".base"):
+            for folder in ("Categories", "Templates", "Attachments"):
+                content = content.replace(
+                    f'inFolder("{folder}")',
+                    f'inFolder("{plan.import_location}/{folder}")',
+                )
+        add(_support_path(plan, path), content.encode("utf-8"))
+    return {}, {}
+
+
 def _add_configuration(plan, run_metadata, add):
+    if plan.import_location is not None:
+        return _add_scoped_support(plan, add)
     home = next(
         target.relative_path
         for target in plan.item_targets
@@ -501,6 +559,20 @@ def _source_warning_report(plan):
     return report
 
 
+def _scoped_migration_report(plan, report):
+    if plan.import_location is not None:
+        report = report.replace(
+            "Open the root Home note", "Open this import’s Home note"
+        )
+        report = report.replace("Bundled Bases and link updates are configured.", "")
+        report = report.replace(
+            "Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.",
+            "The import leaves the vault’s existing settings in place.",
+        )
+        return _scope_support_links(plan, report)
+    return report
+
+
 def _add_migration_report(plan, add):
     snapshot = plan.analysis.snapshot
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
@@ -544,6 +616,7 @@ def _add_migration_report(plan, add):
         report += "\nPDF files are preserved and can be opened in Obsidian. Vault Search does not search PDF body text; this conversion does not extract or index it, or reproduce TheBrain's PDF body search.\n"
     if any(a.video_presentation for a in snapshot.assets):
         report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
+    report = _scoped_migration_report(plan, report)
     report += gap_report(plan)
     report += _image_normalization_report(plan)
     report += _source_warning_report(plan)
@@ -551,17 +624,21 @@ def _add_migration_report(plan, add):
         report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
     listing = uncreated_listing(plan)
     if listing:
-        add("Uncreated targets.md", listing.encode("utf-8"))
-        report += (
+        add(_support_path(plan, "Uncreated targets.md"), listing.encode("utf-8"))
+        report += _scope_support_links(
+            plan,
             "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts"
             + (" and Related pairs" if plan.output_format == 8 else "")
-            + ".\n"
+            + ".\n",
         )
     listing = tag_listing(plan)
     if listing:
         add(plan.tag_memberships_path, listing.encode("utf-8"))
-        report += "\n[[Tag memberships.md|Tag memberships]] lists assignments on uncreated targets and source tags without assignments.\n"
-    add("MIGRATION REPORT.md", report.encode())
+        report += _scope_support_links(
+            plan,
+            "\n[[Tag memberships.md|Tag memberships]] lists assignments on uncreated targets and source tags without assignments.\n",
+        )
+    add(_support_path(plan, "MIGRATION REPORT.md"), report.encode())
 
 
 def _migration_record(
@@ -670,9 +747,20 @@ def _migration_record(
         "counts": counts.model_dump(),
         "obsidian_configuration": configuration,
         "obsidian_core_plugins_configuration": core_plugins,
-        "obsidian_templates_configuration": TEMPLATE_CONFIGURATION,
-        "obsidian_property_types_configuration": {"types": PROPERTY_TYPES},
+        "obsidian_templates_configuration": TEMPLATE_CONFIGURATION
+        if plan.import_location is None
+        else {},
+        "obsidian_property_types_configuration": {"types": PROPERTY_TYPES}
+        if plan.import_location is None
+        else {},
     }
+    if plan.import_location is not None:
+        record["collection_location"] = plan.import_location
+        record["import_reserved_names"] = plan.reserved_import_names
+        record["import_link_connections"] = [
+            choice.model_dump() for choice in plan.import_link_connections
+        ]
+        record["import_support_paths"] = plan.import_support_paths
     # Embed retained JSON directly: decoding/dumping would round large or
     # high-precision numeric source values. Never reconstruct evidence from facts.
     original_values = ",\n".join(
@@ -752,7 +840,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         and assets[target.asset_id].availability == "present"
     )
     add(
-        "migration-record.json",
+        _support_path(plan, "migration-record.json"),
         _migration_record(
             plan,
             run_metadata,

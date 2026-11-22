@@ -8,12 +8,20 @@ from uuid import uuid4
 from brz2obsidian.application.checkpoint_payload_contracts import (
     CheckpointPayloadRequest,
 )
-from brz2obsidian.contracts import SourceIdentity
+from brz2obsidian.contracts import (
+    ImportLinkConnection,
+    MigrationRefused,
+    SourceIdentity,
+)
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
 from brz2obsidian.publication.vault_admission import _safe_relative, _walk
 from brz2obsidian.publication.vault_history import _Git, _read, collection_baselines
 from brz2obsidian.publication.vault_native import available_memory, observe_file
 
+from .collection_placement import (
+    collection_connection_choices,
+    observe_collection_placement,
+)
 from .update_contracts import UpdatePreparation, UpdateResult, update_application_status
 from .update_facts import CollectionImportConflict, output_identity, record
 from .update_lifecycle import (
@@ -132,52 +140,106 @@ def _collection_facts(
     )
 
 
-def prepare_collection_import(operations, vault, source, *, record_path, update=False):
+def _placement_refused(history, impact, *, current=False):
+    return _refused(
+        "import_link_meanings_changed" if current else "import_link_review_required",
+        history=history,
+        action="review_import_placement",
+    ).model_copy(update={"import_link_impact": impact})
+
+
+def _rendered_receipt_matches(payload, rendered):
+    return {
+        (row.relative_path, row.length, row.sha256) for row in rendered.manifest
+    } == {
+        (path, len(raw), hashlib.sha256(raw).hexdigest())
+        for path, raw in payload.items()
+    }
+
+
+def _collection_review_slot(history, observed, update):
+    checkpoint = history.checkpoint
+    if checkpoint is None or checkpoint.status != "valid":
+        return None
+    if not update and collection_baselines(checkpoint).get(
+        (observed.module_id, observed.source_id)
+    ):
+        return "collection_already_active"
+    if checkpoint.manifest.boundary == "local" and checkpoint.manifest.reviewed_source:
+        return "saved_review_pending"
+    return None
+
+
+def _history_refusal(history):
+    if history.admission.repository.kind == "none":
+        return _refused("git_initialization_required", action="review_initialization")
+    if history.admission.status != "supported" or history.status == "unavailable":
+        return _refused(
+            "recovery_first"
+            if history.admission.status == "recovery_first"
+            else "current_history_unavailable",
+            history=history,
+        )
+    return None
+
+
+def prepare_collection_import(
+    operations,
+    vault,
+    source,
+    *,
+    record_path,
+    update=False,
+    rendered=None,
+    connections=(),
+):
     root, source = Path(vault).absolute(), Path(source).absolute()
     kind = "source_update" if update else "collection_import"
     try:
         if source == root or root in source.parents or source in root.parents:
             return _refused("distinct_source_required")
         history = operations.inspect_history(root)
-        if history.admission.repository.kind == "none":
-            return _refused(
-                "git_initialization_required", action="review_initialization"
-            )
-        if history.admission.status != "supported" or history.status == "unavailable":
-            return _refused(
-                "recovery_first"
-                if history.admission.status == "recovery_first"
-                else "current_history_unavailable",
-                history=history,
-            )
+        unavailable = _history_refusal(history)
+        if unavailable is not None:
+            return unavailable
         if not update and "/" not in record_path:
             return _refused("collection_scope_required", history=history)
         incoming = _read_rendered(source, record_path)
+        if rendered is not None and not _rendered_receipt_matches(incoming, rendered):
+            return _refused("source_payload_changed", history=history, kind=kind)
         observed = SourceIdentity.model_validate(
             record(incoming, record_path)["source_identity"]
         )
-        checkpoint = history.checkpoint
-        if checkpoint is not None and checkpoint.status == "valid":
-            if not update and collection_baselines(checkpoint).get(
-                (observed.module_id, observed.source_id)
-            ):
-                return _refused("collection_already_active", history=history)
-            if (
-                checkpoint.manifest.boundary == "local"
-                and checkpoint.manifest.reviewed_source
-            ):
-                return _refused(
-                    "saved_review_pending",
-                    history=history,
-                    action="resume_update",
-                    kind=kind,
-                )
+        occupied = _collection_review_slot(history, observed, update)
+        if occupied is not None:
+            return _refused(
+                occupied,
+                history=history,
+                kind=kind,
+                action="resume_update"
+                if occupied == "saved_review_pending"
+                else "inspect_history",
+            )
         baseline = (
             _baseline(operations, history, observed, record_path) if update else None
         )
         facts = _collection_facts(
             history, baseline, incoming, record_path, uuid4().hex, 1
         )
+        choices = tuple(ImportLinkConnection.model_validate(row) for row in connections)
+        impact = (
+            None
+            if update
+            else observe_collection_placement(
+                operations,
+                history,
+                incoming,
+                record_path,
+                connections=choices,
+            )
+        )
+        if impact is not None and not impact.safe:
+            return _placement_refused(history, impact)
         history = _scoped(operations, history, facts)
         review = prepare_review(facts, preflight=history.admission.preflight)
         binding = _bind_payload(operations, source, review, incoming)
@@ -188,6 +250,11 @@ def prepare_collection_import(operations, vault, source, *, record_path, update=
             review,
             observed,
             collection_record_path=record_path,
+            import_link_connections=choices,
+        ).model_copy(update={"import_link_impact": impact})
+    except MigrationRefused as error:
+        return _refused(
+            error.issues[0].code, action="review_import_placement", kind=kind
         )
     except CollectionImportConflict as error:
         return _refused(str(error), action="resolve_import_conflict", kind=kind)
@@ -261,6 +328,19 @@ def _observe_review(operations, preparation, *, replacement=None):
         plan.proposal.proposal_id,
         plan.proposal.generation,
     )
+    impact = (
+        observe_collection_placement(
+            operations,
+            history,
+            incoming,
+            prepared.collection_record_path,
+            connections=prepared.import_link_connections,
+        )
+        if prepared.kind == "collection_import"
+        else None
+    )
+    if impact is not None and not impact.safe:
+        return history, _placement_refused(history, impact, current=True)
     history = _scope_review(operations, history, facts, plan)
     changed = (
         facts != plan.producer_facts or history.admission.preflight != plan.preflight
@@ -288,10 +368,11 @@ def _observe_review(operations, preparation, *, replacement=None):
         plan,
         observed,
         collection_record_path=prepared.collection_record_path,
+        import_link_connections=prepared.import_link_connections,
         status="stale_review" if changed else "prepared_review",
         code="current_facts_changed" if changed else "current",
         stale=stale,
-    )
+    ).model_copy(update={"import_link_impact": impact})
 
 
 def refresh_collection_review(operations, preparation, *, source=None):
@@ -463,14 +544,20 @@ def resume_collection_review(operations, history):
         actual = operations.observe_reviewed_source(directory, plan)
         if actual.files != binding.files:
             return _refused("saved_payload_mismatch", history=history, kind=kind)
+        path = manifest.collection_record_path or "migration-record.json"
+        choices = (
+            collection_connection_choices(record(incoming, path))
+            if kind == "collection_import"
+            else ()
+        )
         prepared = _prepared(
             history,
             directory,
             actual,
             plan,
             manifest.observed_source,
-            collection_record_path=manifest.collection_record_path
-            or "migration-record.json",
+            collection_record_path=path,
+            import_link_connections=choices,
         )
         _, current = _observe_review(operations, prepared.preparation)
         return (

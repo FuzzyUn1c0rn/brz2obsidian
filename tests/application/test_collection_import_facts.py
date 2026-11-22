@@ -1180,3 +1180,23 @@ def test_saved_unrelated_review_keeps_the_established_source_available():
     assert note.current.content.data == authored
     assert operations.save_update(next_a.preparation).code == "saved"
     assert not (vault / path_b).exists()
+
+
+def test_public_import_reports_retained_identity_before_target_occupancy():
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    path, record_path, incoming = _incoming_brain()
+    for relative, raw in incoming.items():
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    retained = vault / path
+    retained.parent.mkdir(parents=True)
+    authored = incoming[path] + b"Later authored words.\r\n"
+    retained.write_bytes(authored)
+
+    offered = Operations().prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    assert offered.code == "retained_source_identity_conflict"
+    assert retained.read_bytes() == authored

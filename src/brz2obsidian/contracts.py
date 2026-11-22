@@ -424,6 +424,14 @@ class SupportArtifact(Contract):
     ]
 
 
+class ImportLinkConnection(Contract):
+    document_path: str
+    occurrence_id: str
+    document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_path: str
+    target_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class MigrationPlan(Contract):
     analysis: Analysis
     source_identity: SourceIdentity
@@ -432,6 +440,10 @@ class MigrationPlan(Contract):
     output_format: Literal[8, 9] = 8
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
+    import_location: str | None = None
+    reserved_import_names: tuple[str, ...] = ()
+    import_link_connections: tuple[ImportLinkConnection, ...] = ()
+    import_support_paths: dict[str, str] = Field(default_factory=dict)
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()
     tag_memberships_path: str | None = None
@@ -2234,6 +2246,34 @@ class LinkMeaning(ReconciliationContract):
     display_text: str
     fragment: LinkFragment | None
     candidates: tuple[str, ...]
+
+
+class ImportLinkObservation(ReconciliationContract):
+    document_path: str
+    occurrence_id: str
+    query: LinkQuery | None
+    before: LinkMeaning
+    after: LinkMeaning
+    kind: Literal[
+        "preserved",
+        "preexisting_warning",
+        "intentional_absence",
+        "known_source_gap",
+        "changed_meaning",
+        "approved_connection",
+        "connection_required",
+    ]
+    connection: ImportLinkConnection | None = None
+
+
+class ImportLinkImpact(ReconciliationContract):
+    observations: tuple[ImportLinkObservation, ...] = ()
+    warnings: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+    @property
+    def safe(self):
+        return not self.blockers
 
 
 class LinkOccurrence(ReconciliationContract):

@@ -2,9 +2,19 @@
 
 from pathlib import PurePosixPath
 
-from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
+from brz2obsidian.contracts import (
+    Adaptation,
+    Analysis,
+    ImportLinkConnection,
+    MigrationPlan,
+)
 
 from .appearance import icon_snapshots, native_icon_limits
+from .import_placement import (
+    import_name_key,
+    scoped_support_paths,
+    validate_import_location,
+)
 from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
 from .source_gaps import source_gap_targets
@@ -12,13 +22,29 @@ from .support import SUPPORT_NAMESPACE, support_artifacts
 from .tags import assign_tags
 
 
-def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
+def plan(
+    analysis: Analysis,
+    *,
+    output_format: int = 8,
+    import_location: str | None = None,
+    reserved_names: tuple[str, ...] = (),
+    import_link_connections: tuple[ImportLinkConnection, ...] = (),
+) -> MigrationPlan:
+    if import_location is not None:
+        import_location = validate_import_location(import_location)
+    reserved = frozenset(import_name_key(name) for name in reserved_names)
     snapshot = analysis.snapshot
     targets = assign_item_targets(
-        analysis, resource_owners(snapshot), output_format=output_format
+        analysis,
+        resource_owners(snapshot),
+        output_format=output_format,
+        import_location=import_location,
+        reserved_names=reserved,
     )
     isolated, related_pairs = select_fallbacks(snapshot, targets)
-    asset_targets = assign_asset_targets(snapshot)
+    asset_targets = assign_asset_targets(
+        snapshot, import_location=import_location, reserved_names=reserved
+    )
     created = {t.item_key for t in targets if t.created}
     snapshots = icon_snapshots(snapshot, created)
     definitions = {i.key for i in snapshot.items if i.role == "definition"}
@@ -28,6 +54,22 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
         listing_path,
         tuple(t for t in targets if t.item_key in definitions),
     )
+    reserved_support = tuple(a for a in SUPPORT_NAMESPACE if a not in supporting)
+    scoped_paths = {}
+    if import_location is not None:
+        occupied = set(reserved)
+        occupied.update(import_name_key(row.relative_path) for row in targets)
+        occupied.update(
+            import_name_key(row.relative_path)
+            for row in asset_targets
+            if row.relative_path is not None
+        )
+        scoped_paths = scoped_support_paths(
+            import_location, supporting + reserved_support, occupied
+        )
+        supporting = _scoped_support(supporting, scoped_paths)
+        reserved_support = _scoped_support(reserved_support, scoped_paths)
+        listing_path = scoped_paths.get(listing_path)
     tokens = {t.tag_key: t.token for t in tag_targets}
     targets = tuple(
         t.model_copy(update={"vault_tag_token": tokens.get(t.item_key)})
@@ -58,7 +100,7 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
             ),
         }
     )
-    return MigrationPlan(
+    migration_plan = MigrationPlan(
         analysis=analysis,
         source_identity=snapshot.identity,
         profile_id=analysis.policy.profile_id,
@@ -66,6 +108,10 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
         output_format=output_format,
         item_targets=tuple(targets),
         asset_targets=asset_targets,
+        import_location=import_location,
+        reserved_import_names=tuple(sorted(reserved)),
+        import_link_connections=import_link_connections,
+        import_support_paths=scoped_paths,
         tag_targets=tag_targets,
         tag_memberships=tag_memberships,
         tag_memberships_path=listing_path,
@@ -75,9 +121,7 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
         icon_snapshots=snapshots,
         source_gaps=gaps,
         generated_presentations=presentations,
-        reserved_support_paths=tuple(
-            a.relative_path for a in SUPPORT_NAMESPACE if a not in supporting
-        ),
+        reserved_support_paths=tuple(a.relative_path for a in reserved_support),
         adaptations=tuple(
             Adaptation(
                 kind="image_presentation",
@@ -128,7 +172,11 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
             Adaptation(
                 kind="categories_overview",
                 affected=analysis.entry_key,
-                description="Preserved Home with an added Categories overview entry; overview uses the Categories folder and native categories tag role guard.",
+                description=(
+                    "Added the Categories overview entry to the scoped Home."
+                    if import_location is not None
+                    else "Preserved Home with an added Categories overview entry; overview uses the Categories folder and native categories tag role guard."
+                ),
             ),
             Adaptation(
                 kind="native_bases_configuration",
@@ -248,4 +296,24 @@ def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
         ),
         issues=analysis.issues + native_icon_limits(snapshot, created),
         counts=counts,
+    )
+    if import_location is None:
+        return migration_plan
+    return migration_plan.model_copy(
+        update={
+            "adaptations": tuple(
+                row
+                for row in migration_plan.adaptations
+                if row.kind
+                not in ("native_templates_configuration", "native_bases_configuration")
+            ),
+        }
+    )
+
+
+def _scoped_support(artifacts, paths):
+    return tuple(
+        artifact.model_copy(update={"relative_path": paths[artifact.relative_path]})
+        for artifact in artifacts
+        if artifact.relative_path in paths
     )

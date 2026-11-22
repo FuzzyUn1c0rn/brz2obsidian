@@ -2,6 +2,7 @@ import hashlib
 
 import pytest
 
+from brz2obsidian.application.update_facts import assemble_facts
 from brz2obsidian.contracts import (
     Asset,
     Document,
@@ -14,9 +15,10 @@ from brz2obsidian.contracts import (
     SourcePolicy,
     SourceSnapshot,
 )
-from brz2obsidian.core import analyze, plan
+from brz2obsidian.core import analyze, plan, prepare_review, select_review_effects
 from brz2obsidian.obsidian import render
 from tests.application.test_module_seams import METADATA
+from tests.reconciliation.test_resolution import preflight
 from tests.support.notes import note_body
 
 POLICY = SourcePolicy(
@@ -302,6 +304,71 @@ def test_decorative_assets_labels_and_empty_placeholders_alone_leave_targets_unc
     )
     migration = plan(analyze(facts, POLICY))
     assert {t.item_key for t in migration.item_targets if t.created} == {"entry"}
+
+
+def test_scoped_render_uses_one_planned_namespace_for_outputs_and_links():
+    import json
+
+    evidence = b"exact attachment"
+    attachment = Asset(
+        asset_id="proof",
+        owner="a",
+        naming_seed="00112233",
+        original_name="Proof.pdf",
+        role="file",
+        availability="present",
+        actual_length=len(evidence),
+        actual_sha256=hashlib.sha256(evidence).hexdigest(),
+    )
+    facts = snapshot(
+        (item("a", "Twin", "abcdef012345", resource_ids=("proof",)),),
+        (edge("home-a", "entry", "a"),),
+        assets=(attachment,),
+    )
+    analysis = analyze(facts, POLICY)
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+    scoped = plan(
+        analysis,
+        output_format=9,
+        import_location="Imports/Second Brain",
+        reserved_names=("twin", "Categories"),
+    )
+    artifacts = render(scoped, meta)
+    location = "Imports/Second Brain"
+    home = location + "/Home — Entry.md"
+    note = location + "/Notes/Twin — abcdef01.md"
+    asset = location + "/Attachments/abcdef01/Proof.pdf"
+    overview = location + "/Categories — Import.md"
+    assert {row.relative_path for row in artifacts.copies} == {asset}
+    assert all(path.startswith(location + "/") for path in artifacts.manifest)
+    assert not any("/.obsidian/" in path for path in artifacts.manifest)
+    assert f"[[{note}|Twin]]" in generated(artifacts, home)
+    assert f"[[{overview}|Browse categories]]" in generated(artifacts, home)
+    assert f"[[{asset}|Proof.pdf]]" in generated(artifacts, note)
+    record = json.loads(generated(artifacts, location + "/migration-record.json"))
+    assert record["source_identity"]["source_id"] == "collection"
+    assert record["collection_location"] == location
+    assert {row["relative_path"] for row in record["item_targets"]} == {home, note}
+    assert record["asset_targets"][0]["relative_path"] == asset
+    incoming = {row.relative_path: row.content for row in artifacts.generated_files}
+    incoming[asset] = evidence
+    observed = assemble_facts(
+        None,
+        incoming,
+        {"Manual.md": b"[[Twin]]\n", "Old/Twin.md": b"# Existing twin\n"},
+        proposal_id="scoped-render",
+        generation=1,
+        record_path=location + "/migration-record.json",
+    )
+    reviewed = prepare_review(observed, preflight=preflight())
+    assert reviewed.ready, (reviewed.blockers, reviewed.requirements)
+    assert {effect.path for effect in select_review_effects(reviewed).files} == set(
+        artifacts.manifest
+    )
+    usual = render(plan(analysis, output_format=9), meta)
+    assert {".obsidian/app.json", "Categories.md", "Notes/Twin.md"} <= set(
+        usual.manifest
+    )
 
 
 def test_rendering_preserves_authored_body_and_uses_exact_qualified_dotted_targets():

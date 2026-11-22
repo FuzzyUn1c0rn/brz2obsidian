@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 
 from brz2obsidian.contracts import AssetTarget, Issue, MigrationRefused
 
+from .import_placement import import_name_key, qualify_import_path
 from .naming import readable_filename
 
 
@@ -70,7 +71,7 @@ def _resource_filename(asset, base, suffix_length):
     return stem.rstrip(" .") + marker + ending
 
 
-def assign_asset_targets(snapshot):
+def assign_asset_targets(snapshot, *, import_location=None, reserved_names=frozenset()):
     owners = _tokens({item.key: item.naming_seed for item in snapshot.items})
     locals_ = [a for a in snapshot.assets if a.availability == "present"]
     bases = {a.asset_id: _name(a.original_name) for a in locals_}
@@ -90,13 +91,20 @@ def assign_asset_targets(snapshot):
 
     while True:
         paths = {
-            a.asset_id: f"Attachments/{owners[a.owner]}/{_resource_filename(a, bases[a.asset_id], suffix_lengths[a.asset_id])}"
+            a.asset_id: qualify_import_path(
+                import_location,
+                f"Attachments/{owners[a.owner]}/{_resource_filename(a, bases[a.asset_id], suffix_lengths[a.asset_id])}",
+            )
             for a in locals_
         }
         groups = {}
         for key, path in paths.items():
             groups.setdefault(path.casefold(), []).append(key)
-        collisions = [keys for keys in groups.values() if len(keys) > 1]
+        collisions = [
+            keys
+            for path, keys in groups.items()
+            if len(keys) > 1 or import_name_key(path) in reserved_names
+        ]
         if not collisions:
             break
         for keys in collisions:

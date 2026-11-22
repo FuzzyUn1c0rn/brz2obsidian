@@ -12,6 +12,8 @@ from brz2obsidian.application.source_payload_contracts import ReviewedSourceBind
 from brz2obsidian.application.vault_contracts import VaultFile
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from brz2obsidian.contracts import (
+    ImportLinkConnection,
+    ImportLinkImpact,
     LoadedReview,
     ReconciliationContract,
     ReviewedOperationKind,
@@ -52,6 +54,10 @@ class UpdatePreparation(ReconciliationContract):
     original_source_ref: str | None = None
     collection_record_path: str | None = Field(
         default=None, exclude_if=lambda value: value is None
+    )
+    import_link_connections: tuple[ImportLinkConnection, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
     )
     source_binding: ReviewedSourceBinding
     observed_source: SourceIdentity
@@ -138,6 +144,9 @@ class UpdateResult(ReconciliationContract):
     summary: str = ""
     next_actions: tuple[str, ...] = ()
     findings: tuple[str, ...] = ()
+    import_link_impact: ImportLinkImpact | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     diagnostic_omission: bool = True
     recovery_gaps: tuple[str, ...] = ()
     history_retained: bool = False

@@ -79,11 +79,42 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
-    def prepare_collection_import(self, vault, source, *, record_path):
+    def prepare_collection_import(self, vault, source, *, record_path, connections=()):
         """Review an exact rendered collection with vault-relative output paths."""
         from .collection_import import prepare_collection_import
 
-        return prepare_collection_import(self, vault, source, record_path=record_path)
+        return prepare_collection_import(
+            self,
+            vault,
+            source,
+            record_path=record_path,
+            connections=connections,
+        )
+
+    def prepare_collection_import_from_source(
+        self,
+        vault,
+        source,
+        *,
+        staging,
+        import_location=None,
+        connections=(),
+        preview_connections=False,
+    ):
+        """Render a source into fresh staging and review placement in a Git vault."""
+        from .collection_placement import prepare_collection_import_from_source
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_collection_import_from_source(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            import_location=import_location,
+            connections=connections,
+            preview_connections=preview_connections,
+        )
 
     def prepare_collection_update(self, vault, source, *, record_path):
         """Review a rendered update against the selected collection's baseline."""
