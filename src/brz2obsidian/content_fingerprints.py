@@ -153,7 +153,7 @@ def resolved_contract_fields(model):
             if isinstance(value, type)
             and (
                 issubclass(value, contracts.ReconciliationContract)
-                or value is contracts.SourceIdentity
+                or value in (contracts.SourceIdentity, contracts.ImportLinkConnection)
             )
             and value.__module__ == contracts.__name__
         )

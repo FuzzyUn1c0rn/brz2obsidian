@@ -309,7 +309,7 @@ def test_decorative_assets_labels_and_empty_placeholders_alone_leave_targets_unc
 def test_scoped_render_uses_one_planned_namespace_for_outputs_and_links():
     import json
 
-    evidence = b"exact attachment"
+    evidence = b"\x00\xff\x80 exact attachment"
     attachment = Asset(
         asset_id="proof",
         owner="a",
@@ -364,6 +364,15 @@ def test_scoped_render_uses_one_planned_namespace_for_outputs_and_links():
     assert reviewed.ready, (reviewed.blockers, reviewed.requirements)
     assert {effect.path for effect in select_review_effects(reviewed).files} == set(
         artifacts.manifest
+    )
+    from brz2obsidian.core.reversals import review_owned_targets
+
+    change = next(row for row in reviewed.proposal.changes if row.path == asset)
+    (binary,) = review_owned_targets(reviewed, change.change_id, None)
+    assert (binary.canonical_path, binary.kind, binary.identity) == (
+        asset,
+        "resource",
+        None,
     )
     usual = render(plan(analysis, output_format=9), meta)
     assert {".obsidian/app.json", "Categories.md", "Notes/Twin.md"} <= set(

@@ -3311,6 +3311,7 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
         )
     if (
         state.phase == "intent"
+        and not state.scoped
         and state.intent_commit is None
         and state.prepared_commit is not None
         and state.published == 0
@@ -3335,6 +3336,27 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
                 "Git could not record the operation ref. The review was retained. "
                 "Check write access and path length for Git, then resume the review."
             ),
+        )
+    if (
+        state.scoped
+        and state.prepared_commit is not None
+        and state.intent_commit is None
+        and state.phase == "prepared"
+    ):
+        return outcome(
+            "incomplete",
+            "scoped_preparation_retained",
+            start=start,
+            operation_id=operation_id,
+            generation=state.operation_generation,
+            phase="prepared",
+            publication="not_published",
+            history="prepared",
+            planned=state.planned,
+            published=0,
+            changed=False,
+            checkpoint=state.prepared_commit,
+            recovery=True,
         )
     authority_unknown = state.phase == "intent" and state.intent_commit is None
     cleanup_pending = not state.acquired and _lock_path(root).exists()

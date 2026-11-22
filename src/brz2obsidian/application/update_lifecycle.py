@@ -277,6 +277,12 @@ def _required_observation_paths(facts, inventory, managed, *, _owner):
     graph = _observation_link_graph(context)
     related = {key for key in targets if key.startswith("subject:")}
     by_path = {row.canonical_path: row.target_id for row in targets.values()}
+    if facts.format_operation.kind == "collection_import":
+        related.update(
+            by_path[document.source_path]
+            for document in context.current_documents
+            if document.source_path in by_path
+        )
     # Identity suggestions remain suggestions, but their exact candidate files
     # are consumed evidence and cannot be discarded as unrelated context.
     if any(

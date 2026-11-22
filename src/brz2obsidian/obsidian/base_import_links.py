@@ -28,6 +28,7 @@ class BaseDocument:
     occurrences: tuple[BaseOccurrence, ...]
     uncertain: tuple[str, ...]
     unreadable: bool
+    uncertain_properties: tuple[str, ...] = ()
 
     @property
     def status(self):
@@ -35,9 +36,26 @@ class BaseDocument:
 
 
 def _literal(tokens):
-    if len(tokens) != 1 or (matched := _STRING.fullmatch(tokens[0])) is None:
+    if not tokens or any(token != "+" for token in tokens[1::2]):
         return None
-    return matched[1] if matched[1] is not None else matched[2]
+    values = []
+    for token in tokens[::2]:
+        matched = _STRING.fullmatch(token)
+        if matched is None:
+            return None
+        values.append(matched[1] if matched[1] is not None else matched[2])
+    return "".join(values) if len(tokens) % 2 else None
+
+
+def _note_properties(tokens):
+    for i in range(len(tokens) - 2):
+        owner, access, name = tokens[i : i + 3]
+        if owner == "note" and access == "." and name.isidentifier():
+            yield name
+        elif owner == "note" and access == "[" and tokens[i + 3 : i + 4] == ("]",):
+            literal = _literal((name,))
+            if literal:
+                yield literal
 
 
 def _first_argument(tokens, start):
@@ -131,7 +149,7 @@ def inspect_base_document(path, raw, catalog):
         value = yaml.safe_load(raw.decode("utf-8"))
     except UnicodeDecodeError, yaml.YAMLError, RecursionError:
         return BaseDocument(path, content, (), (), True)
-    occurrences, uncertain = [], []
+    occurrences, uncertain, properties = [], [], set()
     for expression in _expressions(value):
         for args, display in _calls(expression):
             target = _literal(args)
@@ -151,6 +169,38 @@ def inspect_base_document(path, raw, catalog):
                     if token.startswith(("'", '"'))
                 )
                 uncertain.append("")
+                properties.update(_note_properties(args))
             else:
                 occurrences.append(row)
-    return BaseDocument(path, content, tuple(occurrences), tuple(uncertain), False)
+    return BaseDocument(
+        path,
+        content,
+        tuple(occurrences),
+        tuple(uncertain),
+        False,
+        tuple(sorted(properties)),
+    )
+
+
+def base_note_property_values(files, names):
+    """Collect observed string values for directly named note properties only."""
+    if not names:
+        return {}
+    values = {name: set() for name in names}
+    for path, raw in files.items():
+        if not path.casefold().endswith(".md") or not isinstance(raw, bytes):
+            continue
+        lines = raw.splitlines()
+        if not lines or lines[0] != b"---":
+            continue
+        try:
+            end = lines.index(b"---", 1)
+            frontmatter = yaml.safe_load(b"\n".join(lines[1:end]).decode("utf-8"))
+        except UnicodeDecodeError, ValueError, yaml.YAMLError, RecursionError:
+            continue
+        if isinstance(frontmatter, dict):
+            for name in names:
+                value = frontmatter.get(name)
+                if isinstance(value, str):
+                    values[name].add(value)
+    return values

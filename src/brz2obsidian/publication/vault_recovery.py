@@ -32,6 +32,7 @@ from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_sha, content_size, same_content
 from brz2obsidian.contracts import (
     QUALIFIED_OUTPUT_FORMATS,
+    AttachmentFacts,
     ContentValue,
     ContentVersion,
     CurrentContent,
@@ -918,6 +919,36 @@ def _require_bound_recovery_links(facts, context, unobserved):
             )
 
 
+def _observed_collection_resources(facts, original):
+    if original.facts.format_operation.kind != "collection_import":
+        return facts
+    from brz2obsidian.core.review_links import collection_asset_effect
+
+    owners = {}
+    for change in original.proposal.changes:
+        effect = collection_asset_effect(original.producer_facts, change)
+        if effect is not None:
+            owners[change.item_id, change.facet] = effect[0].target_id
+    return facts.model_copy(
+        update={
+            "subjects": tuple(
+                subject.model_copy(
+                    update={
+                        "attachment": AttachmentFacts(
+                            current_target_id=owners[subject.item_id, subject.facet],
+                            allocation_candidates=(),
+                            affected_documents=(),
+                        ),
+                    }
+                )
+                if (subject.item_id, subject.facet) in owners
+                else subject
+                for subject in facts.subjects
+            ),
+        }
+    )
+
+
 def _review_observation(
     root,
     observed,
@@ -955,6 +986,20 @@ def _review_observation(
     admission, query_plan, query_subjects = _admit_recovery_review(
         root, original, selected, retained, _owner=_owner
     )
+    if (
+        direction == "finish"
+        and original.facts.format_operation.kind == "collection_import"
+    ):
+        from .collection_placement import require_collection_finish_links
+
+        prepared = retained.owned[intent.prepared_commit][0]
+        require_collection_finish_links(
+            admission,
+            retained.checkpoint,
+            prepared.collection_record_path,
+            original,
+            selected_files,
+        )
     inventory = {row.path: row for row in admission.inventory}
     paths = (
         {subject.current.path for subject in original.facts.subjects}
@@ -1021,8 +1066,11 @@ def _review_observation(
             "link_context": context,
         }
     )
+    resource_facts = _observed_collection_resources(facts, original)
     if context is not None and unobserved:
-        _require_bound_recovery_links(facts, context, unobserved)
+        _require_bound_recovery_links(resource_facts, context, unobserved)
+    if direction == "restore":
+        facts = resource_facts
     # The checkpoint locator advances during the already-authorized operation.
     # Only that validated movement is neutralized: changed policy, consents,
     # current bytes, or a broken graph still reach the ordinary refresh rules.
@@ -2446,6 +2494,8 @@ def _prepare_terminal_cleanup(root, observed, direction):
 def _build_recovery_review(
     root, observed, authority, directions, *, direction, previous, _owner
 ):
+    from .collection_placement import ImportRecoveryLinkChange
+
     origin_commit, origin = authority.graph.authorities[-1]
     loaded = authority.owned[origin.prepared_commit][1]
     if loaded is None:
@@ -2485,6 +2535,10 @@ def _build_recovery_review(
             )
             if direction == "restore"
             else None
+        )
+    except ImportRecoveryLinkChange as error:
+        return _recovery_preparation(
+            "refused", str(error), observed=observed, directions=directions
         )
     except OSError, ValueError, TypeError, UnicodeError:
         return _recovery_preparation("unavailable", "recovery_review_unavailable")
@@ -3133,6 +3187,34 @@ def _observe_recovery_lineage(publication, before_lease):
     )
 
 
+def _held_collection_finish_refusal(publication, lineage, selected_files, removals):
+    if publication.saved.direction != "finish":
+        return None
+    from .collection_placement import (
+        ImportRecoveryLinkChange,
+        require_collection_finish_links,
+    )
+
+    prepared, loaded = publication.authority.owned[lineage.origin.prepared_commit]
+    try:
+        require_collection_finish_links(
+            lineage.history.admission,
+            lineage.history.checkpoint,
+            prepared.collection_record_path,
+            loaded.saved.plan,
+            selected_files,
+            removals,
+            produced={row.path: row.content for row in loaded.historical_effects.files},
+        )
+    except ImportRecoveryLinkChange as error:
+        return _refuse_known_recovery(
+            publication.observed,
+            str(error),
+            start=publication.start,
+        )
+    return None
+
+
 def _plan_recovery_paths(publication, lineage, state):
     selected = publication.selected
     accepted_tracking = {
@@ -3198,6 +3280,11 @@ def _plan_recovery_paths(publication, lineage, state):
         return _refuse_known_recovery(
             publication.observed, "recovery_scope_changed", start=publication.start
         )
+    refusal = _held_collection_finish_refusal(
+        publication, lineage, selected_files, removals
+    )
+    if refusal is not None:
+        return refusal
     state.planned = len(changed)
     stage_need = (
         sum(row.size for path, row in before.items() if path not in removals)

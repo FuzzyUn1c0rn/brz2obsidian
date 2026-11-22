@@ -213,3 +213,63 @@ def test_authored_base_fixed_targets_reserve_and_review_only_the_changed_links()
     assert (
         "affected_link_uncertain" in inspect_import_links(relevant, incoming).blockers
     )
+
+
+def test_base_constant_concatenation_and_authored_properties_can_reach_the_import():
+    from brz2obsidian.obsidian.import_links import inspect_import_links
+
+    target = "Imports/B/Notes/Future.md"
+    incoming = {target: b"# Future\n"}
+    joined = {
+        "Index.base": b"""formulas:
+  open: 'link("Fut" + "ure")'
+"""
+    }
+    impact = inspect_import_links(joined, incoming)
+    assert impact.blockers == ("connection_required",)
+    assert impact.observations[0].after.path == target
+
+    property_link = {
+        "Index.base": b"formulas: {open: 'link(note.next)'}\n",
+        "Authored.md": f"---\nnext: {target}\n---\n".encode(),
+    }
+    assert inspect_import_links(property_link, incoming).blockers == (
+        "affected_link_uncertain",
+    )
+    unrelated = property_link | {
+        "Authored.md": b"---\nnext: Elsewhere/Other.md\n---\n",
+    }
+    impact = inspect_import_links(unrelated, incoming)
+    assert impact.safe
+    assert impact.warnings == ("Index.base",)
+
+
+def test_import_continuation_only_blocks_actual_new_link_effects():
+    from brz2obsidian.obsidian.import_links import inspect_import_links
+
+    old = "Imports/B/Notes/Published.md"
+    missing = "Imports/B/Notes/Future.md"
+    existing = {
+        old: b"# Already published\n",
+        "Authored.md": b"[[Published#Already published|Existing]]\n",
+    }
+    selected = {
+        old: b"# Already published\n\nRestored prose\n",
+        missing: b"# Future\n",
+    }
+    assert inspect_import_links(existing, selected, continuation=True).safe
+    generated = "Imports/B/Home.md"
+    existing[generated] = b"[[Imports/B/Notes/Future.md]]\n"
+    assert inspect_import_links(
+        existing, selected, continuation=True, unchanged_generated=(generated,)
+    ).safe
+    while_stopped = existing | {
+        "Authored.base": f"formulas: {{choose: 'link(\"{missing}\")'}}\n".encode(),
+    }
+    impact = inspect_import_links(
+        while_stopped, selected, continuation=True, unchanged_generated=(generated,)
+    )
+    assert impact.blockers == ("connection_required",)
+    assert (
+        next(row for row in impact.observations if row.connection).after.path == missing
+    )

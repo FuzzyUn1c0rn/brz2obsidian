@@ -7,7 +7,7 @@ from brz2obsidian.content_values import content_key, same_content
 from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
 
 from .identity import _paths_collide, _target_safe
-from .review_links import known_result_document
+from .review_links import collection_asset_effect, known_result_document
 
 
 class ReviewOwnedOutputs(NamedTuple):
@@ -494,6 +494,11 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         if decision_id is None
         else None
     )
+    asset = (
+        collection_asset_effect(plan.producer_facts, change)
+        if decision_id is None
+        else None
+    )
     automatic = (
         decision_id is None
         and plan.producer_facts.format_operation.automatic_merge
@@ -502,7 +507,7 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         and subject.attachment is None
         and not any(a.change_id == change_id for a in plan.approvals)
         and not any(a.change_id == change_id for a in plan.actions)
-        and known is not None
+        and (known is not None or asset is not None)
     )
     if approval is None and not automatic:
         raise ValueError("Origin decision does not own this change")
@@ -524,7 +529,7 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
     candidate = None if automatic else action.candidate
     if candidate is not None:
         targets = candidate.link_targets + targets
-    if automatic:
+    if automatic and known is not None:
         targets = known[1] + targets
     effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
@@ -533,11 +538,15 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         or paths != {change.target_path}
         or any(
             f.path == change.target_path
-            and not same_content(f.content, known[0].content)
+            and not same_content(
+                f.content, asset[1].content if asset is not None else known[0].content
+            )
             for f in effects.files
         )
     ):
         raise ValueError("Automatic origin lacks its exact selected output")
+    if automatic and asset is not None:
+        return (asset[0],)
     if (
         change.rename_review is not None
         and change.rename_review.status == "accepted"

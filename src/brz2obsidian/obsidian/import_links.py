@@ -19,7 +19,11 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.import_placement import import_name_key
 from brz2obsidian.core.link_meanings import resolve_occurrence
 
-from .base_import_links import BaseDocument, inspect_base_document
+from .base_import_links import (
+    BaseDocument,
+    base_note_property_values,
+    inspect_base_document,
+)
 from .links import interpret_link_target, interpret_links
 
 
@@ -129,11 +133,15 @@ def _connection(document, occurrence, after, incoming):
     )
 
 
-def _observation(document, occurrence, after_catalog, incoming, approved):
+def _observation(document, occurrence, after_catalog, incoming, approved, continuation):
     before = occurrence.meaning
     after = resolve_occurrence(occurrence, *after_catalog, "complete")
     choice = None
-    if before == after:
+    if before == after or (
+        continuation
+        and before.status == "resolved"
+        and before.model_copy(update={"target_version": after.target_version}) == after
+    ):
         kind = _existing_kind(before.status)
     else:
         choice = _connection(document, occurrence, after, incoming)
@@ -155,10 +163,15 @@ def _observation(document, occurrence, after_catalog, incoming, approved):
     )
 
 
-def _base_may_reach_import(document, incoming):
+def _base_may_reach_import(document, incoming, property_values):
     if document.unreadable:
         return True
-    for token in document.uncertain:
+    property_targets = (
+        value
+        for name in document.uncertain_properties
+        for value in property_values[name]
+    )
+    for token in (*document.uncertain, *property_targets):
         if not token:
             continue
         value = _key(token.removeprefix("[[").removesuffix("]]").lstrip("/"))
@@ -181,9 +194,9 @@ def _base_may_reach_import(document, incoming):
     return False
 
 
-def _may_reach_import(document, incoming):
+def _may_reach_import(document, incoming, property_values):
     if isinstance(document, BaseDocument):
-        return _base_may_reach_import(document, incoming)
+        return _base_may_reach_import(document, incoming, property_values)
     incoming_names = {import_name_key(path) for path in incoming}
     raw = bytearray(document.content.data)
     for row in document.occurrences:
@@ -239,17 +252,32 @@ def _directory_spellings(paths):
 
 
 def inspect_import_links(
-    existing, incoming, *, reserved_paths=(), gap_paths=(), connections=()
+    existing,
+    incoming,
+    *,
+    reserved_paths=(),
+    gap_paths=(),
+    connections=(),
+    continuation=False,
+    unchanged_generated=(),
 ):
     """Produce before/after evidence for unmodified authored links."""
-    if _path_conflicts(existing, incoming):
+    addition = {path: value for path, value in incoming.items() if path not in existing}
+    if _path_conflicts(existing, addition if continuation else incoming):
         return ImportLinkImpact(blockers=("import_target_occupied",))
     before = _catalog(existing, reserved_paths, gap_paths)
     after = _catalog(existing | incoming, reserved_paths, gap_paths)
-    documents = _authored_documents(existing, before)
+    documents = _authored_documents(
+        {
+            path: data
+            for path, data in existing.items()
+            if path not in unchanged_generated
+        },
+        before,
+    )
     approved = frozenset(connections)
     observations = tuple(
-        _observation(document, occurrence, after, incoming, approved)
+        _observation(document, occurrence, after, incoming, approved, continuation)
         for document in documents
         for occurrence in document.occurrences
     )
@@ -261,9 +289,18 @@ def inspect_import_links(
             blockers.add(row.kind)
         elif row.kind == "preexisting_warning":
             warnings.add(row.document_path)
+    property_values = base_note_property_values(
+        existing,
+        {
+            name
+            for document in documents
+            if isinstance(document, BaseDocument)
+            for name in document.uncertain_properties
+        },
+    )
     for document in documents:
         if document.status == "unsupported":
-            if _may_reach_import(document, incoming):
+            if _may_reach_import(document, incoming, property_values):
                 blockers.add("affected_link_uncertain")
             else:
                 warnings.add(document.source_path)

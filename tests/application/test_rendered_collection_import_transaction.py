@@ -249,3 +249,18 @@ def test_rendered_collection_import_keeps_authored_links_and_revalidates_connect
     assert notes["Future"] in (vault / notes["Independent entry"]).read_text(
         encoding="utf-8"
     )
+
+
+def test_established_default_import_binds_unrelated_authored_asset(tmp_path):
+    source, _ = _incoming_archive(tmp_path / "independent.brz")
+    vault = _vault(established=True)
+    _write(vault, "Journal/Author.md", DRAFT_LINKS)
+    _write(vault, "Old/Twin.md", b"# Old heading\n\nExisting body ^old-block\n")
+    _write(vault, "Old/Existing.png", images()[1])
+    result = Operations().prepare_collection_import_from_source(
+        vault, source, staging=tmp_path / "default"
+    )
+    assert result.ready, result.findings
+    observed = _observation(result, "Current qualified asset")
+    assert observed.before == observed.after
+    assert observed.after.path == "Old/Existing.png"

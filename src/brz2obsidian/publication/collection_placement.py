@@ -12,6 +12,7 @@ from brz2obsidian.contracts import (
     ContentIdentity,
     ImportLinkConnection,
     ImportLinkImpact,
+    InlineExactContent,
     MigrationRefused,
 )
 from brz2obsidian.core.import_placement import validate_import_location
@@ -226,3 +227,78 @@ def collection_write_refusal(
         if not set(context.import_unrelated_documents) <= observed:
             return "import_link_meanings_changed"
     return None
+
+
+class ImportRecoveryLinkChange(ValueError):
+    """The journal's remaining import effects need a new link review."""
+
+
+def require_collection_finish_links(
+    admission,
+    checkpoint,
+    record_path,
+    original,
+    selected,
+    removals=(),
+    *,
+    produced=None,
+):
+    if original.facts.format_operation.kind != "collection_import":
+        return
+    digests = {row.path: row.sha256 for row in admission.inventory}
+    remaining = {
+        path: content
+        for path, content in selected.items()
+        if digests.get(path) != content_sha(content)
+    }
+    if not remaining and not removals:
+        return
+    if record_path is None or removals:
+        raise ImportRecoveryLinkChange("recovery_import_scope_changed")
+    scope = record_path.rsplit("/", 1)[0] + "/"
+    if any(
+        not _safe_relative(path) or not path.startswith(scope) for path in remaining
+    ):
+        raise ImportRecoveryLinkChange("recovery_import_scope_changed")
+    root = Path(admission.vault)
+    directories = {}
+    if any(
+        location_conflict(root, parent, directories=directories)
+        for parent in _rendered_parents(remaining)
+    ):
+        raise ImportRecoveryLinkChange("recovery_import_target_occupied")
+    if any(
+        path.casefold().endswith((".md", ".base"))
+        and not isinstance(content, InlineExactContent)
+        for path, content in remaining.items()
+    ):
+        raise ImportRecoveryLinkChange("recovery_import_link_evidence_unavailable")
+    proposed = {
+        path: content.data
+        if path.casefold().endswith((".md", ".base"))
+        else content.identity
+        for path, content in remaining.items()
+    }
+    existing = existing_files(admission)
+    unchanged_generated = {
+        path
+        for path, content in (selected if produced is None else produced).items()
+        if digests.get(path) == content_sha(content) and path.startswith(scope)
+    }
+    reserved, gaps = uncreated_destinations(admission, checkpoint)
+    choices = tuple(
+        row
+        for row in reviewed_connections(original)
+        if row.target_path in proposed and row.target_path not in existing
+    )
+    impact = inspect_import_links(
+        existing,
+        proposed,
+        reserved_paths=reserved,
+        gap_paths=gaps,
+        connections=choices,
+        continuation=True,
+        unchanged_generated=unchanged_generated,
+    )
+    if not impact.safe:
+        raise ImportRecoveryLinkChange("recovery_import_link_changes")
