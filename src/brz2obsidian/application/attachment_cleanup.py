@@ -72,6 +72,41 @@ def cleanup_facts(
     )
 
 
+def _cleanup_admission_refusal(history):
+    if history.admission.status == "recovery_first":
+        return UpdateResult(
+            kind="attachment_cleanup",
+            status="recovery_required",
+            code="recovery_first",
+            next_actions=("review_recovery",),
+            history_retained=history.status == "intact",
+            recovery_gaps=history.admission.recovery_gaps,
+        )
+    if not history.admission.inventory_complete:
+        return refused(
+            "reference_inventory_incomplete", history, action="review_tracking"
+        )
+    if any(
+        row.excluded and row.path.lower().endswith(".md")
+        for row in history.admission.inventory
+    ):
+        return refused(
+            "excluded_dependency_requires_tracking",
+            history,
+            action="review_tracking",
+        )
+
+
+def _stage_cleanup_source(owner, retained, history):
+    directory = owner._directory / "incoming"
+    directory.mkdir()
+    for row in history.checkpoint.manifest.source:
+        path = directory / row.path
+        owner._write_content(retained[row.path], path)
+        path.chmod(0o755 if row.mode == "100755" else 0o644)
+    return directory
+
+
 def prepare_attachment_cleanup(operations, vault, *, _owner=None):
     """Obtain current native admission before reading retained or authored bytes."""
     try:
@@ -81,28 +116,9 @@ def prepare_attachment_cleanup(operations, vault, *, _owner=None):
             else nullcontext(_owner.observed)
         ) as observed:
             history = observed.history
-            if history.admission.status == "recovery_first":
-                return UpdateResult(
-                    kind="attachment_cleanup",
-                    status="recovery_required",
-                    code="recovery_first",
-                    next_actions=("review_recovery",),
-                    history_retained=history.status == "intact",
-                    recovery_gaps=history.admission.recovery_gaps,
-                )
-            if not history.admission.inventory_complete:
-                return refused(
-                    "reference_inventory_incomplete", history, action="review_tracking"
-                )
-            if any(
-                row.excluded and row.path.lower().endswith(".md")
-                for row in history.admission.inventory
-            ):
-                return refused(
-                    "excluded_dependency_requires_tracking",
-                    history,
-                    action="review_tracking",
-                )
+            refusal = _cleanup_admission_refusal(history)
+            if refusal is not None:
+                return refusal
             history, stopped = _history(operations, vault, observed)
             if stopped is not None:
                 return stopped.model_copy(update={"kind": "attachment_cleanup"})
@@ -135,12 +151,7 @@ def prepare_attachment_cleanup(operations, vault, *, _owner=None):
                     directory = _materialize(retained)
                 else:
                     history, review = _owner._plan(history, facts)
-                    directory = _owner._directory / "incoming"
-                    directory.mkdir()
-                    for row in history.checkpoint.manifest.source:
-                        path = directory / row.path
-                        _owner._write_content(retained[row.path], path)
-                        path.chmod(0o755 if row.mode == "100755" else 0o644)
+                    directory = _stage_cleanup_source(_owner, retained, history)
                 binding = operations.observe_reviewed_source(directory, review)
                 return _prepared(
                     history,

@@ -406,11 +406,7 @@ def with_subject(error, kind, name):
     )
 
 
-def contextual_issue(issue, snapshot):
-    """Use the first admitted affected label from qualified snapshot metadata."""
-    if issue.subject is not None or snapshot is None:
-        return issue
-    affected = set(issue.affected)
+def _affected_subject_candidates(affected, snapshot):
     items = {item.key: item for item in snapshot.items}
     candidates, original_assets = [], set()
     for document in snapshot.documents:
@@ -433,6 +429,15 @@ def contextual_issue(issue, snapshot):
     candidates.extend(
         ("item", item.title) for item in snapshot.items if item.key in affected
     )
+    return candidates
+
+
+def contextual_issue(issue, snapshot):
+    """Use the first admitted affected label from qualified snapshot metadata."""
+    if issue.subject is not None or snapshot is None:
+        return issue
+    affected = set(issue.affected)
+    candidates = _affected_subject_candidates(affected, snapshot)
     for kind, name in candidates:
         subject = diagnostic_subject(kind, name)
         if subject is not None:

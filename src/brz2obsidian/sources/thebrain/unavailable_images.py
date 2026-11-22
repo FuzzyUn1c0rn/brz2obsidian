@@ -41,17 +41,7 @@ def _observation(value, basis):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def adapt_unavailable_images(
-    document,
-    assets,
-    *,
-    basis,
-    members=(),
-    provenance=None,
-    preparation=None,
-    declared_absence=None,
-):
-    """Adapt strictly valid references; keep each occurrence's staged proof."""
+def _missing_images(document, assets, basis, members, declared_absence):
     missing = []
     absence_facts = {}
     declared_absence = declared_absence or {}
@@ -116,9 +106,10 @@ def adapt_unavailable_images(
             else {"basis": basis}
         )
         missing.append((reference, location, _notice(reference, location)))
-    if not missing:
-        return document, ()
+    return missing, absence_facts
 
+
+def _image_provenance(document, provenance, preparation):
     original = document.text
     for edit in reversed(document.text_adaptations):
         original = (
@@ -145,6 +136,10 @@ def adapt_unavailable_images(
             "invalid_reference",
             "Image provenance has a different literal interpretation",
         )
+    return original, literal, literal_edits, provenance
+
+
+def _image_occurrences(literal, literal_edits, provenance, missing):
     source_refs = {
         (reference.start, reference.end): reference
         for reference in trace_note_references(literal, allow_qualified=True)
@@ -174,7 +169,10 @@ def adapt_unavailable_images(
         end = source_position(raw_ref.end, literal_edits)
         occurrences.append((reference, start, end, location, notice, raw_ref))
 
-    base = document.text_adaptations
+    return occurrences
+
+
+def _overlapping_edit_groups(base, occurrences):
     groups = []
     for occurrence in occurrences:
         left, right = occurrence[1:3]
@@ -193,6 +191,11 @@ def adapt_unavailable_images(
                     groups.remove(group)
                     changed = True
         groups.append((left, right))
+    return groups
+
+
+def _compose_image_edits(original, text, base, occurrences):
+    groups = _overlapping_edit_groups(base, occurrences)
     result = [
         edit
         for edit in base
@@ -206,7 +209,7 @@ def adapt_unavailable_images(
         tright = right + sum(
             len(edit.after) - len(edit.before) for edit in base if edit.end <= right
         )
-        after = document.text[tleft:tright]
+        after = text[tleft:tright]
         group_occurrences = [
             occurrence
             for occurrence in occurrences
@@ -243,6 +246,10 @@ def adapt_unavailable_images(
             )
         )
         group_proofs[left] = proof
+    return result, group_proofs
+
+
+def _apply_image_edits(original, result):
     final, delta, edits = original, 0, []
     for edit in sorted(result, key=lambda value: value.start):
         edits.append(
@@ -257,13 +264,10 @@ def adapt_unavailable_images(
     for edit in reversed(edits):
         final = final[: edit.start] + edit.after + final[edit.end :]
 
-    def final_position(position):
-        return position + sum(
-            len(occurrence[4]) - (occurrence[0].end - occurrence[0].start)
-            for occurrence in occurrences
-            if occurrence[0].end <= position
-        )
+    return final, edits
 
+
+def _generated_code_ranges(base, occurrences, final_position):
     code_ranges = []
     for edit in base:
         if edit.kind == "markdown_insert":
@@ -281,6 +285,21 @@ def adapt_unavailable_images(
                         "Active missing image overlaps generated literal code",
                     )
                 code_ranges.append((final_position(begin), final_position(finish)))
+    return code_ranges
+
+
+def _image_findings(
+    document,
+    original,
+    literal_edits,
+    occurrences,
+    edits,
+    final,
+    final_position,
+    absence_facts,
+    group_proofs,
+    basis,
+):
     findings = []
     for reference, start, end, location, notice, raw_ref in occurrences:
         index = next(
@@ -343,6 +362,55 @@ def adapt_unavailable_images(
                 observed_json=_observation(observation, basis),
             )
         )
+    return tuple(findings)
+
+
+def adapt_unavailable_images(
+    document,
+    assets,
+    *,
+    basis,
+    members=(),
+    provenance=None,
+    preparation=None,
+    declared_absence=None,
+):
+    """Adapt strictly valid references; keep each occurrence's staged proof."""
+    missing, absence_facts = _missing_images(
+        document, assets, basis, members, declared_absence
+    )
+    if not missing:
+        return document, ()
+    original, literal, literal_edits, provenance = _image_provenance(
+        document, provenance, preparation
+    )
+    occurrences = _image_occurrences(literal, literal_edits, provenance, missing)
+    base = document.text_adaptations
+    result, group_proofs = _compose_image_edits(
+        original, document.text, base, occurrences
+    )
+    final, edits = _apply_image_edits(original, result)
+
+    def final_position(position):
+        return position + sum(
+            len(occurrence[4]) - (occurrence[0].end - occurrence[0].start)
+            for occurrence in occurrences
+            if occurrence[0].end <= position
+        )
+
+    code_ranges = _generated_code_ranges(base, occurrences, final_position)
+    findings = _image_findings(
+        document,
+        original,
+        literal_edits,
+        occurrences,
+        edits,
+        final,
+        final_position,
+        absence_facts,
+        group_proofs,
+        basis,
+    )
     return document.model_copy(
         update={
             "text": final,
@@ -355,4 +423,4 @@ def adapt_unavailable_images(
                 generated_code_ranges=code_ranges,
             ),
         }
-    ), tuple(findings)
+    ), findings

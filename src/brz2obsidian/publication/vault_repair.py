@@ -146,8 +146,7 @@ def validate_history_copy(vault, copy):
         return _validate_history_copy(vault, copy, _owners=owners)
 
 
-def _validate_history_copy(vault, copy, *, _owners):
-    root, supplied = Path(vault).absolute(), Path(copy).absolute()
+def _inspect_repair_target_layout(root):
     if (root / ".git").exists():
         try:
             supported, layout_code = _supported_layout(root)
@@ -183,6 +182,9 @@ def _validate_history_copy(vault, copy, *, _owners):
                     else "Resolve the existing Git operation or lock before repair."
                 ),
             )
+
+
+def _read_repair_target(root, *, _owners):
     missing = []
     damaged = []
     linked_intents = []
@@ -230,23 +232,33 @@ def _validate_history_copy(vault, copy, *, _owners):
                 else "No validated target-owned history anchors this copy."
             ),
         )
+    return target_git, target, missing, damaged, linked_intents
+
+
+def _repair_operation_refs(git, prefix):
+    return tuple(
+        line
+        for line in git.call(
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            prefix,
+        )
+        .decode("ascii")
+        .splitlines()
+        if line.startswith(prefix)
+    )
+
+
+def _validate_repair_operation_refs(
+    root, target_git, target, linked_intents, *, _owners
+):
     association = target.locator.association
     operation_prefix = (
         "refs/brz2obsidian/imports/" + association.association_id + "/operations/"
     )
     operation_refs = ()
     try:
-        operation_refs = tuple(
-            line
-            for line in target_git.call(
-                "for-each-ref",
-                "--format=%(refname) %(objectname)",
-                operation_prefix,
-            )
-            .decode("ascii")
-            .splitlines()
-            if line.startswith(operation_prefix)
-        )
+        operation_refs = _repair_operation_refs(target_git, operation_prefix)
         if operation_refs and target.status == "valid":
             operation = _inspect_update_status(root, observations=[], _owners=_owners)
             if (
@@ -289,6 +301,13 @@ def _validate_history_copy(vault, copy, *, _owners):
             target=target,
             message="Target operation authority is unavailable.",
         )
+    return operation_prefix, operation_refs
+
+
+def _read_history_repair_copy(
+    root, supplied, target, operation_prefix, operation_refs, *, _owners
+):
+    association = target.locator.association
     try:
         if association.vault_anchor != verify_directory(root) or (
             association.git_anchor != verify_directory(root / ".git")
@@ -316,17 +335,7 @@ def _validate_history_copy(vault, copy, *, _owners):
                 or operation.recovery_required
             ):
                 raise OSError("Supplied copy has incomplete operation authority")
-            copied_refs = tuple(
-                line
-                for line in supplied_git.call(
-                    "for-each-ref",
-                    "--format=%(refname) %(objectname)",
-                    operation_prefix,
-                )
-                .decode("ascii")
-                .splitlines()
-                if line.startswith(operation_prefix)
-            )
+            copied_refs = _repair_operation_refs(supplied_git, operation_prefix)
             if copied_refs != operation_refs or (
                 operation_refs and operation.code == "operation_absent"
             ):
@@ -351,6 +360,30 @@ def _validate_history_copy(vault, copy, *, _owners):
             target=target,
             message="Supplied copy has no complete owned graph.",
         )
+    return copied
+
+
+def _validate_history_copy(vault, copy, *, _owners):
+    root, supplied = Path(vault).absolute(), Path(copy).absolute()
+    refusal = _inspect_repair_target_layout(root)
+    if refusal is not None:
+        return refusal
+    target_read = _read_repair_target(root, _owners=_owners)
+    if isinstance(target_read, HistoryCopyValidation):
+        return target_read
+    target_git, target, missing, damaged, linked_intents = target_read
+    target_operations = _validate_repair_operation_refs(
+        root, target_git, target, linked_intents, _owners=_owners
+    )
+    if isinstance(target_operations, HistoryCopyValidation):
+        return target_operations
+    operation_prefix, operation_refs = target_operations
+    copy_read = _read_history_repair_copy(
+        root, supplied, target, operation_prefix, operation_refs, _owners=_owners
+    )
+    if isinstance(copy_read, HistoryCopyValidation):
+        return copy_read
+    copied = copy_read
     if copied.locator.generation < target.locator.generation:
         return _validation(
             "refused",
@@ -465,6 +498,275 @@ def _discard_temporary(path, parent):
     shutil.rmtree(actual)
 
 
+def _repair_has_space(root, object_directory, rows, damaged_objects):
+    total = sum(row[1] for row in rows)
+    try:
+        same_volume = os.stat(root.parent).st_dev == os.stat(object_directory).st_dev
+        damaged_bytes = sum(
+            (object_directory / oid[:2] / oid[2:]).lstat().st_size
+            for oid, _, _, damaged in rows
+            if damaged
+        )
+        margin = 64 * 1024 * 1024
+        enough = (
+            shutil.disk_usage(root.parent).free
+            >= (2 * total + 2 * damaged_bytes if same_volume else total) + margin
+            and shutil.disk_usage(object_directory).free >= total + margin
+            and (same_volume or not damaged_objects)
+        )
+    except OSError:
+        enough = False
+    return enough
+
+
+def _repair_completed(root, object_directory, original_metadata, target_commit):
+    for oid, metadata in original_metadata.items():
+        path = object_directory / oid[:2] / oid[2:]
+        if retained_metadata(path) != metadata:
+            return False
+    with ExitStack() as owners:
+        after = _read(root, _Git(root), _owners=owners)
+        if after.status != "valid" or after.locator.commit != target_commit:
+            return False
+        operation = _inspect_update_status(root, observations=[], _owners=owners)
+        return operation.code == "operation_absent" or (
+            operation.status in ("applied", "no_content_change", "restored", "undone")
+            and not operation.recovery_required
+        )
+
+
+def _stage_damaged_repair(
+    root, object_directory, temporary, destination, row, metadata
+):
+    oid, size, sha, spool = row
+    diagnostic = temporary / (oid + ".damaged")
+    with diagnostic.open("xb") as sink:
+        observe_file(object_directory, destination, sink=sink, prefix_limit=0)
+        sink.flush()
+        os.fsync(sink.fileno())
+    staged = temporary / (oid + ".staged")
+    copy_stage(destination, staged)
+    staged.chmod(metadata[0] | 0o200)
+    _stage_loose_blob(spool, staged, size)
+    staged.chmod(metadata[0])
+    retained_metadata(destination, copy_to=staged)
+    with staged.open("r+b") as sink:
+        os.fsync(sink.fileno())
+    staged_proof = _LooseBlobCheck(oid, size, sha)
+    observe_file(temporary, staged, sink=staged_proof, prefix_limit=0)
+    if not staged_proof.valid():
+        raise OSError("Staged Git blob does not match the copy")
+    if not _damaged_loose_payload(root, (oid, size, sha, None)):
+        raise OSError("Damaged loose object changed before replacement")
+    return staged
+
+
+def _confirmed_repair_objects(root, rows):
+    confirmed = 0
+    try:
+        target_git = _Git(root)
+        for row in rows:
+            try:
+                verify_blobs(
+                    [*target_git.prefix, "cat-file", "--batch"],
+                    env=target_git.env,
+                    objects=((row[0], row[1], row[2], None),),
+                )
+            except OSError, ValueError, TypeError, UnicodeError:
+                continue
+            confirmed += 1
+    except OSError, ValueError, TypeError, UnicodeError:
+        pass
+    return confirmed
+
+
+def _repair_result(
+    status,
+    code,
+    *,
+    retained=False,
+    storage="not_started",
+    written=0,
+    diagnostic=None,
+    message,
+):
+    return HistoryRepairResult(
+        schema_id="brz2obsidian.history-repair-result",
+        schema_version=1,
+        status=status,
+        code=code,
+        history_retained=retained,
+        object_storage=storage,
+        objects_written=written,
+        authored_files_changed=False,
+        diagnostic_path=diagnostic,
+        message=message,
+    )
+
+
+def _write_repair_objects(
+    root,
+    object_directory,
+    temporary,
+    target_git,
+    supplied_git,
+    rows,
+    original_metadata,
+    mark_attempted,
+    progress,
+):
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    for written, (oid, size, sha, damaged) in enumerate(rows, start=1):
+        spool = temporary / oid
+        with spool.open("w+b") as sink:
+            verify_blobs(
+                [*supplied_git.prefix, "cat-file", "--batch"],
+                env=supplied_git.env,
+                objects=((oid, size, sha, sink),),
+                timeout=120,
+            )
+            sink.flush()
+        if _spool_oid(temporary, spool, size, sha) != oid:
+            raise OSError("Copied history payload changed during repair")
+        if damaged:
+            destination = object_directory / oid[:2] / oid[2:]
+            original_metadata[oid] = retained_metadata(destination)
+            staged = _stage_damaged_repair(
+                root,
+                object_directory,
+                temporary,
+                destination,
+                (oid, size, sha, spool),
+                original_metadata[oid],
+            )
+            mark_attempted()
+            move_file(staged, destination, replace=True)
+            actual = oid
+        else:
+            mark_attempted()
+            actual = (
+                target_git.call(
+                    "hash-object",
+                    "-w",
+                    "--no-filters",
+                    "--stdin-paths",
+                    input=_quoted_paths((spool,)),
+                )
+                .decode()
+                .strip()
+            )
+        if actual != oid:
+            raise OSError("Retained target object differs from the copy")
+        verify_blobs(
+            [*target_git.prefix, "cat-file", "--batch"],
+            env=target_git.env,
+            objects=((oid, size, sha, None),),
+        )
+        if damaged and retained_metadata(destination) != original_metadata[oid]:
+            raise OSError("Replaced Git object metadata changed")
+        report_progress(
+            progress,
+            "publication",
+            completed_units=written,
+            total_units=len(rows),
+            unit="history_objects",
+        )
+
+
+def _retain_repaired_objects(root, supplied, current, object_directory, rows, progress):
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    attempted = False
+    temporary = None
+    keep_diagnostic = False
+    original_metadata = {}
+
+    def mark_attempted():
+        nonlocal attempted
+        attempted = True
+
+    try:
+        target_git = _Git(root)
+        supplied_git = _Git(supplied)
+        temporary = Path(
+            tempfile.mkdtemp(prefix="brz2obsidian-repair-", dir=root.parent)
+        )
+        _write_repair_objects(
+            root,
+            object_directory,
+            temporary,
+            target_git,
+            supplied_git,
+            rows,
+            original_metadata,
+            mark_attempted,
+            progress,
+        )
+        report_progress(progress, "final_verification")
+        if not _repair_completed(
+            root, object_directory, original_metadata, current.target_commit
+        ):
+            raise OSError("Repaired target history did not verify")
+        report_progress(
+            progress,
+            "final_reporting",
+            completed_units=len(rows),
+            total_units=len(rows),
+            unit="history_objects",
+        )
+        return _repair_result(
+            "repaired",
+            "exact_dependency_restored",
+            retained=True,
+            storage="verified",
+            written=len(rows),
+            message="Exact history payloads verified under the target root.",
+        )
+    except OSError, ValueError, TypeError, UnicodeError:
+        if attempted:
+            try:
+                if _repair_completed(
+                    root, object_directory, original_metadata, current.target_commit
+                ):
+                    return _repair_result(
+                        "repaired",
+                        "verified_after_write_fault",
+                        retained=True,
+                        storage="verified",
+                        written=len(rows),
+                        message="Exact target history verified after an uncertain Git response.",
+                    )
+            except OSError, ValueError, TypeError, UnicodeError:
+                pass
+            confirmed = _confirmed_repair_objects(root, rows)
+            keep_diagnostic = bool(current.damaged_objects)
+            return _repair_result(
+                "unknown",
+                "repair_unverified",
+                storage="verified" if confirmed == len(rows) else "possible",
+                written=confirmed,
+                diagnostic=str(temporary) if keep_diagnostic else None,
+                message=(
+                    "Object writes may have occurred; inspect target history. "
+                    f"Damaged bytes retained at {temporary}."
+                    if current.damaged_objects
+                    else "Some object writes may have occurred; inspect target history."
+                ),
+            )
+        return _repair_result(
+            "failed",
+            "repair_not_started",
+            message="Repair stopped before any target object write.",
+        )
+    finally:
+        if temporary is not None and not keep_diagnostic:
+            try:
+                _discard_temporary(temporary, root.parent)
+            except OSError:
+                pass
+
+
 def execute_history_repair(vault, copy, preparation, *, progress=None):
     """Retain exact unavailable payloads proven by the target's own root."""
     from brz2obsidian.application.vault_progress_contracts import report_progress
@@ -472,33 +774,12 @@ def execute_history_repair(vault, copy, preparation, *, progress=None):
     report_progress(progress, "current_inspection")
     root, supplied = Path(vault).absolute(), Path(copy).absolute()
 
-    def outcome(
-        status,
-        code,
-        *,
-        retained=False,
-        storage="not_started",
-        written=0,
-        diagnostic=None,
-        message,
-    ):
-        return HistoryRepairResult(
-            schema_id="brz2obsidian.history-repair-result",
-            schema_version=1,
-            status=status,
-            code=code,
-            history_retained=retained,
-            object_storage=storage,
-            objects_written=written,
-            authored_files_changed=False,
-            diagnostic_path=diagnostic,
-            message=message,
-        )
-
     if not isinstance(preparation, HistoryRepairPreparation) or (
         preparation.status != "prepared"
     ):
-        return outcome("refused", "not_prepared", message="No repair is prepared.")
+        return _repair_result(
+            "refused", "not_prepared", message="No repair is prepared."
+        )
     try:
         current = validate_history_copy(root, supplied)
         stale = current != preparation.validation or any(
@@ -513,13 +794,13 @@ def execute_history_repair(vault, copy, preparation, *, progress=None):
             )
         )
     except OSError, ValueError, TypeError, UnicodeError:
-        return outcome(
+        return _repair_result(
             "refused",
             "repair_context_unavailable",
             message="Target or copy proof could not be inspected.",
         )
     if stale:
-        return outcome(
+        return _repair_result(
             "refused", "stale_repair", message="Target or copy proof changed."
         )
     rows = tuple(
@@ -527,196 +808,15 @@ def execute_history_repair(vault, copy, preparation, *, progress=None):
     ) + tuple(
         (row.object_id, row.size, row.sha256, True) for row in current.damaged_objects
     )
-    total = sum(row[1] for row in rows)
-    try:
-        object_directory = root / ".git/objects"
-        same_volume = os.stat(root.parent).st_dev == os.stat(object_directory).st_dev
-        damaged_bytes = sum(
-            (object_directory / oid[:2] / oid[2:]).lstat().st_size
-            for oid, _, _, damaged in rows
-            if damaged
-        )
-        margin = 64 * 1024 * 1024
-        enough = (
-            shutil.disk_usage(root.parent).free
-            >= (2 * total + 2 * damaged_bytes if same_volume else total) + margin
-            and shutil.disk_usage(object_directory).free >= total + margin
-            and (same_volume or not current.damaged_objects)
-        )
-    except OSError:
-        enough = False
+    object_directory = root / ".git/objects"
+    enough = _repair_has_space(root, object_directory, rows, current.damaged_objects)
     if not rows or not enough:
-        return outcome(
+        return _repair_result(
             "refused",
             "repair_resources_unavailable",
             message="Repair space is unavailable.",
         )
 
-    def complete():
-        for oid, metadata in original_metadata.items():
-            path = object_directory / oid[:2] / oid[2:]
-            if retained_metadata(path) != metadata:
-                return False
-        with ExitStack() as owners:
-            after = _read(root, _Git(root), _owners=owners)
-            if after.status != "valid" or after.locator.commit != current.target_commit:
-                return False
-            operation = _inspect_update_status(root, observations=[], _owners=owners)
-            return operation.code == "operation_absent" or (
-                operation.status
-                in ("applied", "no_content_change", "restored", "undone")
-                and not operation.recovery_required
-            )
-
-    attempted = False
-    written = 0
-    temporary = None
-    keep_diagnostic = False
-    original_metadata = {}
-    try:
-        target_git = _Git(root)
-        supplied_git = _Git(supplied)
-        temporary = Path(
-            tempfile.mkdtemp(prefix="brz2obsidian-repair-", dir=root.parent)
-        )
-        for oid, size, sha, damaged in rows:
-            spool = temporary / oid
-            with spool.open("w+b") as sink:
-                verify_blobs(
-                    [*supplied_git.prefix, "cat-file", "--batch"],
-                    env=supplied_git.env,
-                    objects=((oid, size, sha, sink),),
-                    timeout=120,
-                )
-                sink.flush()
-            if _spool_oid(temporary, spool, size, sha) != oid:
-                raise OSError("Copied history payload changed during repair")
-            if damaged:
-                destination = object_directory / oid[:2] / oid[2:]
-                original_metadata[oid] = retained_metadata(destination)
-                diagnostic = temporary / (oid + ".damaged")
-                with diagnostic.open("xb") as sink:
-                    observe_file(
-                        object_directory, destination, sink=sink, prefix_limit=0
-                    )
-                    sink.flush()
-                    os.fsync(sink.fileno())
-                staged = temporary / (oid + ".staged")
-                copy_stage(destination, staged)
-                staged.chmod(original_metadata[oid][0] | 0o200)
-                _stage_loose_blob(spool, staged, size)
-                staged.chmod(original_metadata[oid][0])
-                retained_metadata(destination, copy_to=staged)
-                with staged.open("r+b") as sink:
-                    os.fsync(sink.fileno())
-                staged_proof = _LooseBlobCheck(oid, size, sha)
-                observe_file(temporary, staged, sink=staged_proof, prefix_limit=0)
-                if not staged_proof.valid():
-                    raise OSError("Staged Git blob does not match the copy")
-                if not _damaged_loose_payload(root, (oid, size, sha, None)):
-                    raise OSError("Damaged loose object changed before replacement")
-                attempted = True
-                move_file(staged, destination, replace=True)
-                actual = oid
-            else:
-                attempted = True
-                actual = (
-                    target_git.call(
-                        "hash-object",
-                        "-w",
-                        "--no-filters",
-                        "--stdin-paths",
-                        input=_quoted_paths((spool,)),
-                    )
-                    .decode()
-                    .strip()
-                )
-            written += 1
-            if actual != oid:
-                raise OSError("Retained target object differs from the copy")
-            verify_blobs(
-                [*target_git.prefix, "cat-file", "--batch"],
-                env=target_git.env,
-                objects=((oid, size, sha, None),),
-            )
-            if damaged and retained_metadata(destination) != original_metadata[oid]:
-                raise OSError("Replaced Git object metadata changed")
-            report_progress(
-                progress,
-                "publication",
-                completed_units=written,
-                total_units=len(rows),
-                unit="history_objects",
-            )
-        report_progress(progress, "final_verification")
-        if not complete():
-            raise OSError("Repaired target history did not verify")
-        report_progress(
-            progress,
-            "final_reporting",
-            completed_units=len(rows),
-            total_units=len(rows),
-            unit="history_objects",
-        )
-        return outcome(
-            "repaired",
-            "exact_dependency_restored",
-            retained=True,
-            storage="verified",
-            written=len(rows),
-            message="Exact history payloads verified under the target root.",
-        )
-    except OSError, ValueError, TypeError, UnicodeError:
-        if attempted:
-            try:
-                if complete():
-                    return outcome(
-                        "repaired",
-                        "verified_after_write_fault",
-                        retained=True,
-                        storage="verified",
-                        written=len(rows),
-                        message="Exact target history verified after an uncertain Git response.",
-                    )
-            except OSError, ValueError, TypeError, UnicodeError:
-                pass
-            confirmed = 0
-            try:
-                target_git = _Git(root)
-                for row in rows:
-                    try:
-                        verify_blobs(
-                            [*target_git.prefix, "cat-file", "--batch"],
-                            env=target_git.env,
-                            objects=((row[0], row[1], row[2], None),),
-                        )
-                    except OSError, ValueError, TypeError, UnicodeError:
-                        continue
-                    confirmed += 1
-            except OSError, ValueError, TypeError, UnicodeError:
-                pass
-            keep_diagnostic = bool(current.damaged_objects)
-            return outcome(
-                "unknown",
-                "repair_unverified",
-                storage="verified" if confirmed == len(rows) else "possible",
-                written=confirmed,
-                diagnostic=str(temporary) if keep_diagnostic else None,
-                message=(
-                    "Object writes may have occurred; inspect target history. "
-                    f"Damaged bytes retained at {temporary}."
-                    if current.damaged_objects
-                    else "Some object writes may have occurred; inspect target history."
-                ),
-            )
-        return outcome(
-            "failed",
-            "repair_not_started",
-            message="Repair stopped before any target object write.",
-        )
-    finally:
-        if temporary is not None and not keep_diagnostic:
-            try:
-                _discard_temporary(temporary, root.parent)
-            except OSError:
-                pass
+    return _retain_repaired_objects(
+        root, supplied, current, object_directory, rows, progress
+    )

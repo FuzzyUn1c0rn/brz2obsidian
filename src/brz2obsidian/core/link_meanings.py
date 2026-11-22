@@ -54,6 +54,20 @@ def _query_matches_target(query, target):
     )
 
 
+def _present_link_status(state, fragment):
+    if state.existence != "present":
+        return state.existence
+    if state.content is None:
+        return "unknown"
+    if fragment is not None:
+        count = state.fragments.count(fragment)
+        if state.interpretation != "supported":
+            return "unknown"
+        if count != 1:
+            return "fragment_missing" if count == 0 else "fragment_ambiguous"
+    return "resolved"
+
+
 def resolve_link_meaning(query, display, fragment, targets, target_facts, inventory):
     def result(status, target=None, state=None, matches=()):
         return LinkMeaning(
@@ -96,21 +110,7 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
     if len(states) != 1:
         return result("unknown", target)
     (state,) = states
-    if state.existence != "present":
-        return result(state.existence, target, state)
-    if state.content is None:
-        return result("unknown", target, state)
-    if fragment is not None:
-        count = state.fragments.count(fragment)
-        if state.interpretation != "supported":
-            return result("unknown", target, state)
-        if count != 1:
-            return result(
-                "fragment_missing" if count == 0 else "fragment_ambiguous",
-                target,
-                state,
-            )
-    return result("resolved", target, state)
+    return result(_present_link_status(state, fragment), target, state)
 
 
 def resolve_occurrence(occurrence, targets, target_facts, inventory):
@@ -409,37 +409,16 @@ SAFE_LINK_STATUSES = (
 )
 
 
-def validate_current_link_context(facts, subject, *, _links=None):
-    """Bind current observations before any remembered or explicit preservation."""
-    from .reversals import cleanup_removal_continuation
-
-    continuation = cleanup_removal_continuation(facts, subject)
-    if subject.attachment is None:
-        return None
-    context = facts.link_context
-    if context is None or context.inventory != "complete":
-        return "link_context_unavailable"
-    association = subject.attachment.current_target_id
-    scope = (
-        _CurrentScope(
-            context,
-            context.current_targets,
-            context.current_target_facts,
-            context.current_documents,
-            facts.identity_inventory,
-        )
-        if _links is None
-        else _links.current_scope(context, facts.identity_inventory)
+def _observed_existence(current, state):
+    expected = (
+        ("missing", "intentionally_uncreated")
+        if current.existence == "absent"
+        else (current.existence,)
     )
+    return state.existence in expected
 
-    def observed_existence(current, state):
-        expected = (
-            ("missing", "intentionally_uncreated")
-            if current.existence == "absent"
-            else (current.existence,)
-        )
-        return state.existence in expected
 
+def _check_current_inventory(facts, context, scope):
     # Complete supplied scope is checked against the independently observed inventory.
     for state in context.current_target_facts:
         records = scope.targets_by_id.get(state.target_id, ())
@@ -461,7 +440,7 @@ def validate_current_link_context(facts, subject, *, _links=None):
         observed = scope.states_by_id.get(record.target_id, ())
         if (
             len(observed) != 1
-            or not observed_existence(entry.current, observed[0])
+            or not _observed_existence(entry.current, observed[0])
             or content_key(observed[0].content) != content_key(entry.current.content)
         ):
             return "link_context_invalid"
@@ -473,6 +452,10 @@ def validate_current_link_context(facts, subject, *, _links=None):
             )
             if len(docs) != 1:
                 return "link_context_unavailable"
+    return None
+
+
+def _check_attachment_target(subject, context, association):
     targets = tuple(t for t in context.current_targets if t.target_id == association)
     states = tuple(
         s for s in context.current_target_facts if s.target_id == association
@@ -490,7 +473,7 @@ def validate_current_link_context(facts, subject, *, _links=None):
     if (
         target.kind != "resource"
         or target.canonical_path != subject.current.path
-        or not observed_existence(subject.current, state)
+        or not _observed_existence(subject.current, state)
         or content_key(state.content) != content_key(subject.current.content)
     ):
         return "link_context_invalid"
@@ -500,6 +483,57 @@ def validate_current_link_context(facts, subject, *, _links=None):
         validate_link_target_state(state, context.current_targets)
     except ValueError:
         return "link_current_unsafe"
+    return None
+
+
+def _check_affected_document(doc, facts, context):
+    from .reference_targets import validate_targets
+
+    entries = tuple(
+        e for e in facts.identity_inventory if e.current.path == doc.source_path
+    )
+    if (
+        len(entries) != 1
+        or entries[0].current.content is None
+        or not same_content(entries[0].current.content, doc.content)
+    ):
+        return "link_context_invalid"
+    if doc.inventory != "complete" or doc.status != "supported":
+        return "link_context_unavailable"
+    own_targets = tuple(
+        t for t in context.current_targets if t.canonical_path == doc.source_path
+    )
+    try:
+        if len(own_targets) != 1:
+            return "link_context_invalid"
+        validate_targets(own_targets)
+    except ValueError:
+        return "link_current_unsafe"
+    return None
+
+
+def _check_affected_occurrences(doc, resolved, association, continuation):
+    for occurrence, meaning in zip(doc.occurrences, resolved, strict=True):
+        if occurrence.meaning != meaning:
+            return "link_context_invalid"
+        if (
+            (meaning.target_id == association or association in meaning.candidates)
+            and meaning.status not in SAFE_LINK_STATUSES
+            and not (
+                continuation is not None
+                and meaning.status == "missing"
+                and meaning.target_id == association
+                and meaning.path == continuation.path
+                and not meaning.candidates
+            )
+        ):
+            return "link_current_unsafe"
+    return None
+
+
+def _check_current_documents(
+    facts, subject, context, association, continuation, _links
+):
     docs = context.current_documents
     if len({d.document_id for d in docs}) != len(docs):
         return "link_context_invalid"
@@ -527,39 +561,45 @@ def validate_current_link_context(facts, subject, *, _links=None):
         )
         if not affected:
             continue
-        entries = tuple(
-            e for e in facts.identity_inventory if e.current.path == doc.source_path
-        )
-        if (
-            len(entries) != 1
-            or entries[0].current.content is None
-            or not same_content(entries[0].current.content, doc.content)
-        ):
-            return "link_context_invalid"
-        if doc.inventory != "complete" or doc.status != "supported":
-            return "link_context_unavailable"
-        own_targets = tuple(
-            t for t in context.current_targets if t.canonical_path == doc.source_path
-        )
-        try:
-            if len(own_targets) != 1:
-                return "link_context_invalid"
-            validate_targets(own_targets)
-        except ValueError:
-            return "link_current_unsafe"
-        for occurrence, meaning in zip(doc.occurrences, resolved, strict=True):
-            if occurrence.meaning != meaning:
-                return "link_context_invalid"
-            if (
-                (meaning.target_id == association or association in meaning.candidates)
-                and meaning.status not in SAFE_LINK_STATUSES
-                and not (
-                    continuation is not None
-                    and meaning.status == "missing"
-                    and meaning.target_id == association
-                    and meaning.path == continuation.path
-                    and not meaning.candidates
-                )
-            ):
-                return "link_current_unsafe"
+        problem = _check_affected_document(doc, facts, context)
+        if problem is None:
+            problem = _check_affected_occurrences(
+                doc, resolved, association, continuation
+            )
+        if problem is not None:
+            return problem
     return None
+
+
+def validate_current_link_context(facts, subject, *, _links=None):
+    """Bind current observations before any remembered or explicit preservation."""
+    from .reversals import cleanup_removal_continuation
+
+    continuation = cleanup_removal_continuation(facts, subject)
+    if subject.attachment is None:
+        return None
+    context = facts.link_context
+    if context is None or context.inventory != "complete":
+        return "link_context_unavailable"
+    association = subject.attachment.current_target_id
+    scope = (
+        _CurrentScope(
+            context,
+            context.current_targets,
+            context.current_target_facts,
+            context.current_documents,
+            facts.identity_inventory,
+        )
+        if _links is None
+        else _links.current_scope(context, facts.identity_inventory)
+    )
+
+    problem = _check_current_inventory(facts, context, scope)
+    if problem is not None:
+        return problem
+    problem = _check_attachment_target(subject, context, association)
+    if problem is not None:
+        return problem
+    return _check_current_documents(
+        facts, subject, context, association, continuation, _links
+    )

@@ -36,6 +36,41 @@ def choice_offers(preparation):
     return review_plan_choice_offers(plan)
 
 
+def _choice_file_disclosure(change, domain):
+    if domain == "restoration":
+        disclosure = "Restore to: " + change.target_path
+        if change.path != change.target_path:
+            disclosure += "\nDeleted path: " + change.path
+        return disclosure
+    if domain == "text":
+        current_path = (
+            change.rename_review.current_path
+            if change.rename_review is not None
+            else change.path
+        )
+        disclosure = "Current file: " + current_path
+        if change.target_path != current_path:
+            disclosure += "\nSelected destination: " + change.target_path
+        return disclosure
+    if domain == "format":
+        review = change.format_review
+        disclosure = "\n".join(
+            (
+                "File: " + change.path,
+                f"Recorded output format: {review.old_identity.output_format}",
+                f"Incoming output format: {review.target_identity.output_format}",
+                "Keep vault version preserves the current vault content or its absence.",
+                "Use incoming version replaces it with the reviewed generated content.",
+                "Original generated content is available for comparison."
+                if review.original_known
+                else "Original generated content is unknown; current vault content is not assumed unchanged.",
+            )
+        )
+        if change.target_path != change.path:
+            disclosure += "\nSelected destination: " + change.target_path
+    return disclosure
+
+
 def review_plan_choice_offers(plan, *, _choices=None):
     result = []
     changes = {row.change_id: row for row in plan.proposal.changes}
@@ -81,38 +116,8 @@ def review_plan_choice_offers(plan, *, _choices=None):
             )
         elif row.domain == "attachment":
             count = len(_attachment_outputs(plan, row))
-        elif row.domain == "restoration":
-            change = changes[row.change_id]
-            disclosure = "Restore to: " + change.target_path
-            if change.path != change.target_path:
-                disclosure += "\nDeleted path: " + change.path
-        elif row.domain == "text":
-            change = changes[row.change_id]
-            current_path = (
-                change.rename_review.current_path
-                if change.rename_review is not None
-                else change.path
-            )
-            disclosure = "Current file: " + current_path
-            if change.target_path != current_path:
-                disclosure += "\nSelected destination: " + change.target_path
-        elif row.domain == "format":
-            change = changes[row.change_id]
-            review = change.format_review
-            disclosure = "\n".join(
-                (
-                    "File: " + change.path,
-                    f"Recorded output format: {review.old_identity.output_format}",
-                    f"Incoming output format: {review.target_identity.output_format}",
-                    "Keep vault version preserves the current vault content or its absence.",
-                    "Use incoming version replaces it with the reviewed generated content.",
-                    "Original generated content is available for comparison."
-                    if review.original_known
-                    else "Original generated content is unknown; current vault content is not assumed unchanged.",
-                )
-            )
-            if change.target_path != change.path:
-                disclosure += "\nSelected destination: " + change.target_path
+        elif row.domain in ("restoration", "text", "format"):
+            disclosure = _choice_file_disclosure(changes[row.change_id], row.domain)
         change = changes.get(row.change_id)
         selected_choice = selected.choice if selected else None
         decision_id = selected.decision_id if selected else None

@@ -34,12 +34,8 @@ def _bounded(readable, prefix, suffix):
     return prefix + readable.rstrip(" .") + suffix
 
 
-def assign_item_targets(analysis, resource_owners, *, output_format):
+def _creation_reasons(analysis, items, resource_owners):
     snapshot = analysis.snapshot
-    items = sorted(
-        (i for i in snapshot.items if i.live and i.role != "system"),
-        key=lambda i: i.key,
-    )
     documents = {d.key: d for d in snapshot.documents}
     reasons = {}
     classified = {a.item_key for a in snapshot.classification_assignments}
@@ -58,6 +54,10 @@ def assign_item_targets(analysis, resource_owners, *, output_format):
             selected.append("classification")
         if selected:
             reasons[item.key] = tuple(selected)
+    return reasons
+
+
+def _cover_relationships(snapshot, output_format, reasons):
     if output_format == 9:
         for relationship in snapshot.relationships:
             if relationship.kind in ("hierarchy", "related"):
@@ -78,6 +78,9 @@ def assign_item_targets(analysis, resource_owners, *, output_format):
                 key=lambda key: (-sum(key in {a, b} for a, b in uncovered), key),
             )
             reasons[chosen] = ("hierarchy",)
+
+
+def _allocate_stems(items, entry_key):
     readable = {item.key: _readable(item.title) for item in items}
     widths = {item.key: 0 for item in items}
     seeds = {item.key: item.naming_seed for item in items}
@@ -85,7 +88,7 @@ def assign_item_targets(analysis, resource_owners, *, output_format):
         stems = {
             item.key: _bounded(
                 readable[item.key],
-                "Home — " if item.key == analysis.entry_key else "",
+                "Home — " if item.key == entry_key else "",
                 " — " + item.naming_seed[: widths[item.key]]
                 if widths[item.key]
                 else "",
@@ -111,6 +114,18 @@ def assign_item_targets(analysis, resource_owners, *, output_format):
                         )
                     )
                 widths[item.key] = new_width
+    return stems
+
+
+def assign_item_targets(analysis, resource_owners, *, output_format):
+    snapshot = analysis.snapshot
+    items = sorted(
+        (i for i in snapshot.items if i.live and i.role != "system"),
+        key=lambda i: i.key,
+    )
+    reasons = _creation_reasons(analysis, items, resource_owners)
+    _cover_relationships(snapshot, output_format, reasons)
+    stems = _allocate_stems(items, analysis.entry_key)
     return tuple(
         ItemTarget(
             item_key=i.key,

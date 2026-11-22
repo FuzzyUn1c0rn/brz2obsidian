@@ -127,6 +127,40 @@ class LegacyDecoder:
         self.ledger.retain_metadata(self.workspace)
         self.chars = _Characters(raw, self.ledger)
 
+    def _hex_code_unit(self):
+        digits = "".join(self.chars.take() for _ in range(4))
+        if any(c not in "0123456789abcdefABCDEF" for c in digits):
+            raise ValueError("Invalid Unicode escape")
+        return int(digits, 16)
+
+    def _escaped_character(self):
+        escape = self.chars.take()
+        if escape == "u":
+            ordinal = self._hex_code_unit()
+            if 0xD800 <= ordinal <= 0xDBFF:
+                if self.chars.take() != "\\" or self.chars.take() != "u":
+                    raise ValueError("Unpaired Unicode surrogate")
+                low = self._hex_code_unit()
+                if not 0xDC00 <= low <= 0xDFFF:
+                    raise ValueError("Unpaired Unicode surrogate")
+                ordinal = 0x10000 + ((ordinal - 0xD800) << 10) + low - 0xDC00
+            elif 0xDC00 <= ordinal <= 0xDFFF:
+                raise ValueError("Unpaired Unicode surrogate")
+            return chr(ordinal)
+        translations = {
+            '"': '"',
+            "\\": "\\",
+            "/": "/",
+            "b": "\b",
+            "f": "\f",
+            "n": "\n",
+            "r": "\r",
+            "t": "\t",
+        }
+        if escape not in translations:
+            raise ValueError("Invalid JSON escape")
+        return translations[escape]
+
     def _string_blocks(self):
         if self.chars.take() != '"':
             raise ValueError("Expected JSON string")
@@ -138,39 +172,7 @@ class LegacyDecoder:
                     yield "".join(block)
                 return
             if char == "\\":
-                escape = self.chars.take()
-                if escape == "u":
-                    digits = "".join(self.chars.take() for _ in range(4))
-                    if any(c not in "0123456789abcdefABCDEF" for c in digits):
-                        raise ValueError("Invalid Unicode escape")
-                    ordinal = int(digits, 16)
-                    if 0xD800 <= ordinal <= 0xDBFF:
-                        if self.chars.take() != "\\" or self.chars.take() != "u":
-                            raise ValueError("Unpaired Unicode surrogate")
-                        low = "".join(self.chars.take() for _ in range(4))
-                        if any(c not in "0123456789abcdefABCDEF" for c in low):
-                            raise ValueError("Invalid Unicode escape")
-                        low = int(low, 16)
-                        if not 0xDC00 <= low <= 0xDFFF:
-                            raise ValueError("Unpaired Unicode surrogate")
-                        ordinal = 0x10000 + ((ordinal - 0xD800) << 10) + low - 0xDC00
-                    elif 0xDC00 <= ordinal <= 0xDFFF:
-                        raise ValueError("Unpaired Unicode surrogate")
-                    char = chr(ordinal)
-                else:
-                    translations = {
-                        '"': '"',
-                        "\\": "\\",
-                        "/": "/",
-                        "b": "\b",
-                        "f": "\f",
-                        "n": "\n",
-                        "r": "\r",
-                        "t": "\t",
-                    }
-                    if escape not in translations:
-                        raise ValueError("Invalid JSON escape")
-                    char = translations[escape]
+                char = self._escaped_character()
             elif ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF:
                 raise ValueError("Invalid JSON string character")
             block.append(char)
@@ -223,6 +225,18 @@ class LegacyDecoder:
                 transaction.write(raw)
         return bytes(result) if result is not None else None
 
+    def _scalar(self):
+        token = []
+        while self.chars.peek() and self.chars.peek() not in " \t\r\n,]}":
+            self.ledger.retain_metadata(4)
+            token.append(self.chars.take())
+        if not token:
+            raise ValueError("Missing JSON value")
+        value = json.loads("".join(token))
+        if value is not None and type(value) not in (bool, int):
+            raise ValueError("Invalid legacy scalar")
+        return value
+
     def value(self, annotation, path=(), depth=1):
         self.ledger.node(depth)
         self.chars.whitespace()
@@ -251,16 +265,26 @@ class LegacyDecoder:
             return tuple(children)
         if char == '"':
             return self._data() if annotation is bytes else self._string()
-        token = []
-        while self.chars.peek() and self.chars.peek() not in " \t\r\n,]}":
-            self.ledger.retain_metadata(4)
-            token.append(self.chars.take())
-        if not token:
-            raise ValueError("Missing JSON value")
-        value = json.loads("".join(token))
-        if value is not None and type(value) not in (bool, int):
-            raise ValueError("Invalid legacy scalar")
-        return value
+        return self._scalar()
+
+    def _member_name(self, values):
+        key = self._string()
+        if key in values:
+            raise ValueError("Duplicate JSON member")
+        self.ledger.retain_metadata(64)
+        self.chars.whitespace()
+        if self.chars.take() != ":":
+            raise ValueError("Missing JSON colon")
+        self.chars.whitespace()
+        return key
+
+    def _finish_content(self, values, transaction, *, inline):
+        if set(values) - {"data", "reference"} or transaction is None:
+            raise ValueError("Invalid legacy content fields")
+        historical = values.get("reference")
+        if historical is not None:
+            historical = ImmutableContentReference.model_validate(historical)
+        return self.owner._finish_input(transaction, historical, inline=inline)
 
     def _object(self, annotation, path, depth):
         models = _models(annotation)
@@ -273,14 +297,7 @@ class LegacyDecoder:
             self.chars.whitespace()
             if self.chars.peek() != "}":
                 while True:
-                    key = self._string()
-                    if key in values:
-                        raise ValueError("Duplicate JSON member")
-                    self.ledger.retain_metadata(64)
-                    self.chars.whitespace()
-                    if self.chars.take() != ":":
-                        raise ValueError("Missing JSON colon")
-                    self.chars.whitespace()
+                    key = self._member_name(values)
                     if content and key == "data":
                         transaction = self.owner._begin_input(path)
                         self._data(transaction)
@@ -297,12 +314,7 @@ class LegacyDecoder:
             if self.chars.take() != "}":
                 raise ValueError("Invalid JSON object")
             if content:
-                if set(values) - {"data", "reference"} or transaction is None:
-                    raise ValueError("Invalid legacy content fields")
-                historical = values.get("reference")
-                if historical is not None:
-                    historical = ImmutableContentReference.model_validate(historical)
-                return self.owner._finish_input(transaction, historical, inline=inline)
+                return self._finish_content(values, transaction, inline=inline)
             return self.owner._semantic_input(models, values)
         except BaseException:
             if transaction is not None:

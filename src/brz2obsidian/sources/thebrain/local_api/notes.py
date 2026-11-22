@@ -70,6 +70,32 @@ def scope_text(
     return text, removed
 
 
+def _bind_references(document, assets, included, brain_id, allow_qualified):
+    bound = []
+    for reference in document.references:
+        if reference.kind == "item":
+            target = compact_thought_identity(
+                reference.target,
+                brain_id=brain_id,
+                allow_qualified=allow_qualified,
+            )
+            if target is None:
+                continue
+            if target not in included:
+                refuse("A note reference has no included source target")
+            bound.append(
+                reference.model_copy(
+                    update={"target": target, "source_target": reference.target}
+                )
+            )
+        else:
+            # Only the pure image-path/span binder runs here. No archive
+            # thought declarations or flags are manufactured.
+            image_document = document.model_copy(update={"references": (reference,)})
+            bound.extend(bind_note_references(image_document, assets, {}).references)
+    return tuple(bound)
+
+
 def bind_documents(
     documents,
     assets,
@@ -160,33 +186,10 @@ def bind_documents(
                     ),
                 )
                 findings.extend(image_findings)
-            bound = []
-            for reference in document.references:
-                if reference.kind == "item":
-                    target = compact_thought_identity(
-                        reference.target,
-                        brain_id=brain_id,
-                        allow_qualified=allow_qualified,
-                    )
-                    if target is None:
-                        continue
-                    if target not in included:
-                        refuse("A note reference has no included source target")
-                    bound.append(
-                        reference.model_copy(
-                            update={"target": target, "source_target": reference.target}
-                        )
-                    )
-                else:
-                    # Only the pure image-path/span binder runs here. No archive
-                    # thought declarations or flags are manufactured.
-                    image_document = document.model_copy(
-                        update={"references": (reference,)}
-                    )
-                    bound.extend(
-                        bind_note_references(image_document, assets, {}).references
-                    )
-            result.append(document.model_copy(update={"references": tuple(bound)}))
+            bound = _bind_references(
+                document, assets, included, brain_id, allow_qualified
+            )
+            result.append(document.model_copy(update={"references": bound}))
         except MigrationRefused as error:
             raise with_subject(
                 error, "document", (subjects or {}).get(document.owner)

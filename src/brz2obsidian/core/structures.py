@@ -32,6 +32,33 @@ def _value(document, field):
     return field.kind, field.scalar_type, field.value
 
 
+def _body_edits_bound(comparison, documents):
+    if comparison.alignment == "supported":
+        for document, edits in (
+            (documents[1], comparison.local_edits),
+            (documents[2], comparison.source_edits),
+        ):
+            original = documents[0]
+            if isinstance(original.content, ExactContent) and isinstance(
+                document.content, ExactContent
+            ):
+                before = original.content.data[original.body.start : original.body.end]
+                after = document.content.data[document.body.start : document.body.end]
+                if _apply(before, edits) != after:
+                    return False
+            elif (
+                edits
+                or original.body.start != 0
+                or document.body.start != 0
+                or not same_content(original.content, document.content)
+            ):
+                # For a whole body, _apply(body, ()) is exactly the owned
+                # whole-version byte correspondence. Edited operands still
+                # require actual available bytes; no status shortcut.
+                return False
+    return True
+
+
 def validate_structure_facts(
     subject,
     baseline_identity,
@@ -88,33 +115,8 @@ def validate_structure_facts(
     # Preservation selects exact current bytes. Combination validates its targets
     # separately; an unsafe unchosen incoming alternative cannot veto safe keep.
     try:
-        if comparison.alignment == "supported":
-            for document, edits in (
-                (documents[1], comparison.local_edits),
-                (documents[2], comparison.source_edits),
-            ):
-                original = documents[0]
-                if isinstance(original.content, ExactContent) and isinstance(
-                    document.content, ExactContent
-                ):
-                    before = original.content.data[
-                        original.body.start : original.body.end
-                    ]
-                    after = document.content.data[
-                        document.body.start : document.body.end
-                    ]
-                    if _apply(before, edits) != after:
-                        return "structure_unbound"
-                elif (
-                    edits
-                    or original.body.start != 0
-                    or document.body.start != 0
-                    or not same_content(original.content, document.content)
-                ):
-                    # For a whole body, _apply(body, ()) is exactly the owned
-                    # whole-version byte correspondence. Edited operands still
-                    # require actual available bytes; no status shortcut.
-                    return "structure_unbound"
+        if not _body_edits_bound(comparison, documents):
+            return "structure_unbound"
         for index, document in enumerate(documents):
             validate_memberships(
                 document, target_safety=current_target_safety and index == 1
@@ -130,54 +132,17 @@ def validate_structure_facts(
     return None
 
 
-def structure_proposal(
-    subject, baseline_identity, incoming_identity, *, source_version, automatic=False
+def _scalar_replacements(
+    documents, old_fields, current_fields, source_fields, memberships
 ):
-    comparison = subject.structure
-    documents = comparison.original, comparison.current, comparison.incoming
-
-    def unresolved(rule):
-        return ("unresolved", None, rule, True), None
-
-    problem = validate_structure_facts(
-        subject, baseline_identity, incoming_identity, source_version=source_version
-    )
-    if problem is not None:
-        return unresolved(problem)
-    if any(doc.status != "supported" for doc in documents):
-        return unresolved("structure_unsupported")
-    original, current, incoming = documents
-    if automatic and same_content(current.content, original.content):
-        # No local delta needs hunk alignment. The outer automatic candidate and
-        # effect guards still validate this exact supported incoming document.
-        return ("compatible", incoming.content, "source_only", True), incoming
-    if comparison.alignment == "unsupported":
-        return unresolved("structure_unsupported")
-    if comparison.alignment != "supported":
-        return unresolved("structure_ambiguous")
-    old_fields, current_fields, source_fields = (
-        {f.key: f for f in doc.fields} for doc in documents
-    )
-    if set(old_fields) != set(source_fields) or not set(old_fields) <= set(
-        current_fields
-    ):
-        return unresolved("structure_conflict")
+    current = documents[1]
     replacements = {}
-    try:
-        membership_replacements, memberships = combine_memberships(
-            documents, comparison
-        )
-        validate_section_combination(comparison)
-    except ValueError as error:
-        return unresolved(str(error))
-    if len({d.appearance_field for d in documents}) != 1:
-        return unresolved("structure_conflict")
     for key, source in source_fields.items():
         old, local = old_fields[key], current_fields[key]
         if key in memberships or key == current.appearance_field:
             continue
         if old.kind != local.kind or old.kind != source.kind:
-            return unresolved("structure_conflict")
+            return None
         old_value, local_value, source_value = (
             _value(doc, f)
             for doc, f in zip(documents, (old, local, source), strict=True)
@@ -185,21 +150,14 @@ def structure_proposal(
         if source_value == old_value or local_value == source_value:
             continue
         if source.kind != "scalar" or local_value != old_value:
-            return unresolved("structure_conflict")
+            return None
         replacements[key] = source
-    source_body = incoming.content.data[incoming.body.start : incoming.body.end]
-    old_body = original.content.data[original.body.start : original.body.end]
-    local_body = current.content.data[current.body.start : current.body.end]
-    try:
-        candidate_body, patches = _combine_body(
-            old_body,
-            local_body,
-            source_body,
-            comparison.local_edits,
-            comparison.source_edits,
-        )
-    except ValueError as error:
-        return unresolved(str(error))
+    return replacements
+
+
+def _build_combined_text(
+    current, incoming, candidate_body, replacements, membership_replacements
+):
     data, cursor, fields = b"", 0, []
     for field in current.fields:
         data += current.content.data[cursor : field.span.start]
@@ -232,10 +190,56 @@ def structure_proposal(
         cursor = field.span.end
     body_start = current.body.start + len(data) - cursor
     data += current.content.data[cursor : current.body.start] + candidate_body
+    return data, fields, body_start
+
+
+def _structure_unresolved(rule):
+    return ("unresolved", None, rule, True), None
+
+
+def _combine_structure(comparison, documents, output_format):
+    original, current, incoming = documents
+    old_fields, current_fields, source_fields = (
+        {f.key: f for f in doc.fields} for doc in documents
+    )
+    if set(old_fields) != set(source_fields) or not set(old_fields) <= set(
+        current_fields
+    ):
+        return _structure_unresolved("structure_conflict")
+    try:
+        membership_replacements, memberships = combine_memberships(
+            documents, comparison
+        )
+        validate_section_combination(comparison)
+    except ValueError as error:
+        return _structure_unresolved(str(error))
+    if len({d.appearance_field for d in documents}) != 1:
+        return _structure_unresolved("structure_conflict")
+    replacements = _scalar_replacements(
+        documents, old_fields, current_fields, source_fields, memberships
+    )
+    if replacements is None:
+        return _structure_unresolved("structure_conflict")
+    source_body = incoming.content.data[incoming.body.start : incoming.body.end]
+    old_body = original.content.data[original.body.start : original.body.end]
+    local_body = current.content.data[current.body.start : current.body.end]
+    try:
+        candidate_body, patches = _combine_body(
+            old_body,
+            local_body,
+            source_body,
+            comparison.local_edits,
+            comparison.source_edits,
+        )
+    except ValueError as error:
+        return _structure_unresolved(str(error))
+    data, fields, body_start = _build_combined_text(
+        current, incoming, candidate_body, replacements, membership_replacements
+    )
     result = StructuredDocument(
         schema_id="brz2obsidian.structured-document",
         schema_version=1,
-        output_format=incoming_identity.output_format,
+        output_format=output_format,
         content=ExactContent(data=data),
         status="supported",
         issues=(),
@@ -251,11 +255,36 @@ def structure_proposal(
             result, {b.section_id: b for b in comparison.section_bases}
         )
     except ValueError as error:
-        return unresolved(str(error))
+        return _structure_unresolved(str(error))
     result = result.model_copy(update={"issues": appearance_issues(result)})
     if result.content.data == current.content.data:
         return ("no_change", current.content, "structure_combined", False), result
     return ("compatible", result.content, "structure_combined", True), result
+
+
+def structure_proposal(
+    subject, baseline_identity, incoming_identity, *, source_version, automatic=False
+):
+    comparison = subject.structure
+    documents = comparison.original, comparison.current, comparison.incoming
+
+    problem = validate_structure_facts(
+        subject, baseline_identity, incoming_identity, source_version=source_version
+    )
+    if problem is not None:
+        return _structure_unresolved(problem)
+    if any(doc.status != "supported" for doc in documents):
+        return _structure_unresolved("structure_unsupported")
+    original, current, incoming = documents
+    if automatic and same_content(current.content, original.content):
+        # No local delta needs hunk alignment. The outer automatic candidate and
+        # effect guards still validate this exact supported incoming document.
+        return ("compatible", incoming.content, "source_only", True), incoming
+    if comparison.alignment == "unsupported":
+        return _structure_unresolved("structure_unsupported")
+    if comparison.alignment != "supported":
+        return _structure_unresolved("structure_ambiguous")
+    return _combine_structure(comparison, documents, incoming_identity.output_format)
 
 
 def _apply(original, edits):

@@ -25,6 +25,32 @@ class LocalApiSourceRef:
             raise ValueError("A canonical nonzero Brain UUID is required") from None
 
 
+def _validate_local_origin(api_url):
+    try:
+        if not isinstance(api_url, str) or any(
+            ord(c) < 33 or ord(c) > 126 for c in api_url
+        ):
+            raise ValueError
+        url = urlsplit(api_url)
+        host = url.hostname
+        local = host == "localhost" or ipaddress.ip_address(host).is_loopback
+        if (
+            not local
+            or url.scheme not in {"http", "https"}
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or url.path not in {"/api", "/api/"}
+            or (url.port is not None and not 1 <= url.port <= 65535)
+        ):
+            raise ValueError
+    except ValueError, TypeError, AttributeError:
+        raise ValueError(
+            "The API address must be a credential-free local HTTP origin ending in /api"
+        ) from None
+
+
 @dataclass(frozen=True)
 class LocalApiConfig:
     api_url: str = "http://127.0.0.1:11522/api"
@@ -41,29 +67,7 @@ class LocalApiConfig:
     include_pins: bool = False
 
     def __post_init__(self):
-        try:
-            if not isinstance(self.api_url, str) or any(
-                ord(c) < 33 or ord(c) > 126 for c in self.api_url
-            ):
-                raise ValueError
-            url = urlsplit(self.api_url)
-            host = url.hostname
-            local = host == "localhost" or ipaddress.ip_address(host).is_loopback
-            if (
-                not local
-                or url.scheme not in {"http", "https"}
-                or url.username is not None
-                or url.password is not None
-                or url.query
-                or url.fragment
-                or url.path not in {"/api", "/api/"}
-                or (url.port is not None and not 1 <= url.port <= 65535)
-            ):
-                raise ValueError
-        except ValueError, TypeError, AttributeError:
-            raise ValueError(
-                "The API address must be a credential-free local HTTP origin ending in /api"
-            ) from None
+        _validate_local_origin(self.api_url)
         for name in [
             "search_initial_results",
             "search_max_response_bytes",

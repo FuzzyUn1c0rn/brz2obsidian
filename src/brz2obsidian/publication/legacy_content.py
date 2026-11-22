@@ -135,96 +135,139 @@ class _Projection:
             )
         self.emit(b'"')
 
-    def walk(self, value, depth):
-        self.transfer.check()
+    def _literal(self, value, kind):
+        if value is None:
+            return b"null"
+        if kind is bool:
+            return b"true" if value else b"false"
+        raise OSError("Unsupported legacy node type")
+
+    def _integer_bytes(self, value):
+        if max(1, (value.bit_length() - 1) // 4) > self.maximum - self.metadata:
+            raise OSError("Integer metadata budget exhausted")
+        return str(value).encode("ascii")
+
+    def _object_fields(self, value):
+        fields = value.fields
+        if type(fields) is not tuple or len(fields) > self.nodes_left:
+            raise OSError("Invalid bounded legacy object")
+        keys = set()
+        key_bytes = 0
+        for pair in fields:
+            if type(pair) is not tuple or len(pair) != 2 or type(pair[0]) is not str:
+                raise OSError("Invalid legacy object field")
+            key_bytes += len(pair[0]) + 2
+            if key_bytes > self.maximum - self.metadata:
+                raise OSError("Object key metadata budget exhausted")
+            if pair[0] in keys:
+                raise OSError("Duplicate legacy object key")
+            keys.add(pair[0])
+        return fields
+
+    def _begin_slot(self, value):
+        reference = self.member(value.transport_reference)
+        historical = value.legacy_reference
+        if historical is not None:
+            historical = _reference(historical)
+            if (historical.size, historical.sha256) != (
+                reference.size,
+                reference.sha256,
+            ):
+                raise OSError("Historical reference differs from admitted content")
+        self.emit(b'{"data"' + self.colon + b'"')
+        self.tokens.append(reference)
+        self.payload += 4 * ((reference.size + 2) // 3)
+        self.emit(b'"' + self.comma + b'"reference"' + self.colon)
+        return historical
+
+    def _active_collection(self, value):
+        identity = id(value)
+        if identity in self.active:
+            raise OSError("Cyclic legacy metadata")
+        self.active.add(identity)
+        return identity
+
+    def _collection_fields(self, value, kind):
+        if kind is tuple:
+            if len(value) > self.nodes_left:
+                raise OSError("Node budget exhausted")
+            return ((None, child) for child in value)
+        return self._object_fields(value)
+
+    def _charge_node(self, depth):
         if depth > self.depth or self.nodes_left == 0:
             raise OSError("Node or depth budget exhausted")
         self.nodes_left -= 1
+
+    def walk(self, value, depth):
+        self.transfer.check()
+        self._charge_node(depth)
         if self.ledger is not None:
             self.ledger.node(depth)
         kind = type(value)
-        if value is None:
-            self.emit(b"null")
-        elif kind is bool:
-            self.emit(b"true" if value else b"false")
-        elif kind is int:
-            if max(1, (value.bit_length() - 1) // 4) > self.maximum - self.metadata:
-                raise OSError("Integer metadata budget exhausted")
+        if kind in (tuple, LegacyObject):
+            identity = self._active_collection(value)
             try:
-                self.emit(str(value).encode("ascii"))
-            except ValueError as error:
-                raise OSError("Integer metadata is not encodable") from error
-        elif kind is str:
-            self.string(value)
-        elif kind in (tuple, LegacyObject):
-            identity = id(value)
-            if identity in self.active:
-                raise OSError("Cyclic legacy metadata")
-            self.active.add(identity)
-            try:
-                if kind is tuple:
-                    if len(value) > self.nodes_left:
-                        raise OSError("Node budget exhausted")
-                    self.emit(b"[")
-                    for index, child in enumerate(value):
-                        if index:
-                            self.emit(self.comma)
-                        self.walk(child, depth + 1)
-                    self.emit(b"]")
-                else:
-                    fields = value.fields
-                    if type(fields) is not tuple or len(fields) > self.nodes_left:
-                        raise OSError("Invalid bounded legacy object")
-                    keys = set()
-                    key_bytes = 0
-                    for pair in fields:
-                        if (
-                            type(pair) is not tuple
-                            or len(pair) != 2
-                            or type(pair[0]) is not str
-                        ):
-                            raise OSError("Invalid legacy object field")
-                        key_bytes += len(pair[0]) + 2
-                        if key_bytes > self.maximum - self.metadata:
-                            raise OSError("Object key metadata budget exhausted")
-                        if pair[0] in keys:
-                            raise OSError("Duplicate legacy object key")
-                        keys.add(pair[0])
-                    self.emit(b"{")
-                    ordered = (
-                        fields
-                        if self.dialect == "Ju"
-                        else sorted(fields, key=lambda p: p[0])
-                    )
-                    for index, (key, child) in enumerate(ordered):
-                        if index:
-                            self.emit(self.comma)
+                fields = self._collection_fields(value, kind)
+                opening, ending = (b"[", b"]") if kind is tuple else (b"{", b"}")
+                self.emit(opening)
+                fields = (
+                    sorted(fields, key=lambda pair: pair[0])
+                    if kind is LegacyObject and self.dialect != "Ju"
+                    else fields
+                )
+                for index, (key, child) in enumerate(fields):
+                    if index:
+                        self.emit(self.comma)
+                    if key is not None:
                         self.string(key)
                         self.emit(self.colon)
-                        self.walk(child, depth + 1)
-                    self.emit(b"}")
+                    self.walk(child, depth + 1)
+                self.emit(ending)
             finally:
                 self.active.remove(identity)
         elif kind is LegacyContentSlot:
-            reference = self.member(value.transport_reference)
-            historical = value.legacy_reference
-            if historical is not None:
-                historical = _reference(historical)
-                if (historical.size, historical.sha256) != (
-                    reference.size,
-                    reference.sha256,
-                ):
-                    raise OSError("Historical reference differs from admitted content")
-            self.emit(b'{"data"' + self.colon + b'"')
-            self.tokens.append(reference)
-            self.payload += 4 * ((reference.size + 2) // 3)
-            self.emit(b'"' + self.comma + b'"reference"' + self.colon)
+            historical = self._begin_slot(value)
             self.walk(
                 None if historical is None else _reference_node(historical), depth + 1
             )
             self.emit(b"}")
+        elif kind is str:
+            self.string(value)
+        elif kind is int:
+            try:
+                self.emit(self._integer_bytes(value))
+            except ValueError as error:
+                raise OSError("Integer metadata is not encodable") from error
         else:
-            raise OSError("Unsupported legacy node type")
+            self.emit(self._literal(value, kind))
+
+
+def _comparison_references(references, transfer, metadata_limit, node_limit):
+    _limit(node_limit, "node", minimum=1)
+    if type(references) is not tuple or 1 + 4 * len(references) > node_limit:
+        raise OSError("Invalid bounded comparison references")
+    remaining_metadata = _limit(metadata_limit, "metadata") - 2
+    if remaining_metadata < 0:
+        raise OSError("Metadata budget exhausted")
+    admitted = []
+    for index, value in enumerate(references):
+        if index:
+            remaining_metadata -= 1
+        if remaining_metadata < 0:
+            raise OSError("Metadata budget exhausted")
+        value = _reference(value)
+        fragment = _Projection(
+            _reference_node(value),
+            None,
+            transfer,
+            metadata_limit=remaining_metadata,
+            node_limit=4,
+            depth_limit=2,
+        )
+        remaining_metadata -= fragment.metadata
+        admitted.append(value)
+    return admitted
 
 
 class ContentComparison:
@@ -256,29 +299,9 @@ class ContentComparison:
             _native=_ledger is not None and _scope is not None,
         )
         work = _RawWork(raw_work_limit, _ledger)
-        _limit(node_limit, "node", minimum=1)
-        if type(references) is not tuple or 1 + 4 * len(references) > node_limit:
-            raise OSError("Invalid bounded comparison references")
-        remaining_metadata = _limit(metadata_limit, "metadata") - 2
-        if remaining_metadata < 0:
-            raise OSError("Metadata budget exhausted")
-        admitted = []
-        for index, value in enumerate(references):
-            if index:
-                remaining_metadata -= 1
-            if remaining_metadata < 0:
-                raise OSError("Metadata budget exhausted")
-            value = _reference(value)
-            fragment = _Projection(
-                _reference_node(value),
-                None,
-                transfer,
-                metadata_limit=remaining_metadata,
-                node_limit=4,
-                depth_limit=2,
-            )
-            remaining_metadata -= fragment.metadata
-            admitted.append(value)
+        admitted = _comparison_references(
+            references, transfer, metadata_limit, node_limit
+        )
         resolved = [self._resolve(value) for value in admitted]
         self._members = {value.content_id: value for value, _, _ in resolved}
         self._backings = {value.content_id: backing for value, backing, _ in resolved}
@@ -447,15 +470,7 @@ class ContentComparison:
             if type(token) is bytes:
                 emit(token)
             else:
-                residual = b""
-                with closing(self._read(token, work, transfer)) as chunks:
-                    for block in chunks:
-                        combined = residual + block
-                        end = len(combined) - len(combined) % 3
-                        emit(base64.urlsafe_b64encode(combined[:end]))
-                        residual = combined[end:]
-                if residual:
-                    emit(base64.urlsafe_b64encode(residual))
+                self._emit_content(token, work, transfer, emit)
         if count != expected_size:
             raise OSError("Projection encoded length differs from preflight")
         self._check()
@@ -463,3 +478,14 @@ class ContentComparison:
         return LegacyProjectionEvidence(
             dialect, digest.hexdigest(), count, bytes(preview)
         )
+
+    def _emit_content(self, reference, work, transfer, emit):
+        residual = b""
+        with closing(self._read(reference, work, transfer)) as chunks:
+            for block in chunks:
+                combined = residual + block
+                end = len(combined) - len(combined) % 3
+                emit(base64.urlsafe_b64encode(combined[:end]))
+                residual = combined[end:]
+        if residual:
+            emit(base64.urlsafe_b64encode(residual))

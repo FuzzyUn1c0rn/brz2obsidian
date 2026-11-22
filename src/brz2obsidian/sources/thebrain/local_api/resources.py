@@ -104,7 +104,7 @@ def reference_uri(location, profile_version):
     return external_file_uri(location, invalid)
 
 
-def role(value, profile_version):
+def _validate_resource_dates(value):
     for field in (
         "creationDateTime",
         "modificationDateTime",
@@ -112,6 +112,46 @@ def role(value, profile_version):
     ):
         if field in value and value[field] is not None:
             source_date(value[field])
+
+
+def _web_resource_role(location, name):
+    try:
+        uri = urlsplit(location)
+        if (
+            uri.scheme.lower() not in {"http", "https"}
+            or not uri.hostname
+            or any(ord(c) <= 32 or ord(c) == 127 for c in location)
+            or name is not None
+            and not isinstance(name, str)
+        ):
+            raise ValueError
+        return "url"
+    except ValueError:
+        refuse("The external resource declaration is not qualified")
+
+
+def _qualified_file(kind, location, name, profile_version):
+    if (
+        location.strip() != location
+        or location in {".", ".."}
+        or any(c in "/\\:%" or ord(c) < 32 or ord(c) == 127 for c in location)
+        or name is not None
+        and (not isinstance(name, str) or not name)
+    ):
+        refuse("The owned file basename or display name is not qualified")
+    suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
+    return (
+        (kind, suffix) in {(1, "pdf"), (15, "txt")}
+        or profile_version in {"4", "5"}
+        and kind == 1
+        or profile_version in {"2", "3", "4", "5"}
+        and name is None
+        and (kind, suffix) in {(1, "png"), (1, "zip")}
+    )
+
+
+def role(value, profile_version):
+    _validate_resource_dates(value)
     kind, location, name = value["type"], value["location"], value["name"]
     if not isinstance(location, str) or not location:
         refuse("An attachment location is invalid")
@@ -123,19 +163,7 @@ def role(value, profile_version):
         reference_uri(location, profile_version)
         return {2: "file", 8: "directory"}[kind]
     if kind == 3:
-        try:
-            uri = urlsplit(location)
-            if (
-                uri.scheme.lower() not in {"http", "https"}
-                or not uri.hostname
-                or any(ord(c) <= 32 or ord(c) == 127 for c in location)
-                or name is not None
-                and not isinstance(name, str)
-            ):
-                raise ValueError
-            return "url"
-        except ValueError:
-            refuse("The external resource declaration is not qualified")
+        return _web_resource_role(location, name)
     if kind == 5 and name is None and location == "Icon.png":
         return "icon"
     if (
@@ -148,25 +176,8 @@ def role(value, profile_version):
         | ({value["id"] + ".svg"} if profile_version in {"3", "4", "5"} else set())
     ):
         return "image"
-    if kind in {1, 15}:
-        if (
-            location.strip() != location
-            or location in {".", ".."}
-            or any(c in "/\\:%" or ord(c) < 32 or ord(c) == 127 for c in location)
-            or name is not None
-            and (not isinstance(name, str) or not name)
-        ):
-            refuse("The owned file basename or display name is not qualified")
-        suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
-        if (
-            (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version in {"4", "5"}
-            and kind == 1
-            or profile_version in {"2", "3", "4", "5"}
-            and name is None
-            and (kind, suffix) in {(1, "png"), (1, "zip")}
-        ):
-            return "file"
+    if kind in {1, 15} and _qualified_file(kind, location, name, profile_version):
+        return "file"
     unsupported_shape(
         profile_version,
         "resource",
@@ -174,37 +185,12 @@ def role(value, profile_version):
     )
 
 
-def validate_bytes(value, raw, profile_version, *, cancel=None):
-    check_cancel(cancel)
-    if profile_version == "5" and role(value, profile_version) == "icon":
-        from .icons import validate_structural_icon
-
-        if validate_structural_icon(raw, cancel=cancel):
-            return "icon"
-    source = raw if isinstance(raw, Path) else BytesIO(raw)
-    if isinstance(raw, Path):
-        with raw.open("rb") as stream:
-            prefix = stream.read(24)
-    else:
-        prefix = raw[:24]
-    selected = role(value, profile_version)
-    if selected == "url" or value["type"] in {2, 8}:
-        refuse("External destinations must not be fetched")
-    if selected == "note_original" or value["type"] == 15:
-        try:
-            (raw.read_bytes() if isinstance(raw, Path) else raw).decode(
-                "utf-8", errors="strict"
-            )
-        except UnicodeError:
-            refuse("Required authored text is not strict UTF-8")
-        return selected
-    location = value["location"]
-    suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
-    if selected == "file" and suffix == "pdf":
+def _qualified_file_bytes(source, prefix, suffix, profile_version):
+    if suffix == "pdf":
         if not prefix.startswith(b"%PDF-"):
             refuse("Required PDF bytes do not match the qualified signature")
-        return selected
-    if selected == "file" and suffix == "zip":
+        return True
+    if suffix == "zip":
         try:
             if not prefix.startswith(b"PK\x03\x04"):
                 raise ValueError
@@ -212,12 +198,11 @@ def validate_bytes(value, raw, profile_version, *, cancel=None):
                 archive.infolist()
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
-        return selected
-    if selected == "file" and profile_version in {"4", "5"} and suffix != "png":
-        return selected
-    if selected == "image" and suffix == "svg" and profile_version in {"3", "4", "5"}:
-        validate_svg(raw)
-        return selected
+        return True
+    return profile_version in {"4", "5"} and suffix != "png"
+
+
+def _raster_format(selected, suffix, prefix, profile_version):
     expected = None
     if prefix.startswith(b"\x89PNG\r\n\x1a\n") and (
         selected == "icon" or suffix == "png"
@@ -238,15 +223,10 @@ def validate_bytes(value, raw, profile_version, *, cancel=None):
         and prefix[8:12] == b"WEBP"
     ):
         expected = "WEBP"
-    if (
-        selected == "icon"
-        and profile_version in {"3", "4"}
-        and prefix[:4] == b"\x00\x00\x01\x00"
-    ):
-        validate_ico(raw, cancel=cancel)
-        return selected
-    if expected is None:
-        refuse("Required image/icon bytes do not match the qualified signature")
+    return expected
+
+
+def _decode_raster(raw, selected, suffix, expected, profile_version, cancel):
     strict_jpeg = (
         selected == "image" and profile_version in {"3", "4", "5"} and suffix == "jpg"
     )
@@ -285,7 +265,172 @@ def validate_bytes(value, raw, profile_version, *, cancel=None):
         refuse("Required image/icon bytes are not fully decodable")
     if strict_jpeg:
         validate_jpeg(raw, *verified_jpeg)
+
+
+def _payload_prefix(raw):
+    if isinstance(raw, Path):
+        with raw.open("rb") as stream:
+            return stream.read(24)
+    return raw[:24]
+
+
+def _validate_utf8(raw):
+    try:
+        (raw.read_bytes() if isinstance(raw, Path) else raw).decode(
+            "utf-8", errors="strict"
+        )
+    except UnicodeError:
+        refuse("Required authored text is not strict UTF-8")
+
+
+def validate_bytes(value, raw, profile_version, *, cancel=None):
+    check_cancel(cancel)
+    if profile_version == "5" and role(value, profile_version) == "icon":
+        from .icons import validate_structural_icon
+
+        if validate_structural_icon(raw, cancel=cancel):
+            return "icon"
+    source = raw if isinstance(raw, Path) else BytesIO(raw)
+    prefix = _payload_prefix(raw)
+    selected = role(value, profile_version)
+    if selected == "url" or value["type"] in {2, 8}:
+        refuse("External destinations must not be fetched")
+    if selected == "note_original" or value["type"] == 15:
+        _validate_utf8(raw)
+        return selected
+    location = value["location"]
+    suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
+    if selected == "file" and _qualified_file_bytes(
+        source, prefix, suffix, profile_version
+    ):
+        return selected
+    if selected == "image" and suffix == "svg" and profile_version in {"3", "4", "5"}:
+        validate_svg(raw)
+        return selected
+    expected = _raster_format(selected, suffix, prefix, profile_version)
+    if (
+        selected == "icon"
+        and profile_version in {"3", "4"}
+        and prefix[:4] == b"\x00\x00\x01\x00"
+    ):
+        validate_ico(raw, cancel=cancel)
+        return selected
+    if expected is None:
+        refuse("Required image/icon bytes do not match the qualified signature")
+    _decode_raster(raw, selected, suffix, expected, profile_version, cancel)
     return selected
+
+
+def _owned_declarations(brain, owner, owned, graph_attachments, budget):
+    declarations = [declaration(a, brain, owner, budget) for a in owned]
+    if len({a["id"] for a in declarations}) != len(declarations):
+        refuse("Owned attachment identities are duplicated")
+    if graph_attachments is None and declarations:
+        refuse("A populated attachment inventory needs actual graph agreement")
+    if graph_attachments is not None:
+        observed = [declaration(a, brain, owner, budget) for a in graph_attachments]
+        if sorted(declarations, key=lambda a: a["id"]) != sorted(
+            observed, key=lambda a: a["id"]
+        ):
+            refuse("Graph and owned attachment inventories disagree")
+    return declarations
+
+
+def _external_asset(value, selected, common, profile_version):
+    if selected == "url":
+        return Asset(
+            **dict(
+                common,
+                original_name=value["name"]
+                if value["name"] is not None
+                else value["location"],
+            ),
+            role="url",
+            availability="external",
+            external_uri=value["location"],
+        )
+    if value["type"] in {2, 8}:
+        return Asset(
+            **dict(common, display_name=PureWindowsPath(value["location"]).name),
+            role=selected,
+            availability="external",
+            external_uri=reference_uri(value["location"], profile_version),
+        )
+    return None
+
+
+def _capture_file(
+    client, request_path, directory, raw, value, selected, profile_version
+):
+    with directory.open(raw.name, "xb") as stream:
+        status, _ = client.request(
+            "attachment-content",
+            request_path,
+            value["id"],
+            sink=stream,
+            allow_missing_txt=value["type"] == 15,
+            allow_missing_image=profile_version in {"4", "5"} and selected == "image",
+            bounded_icon=profile_version == "5" and selected == "icon",
+        )
+    if status == 404:
+        return None
+    directory.verify()
+    validate_bytes(value, raw, profile_version, cancel=client.cancel)
+    measured_length, measured_hash = 0, hashlib.sha256()
+    with directory.open(raw.name, "rb") as stream:
+        while chunk := stream.read(65536):
+            measured_length += len(chunk)
+            measured_hash.update(chunk)
+    return measured_length, measured_hash
+
+
+def _scoped_note(
+    note_bytes,
+    client,
+    brain,
+    excluded,
+    profile_version,
+    common,
+    has_document,
+    record,
+    decisions,
+):
+    owner = common["owner"]
+    text = note_bytes.decode("utf-8", errors="strict")
+    client.ensure_safe(text)
+    if has_document:
+        refuse("Multiple authored notes have ambiguous ownership")
+    text, removed = scope_text(
+        text,
+        excluded,
+        brain_id=brain,
+        allow_qualified=profile_version in {"4", "5"},
+        allow_literal_tokens=profile_version in {"4", "5"},
+    )
+    record("note_text", "note_text:" + owner, owner, {"text": text})
+    if removed:
+        decisions.append(
+            {
+                "key": "scope:note:" + common["asset_id"],
+                "rule_id": "local-api.system.v1"
+                if any(excluded[k]["kind"] == 5 for k in removed)
+                else "local-api.forgotten.v1",
+                "outcome": "excluded_association",
+                "subjects": ["thought:" + owner]
+                + ["thought:" + k for k in sorted(removed)],
+                "evidence": ["note_text:" + owner]
+                + ["exclusion:" + k for k in sorted(removed)],
+            }
+        )
+    return Document(
+        key=common["asset_id"],
+        owner=owner,
+        text=text,
+        text_digest=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        original_asset_id=None if removed else common["asset_id"],
+        original_copy_omitted=bool(removed),
+        evidence=common["evidence"],
+    )
 
 
 def capture_owner(
@@ -301,22 +446,9 @@ def capture_owner(
     decisions,
     directory,
 ):
-    declarations = [
-        declaration(a, brain, owner, config.max_response_bytes) for a in owned
-    ]
-    if len({a["id"] for a in declarations}) != len(declarations):
-        refuse("Owned attachment identities are duplicated")
-    if graph_attachments is None and declarations:
-        refuse("A populated attachment inventory needs actual graph agreement")
-    if graph_attachments is not None:
-        observed = [
-            declaration(a, brain, owner, config.max_response_bytes)
-            for a in graph_attachments
-        ]
-        if sorted(declarations, key=lambda a: a["id"]) != sorted(
-            observed, key=lambda a: a["id"]
-        ):
-            refuse("Graph and owned attachment inventories disagree")
+    declarations = _owned_declarations(
+        brain, owner, owned, graph_attachments, config.max_response_bytes
+    )
     assets, documents, payloads = [], [], {}
     for value in sorted(declarations, key=lambda a: a["id"]):
         asset_id = value["id"]
@@ -341,115 +473,52 @@ def capture_owner(
             "display_name": value["name"],
             "evidence": (pointer,),
         }
-        if selected == "url":
-            assets.append(
-                Asset(
-                    **dict(
-                        common,
-                        original_name=value["name"]
-                        if value["name"] is not None
-                        else value["location"],
-                    ),
-                    role="url",
-                    availability="external",
-                    external_uri=value["location"],
-                )
-            )
-            continue
-        if value["type"] in {2, 8}:
-            assets.append(
-                Asset(
-                    **dict(
-                        common, display_name=PureWindowsPath(value["location"]).name
-                    ),
-                    role=selected,
-                    availability="external",
-                    external_uri=reference_uri(value["location"], profile_version),
-                )
-            )
+        external = _external_asset(value, selected, common, profile_version)
+        if external is not None:
+            assets.append(external)
             continue
         raw = directory.path / f"{len(client.requests):016x}.bin"
-        note_bytes = None
+        request_path = f"/attachments/{brain}/{asset_id}/file-content"
         if selected == "note_original":
             with BytesIO() as stream:
                 client.request(
                     "attachment-content",
-                    f"/attachments/{brain}/{asset_id}/file-content",
+                    request_path,
                     asset_id,
                     sink=stream,
                 )
                 note_bytes = stream.getvalue()
             validate_bytes(value, note_bytes, profile_version, cancel=client.cancel)
             measured_length, measured_hash = len(note_bytes), hashlib.sha256(note_bytes)
-        else:
-            with directory.open(raw.name, "xb") as stream:
-                status, _ = client.request(
-                    "attachment-content",
-                    f"/attachments/{brain}/{asset_id}/file-content",
-                    asset_id,
-                    sink=stream,
-                    allow_missing_txt=value["type"] == 15,
-                    allow_missing_image=profile_version in {"4", "5"}
-                    and selected == "image",
-                    bounded_icon=profile_version == "5" and selected == "icon",
-                )
-            if status == 404:
-                assets.append(Asset(**common, role=selected, availability="absent"))
-                continue
-            directory.verify()
-            validate_bytes(value, raw, profile_version, cancel=client.cancel)
-            measured_length, measured_hash = 0, hashlib.sha256()
-            with directory.open(raw.name, "rb") as stream:
-                while chunk := stream.read(65536):
-                    measured_length += len(chunk)
-                    measured_hash.update(chunk)
-        if selected == "note_original":
-            text = note_bytes.decode("utf-8", errors="strict")
-            client.ensure_safe(text)
-            if documents:
-                refuse("Multiple authored notes have ambiguous ownership")
-            text, removed = scope_text(
-                text,
-                excluded,
-                brain_id=brain,
-                allow_qualified=profile_version in {"4", "5"},
-                allow_literal_tokens=profile_version in {"4", "5"},
-            )
-            record("note_text", "note_text:" + owner, owner, {"text": text})
-            if removed:
-                decisions.append(
-                    {
-                        "key": "scope:note:" + asset_id,
-                        "rule_id": "local-api.system.v1"
-                        if any(excluded[k]["kind"] == 5 for k in removed)
-                        else "local-api.forgotten.v1",
-                        "outcome": "excluded_association",
-                        "subjects": ["thought:" + owner]
-                        + ["thought:" + k for k in sorted(removed)],
-                        "evidence": ["note_text:" + owner]
-                        + ["exclusion:" + k for k in sorted(removed)],
-                    }
-                )
             documents.append(
-                Document(
-                    key=asset_id,
-                    owner=owner,
-                    text=text,
-                    text_digest=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                    original_asset_id=None if removed else asset_id,
-                    original_copy_omitted=bool(removed),
-                    evidence=(pointer,),
+                _scoped_note(
+                    note_bytes,
+                    client,
+                    brain,
+                    excluded,
+                    profile_version,
+                    common,
+                    bool(documents),
+                    record,
+                    decisions,
                 )
             )
-        if selected == "note_original" and documents[-1].original_copy_omitted:
-            continue
-        if selected == "note_original":
+            if documents[-1].original_copy_omitted:
+                continue
             with (
                 BytesIO(note_bytes) as source_stream,
                 directory.open(raw.name, "xb") as destination,
             ):
                 while chunk := source_stream.read(65536):
                     destination.write(chunk)
+        else:
+            measured = _capture_file(
+                client, request_path, directory, raw, value, selected, profile_version
+            )
+            if measured is None:
+                assets.append(Asset(**common, role=selected, availability="absent"))
+                continue
+            measured_length, measured_hash = measured
         assets.append(
             Asset(
                 **common,
@@ -477,10 +546,227 @@ def _finding_document(finding):
         refuse("Image finding has invalid structured provenance")
 
 
-def validate_payload_binding(source, snapshot, audit):
-    """Bind normalized content to closed qualified source facts, not just hashes."""
+def _validate_asset_declarations(assets, attachments, profile):
+    for key, asset in assets.items():
+        value = attachments[key]
+        selected = role(value, profile)
+        external_path = value["type"] in {2, 8}
+        external = selected == "url" or external_path
+        expected_uri = (
+            reference_uri(value["location"], profile)
+            if external_path
+            else value["location"]
+            if selected == "url"
+            else None
+        )
+        if (
+            asset.owner != value["sourceId"]
+            or asset.role != selected
+            or asset.naming_seed != key.replace("-", "")
+            or asset.original_name
+            != (
+                value["name"]
+                if selected == "url" and value["name"] is not None
+                else value["location"]
+            )
+            or asset.display_name
+            != (
+                PureWindowsPath(value["location"]).name
+                if external_path
+                else value["name"]
+            )
+            or asset.availability
+            not in ({"external"} if external else {"present", "absent"})
+            or asset.external_uri != expected_uri
+            or asset.video_presentation is not None
+        ):
+            refuse("Normalized payload roles or source declarations disagree")
+
+
+def _rebind_captured_note(
+    source,
+    snapshot,
+    document,
+    raw,
+    profile,
+    excluded_thoughts,
+    image_absences,
+):
     from .notes import bind_documents
 
+    source_document = document.model_copy(
+        update={
+            "text": raw,
+            "text_digest": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+            "references": (),
+            "text_adaptations": (),
+        }
+    )
+    signature_removed = bool(
+        document.text_adaptations
+        and document.text_adaptations[0].start == 0
+        and document.text_adaptations[0].end == 1
+        and document.text_adaptations[0].before == "\ufeff"
+        and document.text_adaptations[0].after == ""
+    )
+    retained_findings = [
+        finding
+        for finding in snapshot.findings
+        if (
+            finding.rule_id == "local-api.note-formatting.v1"
+            and set(finding.affected) == {document.owner, document.key}
+        )
+        or (
+            finding.rule_id
+            in {
+                "thebrain.unavailable-image.v1",
+                "thebrain.unavailable-declared-image.v1",
+            }
+            and _finding_document(finding) == document.key
+        )
+    ]
+    legacy_bom = raw.startswith("\ufeff") and not signature_removed
+    for (
+        preserve_bom,
+        preserve_colors,
+        legacy_tables,
+        previous_tables,
+        compact_tables,
+        legacy_table_boundaries,
+        preserve_table_warnings,
+    ) in (
+        (False, False, False, False, False, False, False),
+        (False, False, False, False, False, False, True),
+        (False, False, False, False, False, True, True),
+        (False, False, False, False, True, True, True),
+        (False, False, False, True, True, True, True),
+        (legacy_bom, False, True, False, True, True, True),
+        (legacy_bom, True, True, False, True, True, True),
+    ):
+        try:
+            documents, document_findings = bind_documents(
+                [source_document],
+                snapshot.assets,
+                {item.key for item in snapshot.items},
+                with_findings=True,
+                preserve_bom=preserve_bom,
+                preserve_table_colors=preserve_colors,
+                legacy_tables=legacy_tables,
+                previous_tables=previous_tables,
+                compact_tables=compact_tables,
+                legacy_table_boundaries=legacy_table_boundaries,
+                preserve_table_warnings=preserve_table_warnings,
+                brain_id=source["brain"]["id"],
+                allow_qualified=profile in {"4", "5"},
+                allow_literal_tokens=profile in {"4", "5"},
+                excluded=excluded_thoughts,
+                profile_version=profile,
+                image_absences=image_absences,
+            )
+        except MigrationRefused:
+            continue
+        if document == documents[0] and sorted(
+            retained_findings, key=lambda finding: finding.observed_json
+        ) == sorted(document_findings, key=lambda finding: finding.observed_json):
+            return documents[0], document_findings
+    return None, ()
+
+
+def _validate_captured_documents(
+    source,
+    snapshot,
+    texts,
+    attachments,
+    assets,
+    profile,
+    excluded_thoughts,
+    image_absences,
+    expected_findings,
+):
+    owners = set()
+    for document in snapshot.documents:
+        if document.owner in owners or document.owner not in texts:
+            refuse("Authored note ownership is ambiguous or unbound")
+        owners.add(document.owner)
+        raw = texts[document.owner]
+        expected, document_findings = _rebind_captured_note(
+            source,
+            snapshot,
+            document,
+            raw,
+            profile,
+            excluded_thoughts,
+            image_absences,
+        )
+        expected_findings.extend(document_findings)
+        candidates = [
+            key
+            for key, value in attachments.items()
+            if value["sourceId"] == document.owner
+            and role(value, profile) == "note_original"
+        ]
+        if (
+            len(candidates) != 1
+            or document != expected
+            or document.original_copy_omitted
+            and (
+                document.original_asset_id is not None
+                or not any(
+                    d["key"] == "scope:note:" + candidates[0]
+                    and d["outcome"] == "excluded_association"
+                    for d in source["scope"]["decisions"]
+                )
+            )
+            or not document.original_copy_omitted
+            and (
+                document.original_asset_id != candidates[0]
+                or assets[candidates[0]].actual_sha256
+                != hashlib.sha256(raw.encode("utf-8")).hexdigest()
+                or assets[candidates[0]].actual_length != len(raw.encode("utf-8"))
+            )
+        ):
+            refuse("Normalized Markdown is not bound to qualified scoped source text")
+    return owners
+
+
+def _validate_item_bindings(source, snapshot, attachments):
+    for item in snapshot.items:
+        icon = [
+            a.asset_id
+            for a in snapshot.assets
+            if a.owner == item.key and a.role == "icon"
+        ]
+        if (
+            len(icon) > 1
+            or set(item.document_ids)
+            != {d.key for d in snapshot.documents if d.owner == item.key}
+            or set(item.resource_ids)
+            != {
+                a.asset_id
+                for a in snapshot.assets
+                if a.owner == item.key and a.role != "note_original"
+            }
+            or (
+                item.declared_appearance.icon_asset_id
+                if item.declared_appearance
+                else None
+            )
+            != (icon[0] if icon else None)
+        ):
+            refuse("Item note/resource/icon ownership disagrees with captured facts")
+        graph = next(
+            r["value"] for r in source["records"] if r["key"] == "graph:" + item.key
+        )
+        if set(graph["attachment_ids"]) != {
+            key for key, value in attachments.items() if value["sourceId"] == item.key
+        }:
+            refuse(
+                "Scoped graph attachment inventory disagrees with owned declarations"
+            )
+
+
+def validate_payload_binding(source, snapshot, audit):
+    """Bind normalized content to closed qualified source facts, not just hashes."""
     profile = source["identifiers"]["profile_version"]
     excluded_thoughts = {
         record["value"]["id"]
@@ -517,40 +803,7 @@ def validate_payload_binding(source, snapshot, audit):
         refuse("Authored-note and successful no-note inventories do not reconcile")
     if set(attachments) != set(assets) | omitted or set(texts) & empty:
         refuse("Captured content declarations are missing or contradictory")
-    for key, asset in assets.items():
-        value = attachments[key]
-        selected = role(value, profile)
-        external_path = value["type"] in {2, 8}
-        external = selected == "url" or external_path
-        expected_uri = (
-            reference_uri(value["location"], profile)
-            if external_path
-            else value["location"]
-            if selected == "url"
-            else None
-        )
-        if (
-            asset.owner != value["sourceId"]
-            or asset.role != selected
-            or asset.naming_seed != key.replace("-", "")
-            or asset.original_name
-            != (
-                value["name"]
-                if selected == "url" and value["name"] is not None
-                else value["location"]
-            )
-            or asset.display_name
-            != (
-                PureWindowsPath(value["location"]).name
-                if external_path
-                else value["name"]
-            )
-            or asset.availability
-            not in ({"external"} if external else {"present", "absent"})
-            or asset.external_uri != expected_uri
-            or asset.video_presentation is not None
-        ):
-            refuse("Normalized payload roles or source declarations disagree")
+    _validate_asset_declarations(assets, attachments, profile)
     from .gaps import gap_projections, image_absence_facts, validate_gap_audit
 
     expected_findings, expected_decisions = gap_projections(
@@ -577,117 +830,17 @@ def validate_payload_binding(source, snapshot, audit):
         [request.model_dump(mode="json") for request in audit.requests],
         profile,
     )
-    owners = set()
-    for document in snapshot.documents:
-        if document.owner in owners or document.owner not in texts:
-            refuse("Authored note ownership is ambiguous or unbound")
-        owners.add(document.owner)
-        raw = texts[document.owner]
-        source_document = document.model_copy(
-            update={
-                "text": raw,
-                "text_digest": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
-                "references": (),
-                "text_adaptations": (),
-            }
-        )
-        signature_removed = bool(
-            document.text_adaptations
-            and document.text_adaptations[0].start == 0
-            and document.text_adaptations[0].end == 1
-            and document.text_adaptations[0].before == "\ufeff"
-            and document.text_adaptations[0].after == ""
-        )
-        retained_findings = [
-            finding
-            for finding in snapshot.findings
-            if (
-                finding.rule_id == "local-api.note-formatting.v1"
-                and set(finding.affected) == {document.owner, document.key}
-            )
-            or (
-                finding.rule_id
-                in {
-                    "thebrain.unavailable-image.v1",
-                    "thebrain.unavailable-declared-image.v1",
-                }
-                and _finding_document(finding) == document.key
-            )
-        ]
-        expected = None
-        legacy_bom = raw.startswith("\ufeff") and not signature_removed
-        for (
-            preserve_bom,
-            preserve_colors,
-            legacy_tables,
-            previous_tables,
-            compact_tables,
-            legacy_table_boundaries,
-            preserve_table_warnings,
-        ) in (
-            (False, False, False, False, False, False, False),
-            (False, False, False, False, False, False, True),
-            (False, False, False, False, False, True, True),
-            (False, False, False, False, True, True, True),
-            (False, False, False, True, True, True, True),
-            (legacy_bom, False, True, False, True, True, True),
-            (legacy_bom, True, True, False, True, True, True),
-        ):
-            try:
-                documents, document_findings = bind_documents(
-                    [source_document],
-                    snapshot.assets,
-                    {item.key for item in snapshot.items},
-                    with_findings=True,
-                    preserve_bom=preserve_bom,
-                    preserve_table_colors=preserve_colors,
-                    legacy_tables=legacy_tables,
-                    previous_tables=previous_tables,
-                    compact_tables=compact_tables,
-                    legacy_table_boundaries=legacy_table_boundaries,
-                    preserve_table_warnings=preserve_table_warnings,
-                    brain_id=source["brain"]["id"],
-                    allow_qualified=profile in {"4", "5"},
-                    allow_literal_tokens=profile in {"4", "5"},
-                    excluded=excluded_thoughts,
-                    profile_version=profile,
-                    image_absences=image_absences,
-                )
-            except MigrationRefused:
-                continue
-            if document == documents[0] and sorted(
-                retained_findings, key=lambda finding: finding.observed_json
-            ) == sorted(document_findings, key=lambda finding: finding.observed_json):
-                expected = documents[0]
-                expected_findings.extend(document_findings)
-                break
-        candidates = [
-            key
-            for key, value in attachments.items()
-            if value["sourceId"] == document.owner
-            and role(value, profile) == "note_original"
-        ]
-        if (
-            len(candidates) != 1
-            or document != expected
-            or document.original_copy_omitted
-            and (
-                document.original_asset_id is not None
-                or not any(
-                    d["key"] == "scope:note:" + candidates[0]
-                    and d["outcome"] == "excluded_association"
-                    for d in source["scope"]["decisions"]
-                )
-            )
-            or not document.original_copy_omitted
-            and (
-                document.original_asset_id != candidates[0]
-                or assets[candidates[0]].actual_sha256
-                != hashlib.sha256(raw.encode("utf-8")).hexdigest()
-                or assets[candidates[0]].actual_length != len(raw.encode("utf-8"))
-            )
-        ):
-            refuse("Normalized Markdown is not bound to qualified scoped source text")
+    owners = _validate_captured_documents(
+        source,
+        snapshot,
+        texts,
+        attachments,
+        assets,
+        profile,
+        excluded_thoughts,
+        image_absences,
+        expected_findings,
+    )
     admitted_images = {
         key
         for finding in expected_findings
@@ -702,36 +855,4 @@ def validate_payload_binding(source, snapshot, audit):
         refuse("Note findings are not bound to the qualified formatting adaptations")
     if owners != set(texts):
         refuse("An authored source note has no normalized document")
-    for item in snapshot.items:
-        icon = [
-            a.asset_id
-            for a in snapshot.assets
-            if a.owner == item.key and a.role == "icon"
-        ]
-        if (
-            len(icon) > 1
-            or set(item.document_ids)
-            != {d.key for d in snapshot.documents if d.owner == item.key}
-            or set(item.resource_ids)
-            != {
-                a.asset_id
-                for a in snapshot.assets
-                if a.owner == item.key and a.role != "note_original"
-            }
-            or (
-                item.declared_appearance.icon_asset_id
-                if item.declared_appearance
-                else None
-            )
-            != (icon[0] if icon else None)
-        ):
-            refuse("Item note/resource/icon ownership disagrees with captured facts")
-        graph = next(
-            r["value"] for r in source["records"] if r["key"] == "graph:" + item.key
-        )
-        if set(graph["attachment_ids"]) != {
-            key for key, value in attachments.items() if value["sourceId"] == item.key
-        }:
-            refuse(
-                "Scoped graph attachment inventory disagrees with owned declarations"
-            )
+    _validate_item_bindings(source, snapshot, attachments)

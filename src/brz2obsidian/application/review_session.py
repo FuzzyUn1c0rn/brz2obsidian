@@ -508,6 +508,51 @@ class ReviewSession:
             raise OSError("Owned canonical review changed")
         return _inspect_canonical_choices(canonical)
 
+    def _project_export(self, saved, stored_model_fields, *, select_effects):
+        values = {}
+        plain_fields = {} if select_effects else None
+
+        def project(value):
+            if isinstance(value, (InlineExactContent, OpaqueContent)):
+                self._binding(
+                    value.occurrence,
+                    value.identity,
+                    value.reference,
+                    inline=value.data if type(value) is InlineExactContent else None,
+                )
+                values.setdefault(value.identity.sha256, value)
+                return {
+                    "data": {"__brz2obsidian_review_blob__": value.identity.sha256},
+                    "reference": project(value.reference),
+                }
+            if type(value) is bytes:
+                self._ledger.check()
+                item = plain_fields.get(value) if plain_fields is not None else None
+                if item is None:
+                    item = self._admit_values(InlineExactContent(data=value))
+                    if plain_fields is not None and len(plain_fields) < 1024:
+                        self._ledger.retain_metadata(128)
+                        plain_fields[value] = item
+                values.setdefault(item.identity.sha256, item)
+                return {"__brz2obsidian_review_blob__": item.identity.sha256}
+            if isinstance(value, BaseModel):
+                return {
+                    name: project(getattr(value, name))
+                    for name in stored_model_fields(value)
+                }
+            if isinstance(value, (tuple, list)):
+                return [project(child) for child in value]
+            if value is None or type(value) in (str, bool, int, float):
+                return value
+            raise OSError("Unsupported owned review wire value")
+
+        shape = {
+            "schema_id": "brz2obsidian.saved-review-refs",
+            "schema_version": 1,
+            "record": project(saved),
+        }
+        return shape, values
+
     def _freeze_export(self, plan, *, select_effects=False):
         import json
 
@@ -525,50 +570,9 @@ class ReviewSession:
             saved = SavedReview(
                 schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
             )
-            values = {}
-            plain_fields = {} if select_effects else None
-
-            def project(value):
-                if isinstance(value, (InlineExactContent, OpaqueContent)):
-                    self._binding(
-                        value.occurrence,
-                        value.identity,
-                        value.reference,
-                        inline=value.data
-                        if type(value) is InlineExactContent
-                        else None,
-                    )
-                    values.setdefault(value.identity.sha256, value)
-                    return {
-                        "data": {"__brz2obsidian_review_blob__": value.identity.sha256},
-                        "reference": project(value.reference),
-                    }
-                if type(value) is bytes:
-                    self._ledger.check()
-                    item = plain_fields.get(value) if plain_fields is not None else None
-                    if item is None:
-                        item = self._admit_values(InlineExactContent(data=value))
-                        if plain_fields is not None and len(plain_fields) < 1024:
-                            self._ledger.retain_metadata(128)
-                            plain_fields[value] = item
-                    values.setdefault(item.identity.sha256, item)
-                    return {"__brz2obsidian_review_blob__": item.identity.sha256}
-                if isinstance(value, BaseModel):
-                    return {
-                        name: project(getattr(value, name))
-                        for name in _stored_model_fields(value)
-                    }
-                if isinstance(value, (tuple, list)):
-                    return [project(child) for child in value]
-                if value is None or type(value) in (str, bool, int, float):
-                    return value
-                raise OSError("Unsupported owned review wire value")
-
-            shape = {
-                "schema_id": "brz2obsidian.saved-review-refs",
-                "schema_version": 1,
-                "record": project(saved),
-            }
+            shape, values = self._project_export(
+                saved, _stored_model_fields, select_effects=select_effects
+            )
             self._coadmit()
             raw = json.dumps(
                 shape, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -725,6 +729,29 @@ class ReviewSession:
         )
         return self._text(value) if inline else value
 
+    def _verify_inline_binding(self, binding, reference, inline):
+        backing = binding.registration.backing
+        if type(backing) is _MemoryBacking:
+            self._ledger.raw_pass(reference.size)
+            if inline != backing.data:
+                raise OSError("Inline bytes differ from the actual owned occurrence")
+            self._scope._check_live(self._content)
+            return
+        position, equal = 0, True
+        with closing(
+            self._content._read_owned(
+                backing,
+                reference,
+                self._ledger,
+                self._scope,
+            )
+        ) as chunks:
+            for block in chunks:
+                equal = (inline[position : position + len(block)] == block) and equal
+                position += len(block)
+        if not equal or position != len(inline):
+            raise OSError("Inline bytes differ from the actual owned occurrence")
+
     def _binding(
         self, occurrence, identity, historical, *, published=False, inline=None
     ):
@@ -749,31 +776,7 @@ class ReviewSession:
         if (identity.sha256, identity.size) != (reference.sha256, reference.size):
             raise OSError("Registered content identity changed")
         if inline is not None:
-            backing = binding.registration.backing
-            if type(backing) is _MemoryBacking:
-                self._ledger.raw_pass(reference.size)
-                if inline != backing.data:
-                    raise OSError(
-                        "Inline bytes differ from the actual owned occurrence"
-                    )
-                self._scope._check_live(self._content)
-                return binding
-            position, equal = 0, True
-            with closing(
-                self._content._read_owned(
-                    backing,
-                    reference,
-                    self._ledger,
-                    self._scope,
-                )
-            ) as chunks:
-                for block in chunks:
-                    equal = (
-                        inline[position : position + len(block)] == block
-                    ) and equal
-                    position += len(block)
-            if not equal or position != len(inline):
-                raise OSError("Inline bytes differ from the actual owned occurrence")
+            self._verify_inline_binding(binding, reference, inline)
         return binding
 
     def _semantic_value(self, binding):
@@ -850,6 +853,30 @@ class ReviewSession:
             occurrence=value.occurrence,
         )
 
+    def _materialize_subject_semantics(self, values):
+        for key in ("baseline", "current"):
+            version = values.get(key)
+            if type(version) is dict and version.get("content") is not None:
+                version["content"] = self._text(version["content"])
+        if values.get("incoming") is not None:
+            values["incoming"] = self._text(values["incoming"])
+        comparison = values.get("structure")
+        if type(comparison) is dict:
+            for name, version in (
+                ("original", values.get("baseline")),
+                ("current", values.get("current")),
+                ("incoming", values.get("incoming")),
+            ):
+                document = comparison.get(name)
+                available = version.get("content") if type(version) is dict else version
+                content = document.get("content") if type(document) is dict else None
+                if (
+                    type(content) is OpaqueContent
+                    and type(available) is InlineExactContent
+                    and content.identity == available.identity
+                ):
+                    document["content"] = self._semantic_alias(content, available)
+
     def _semantic_input(self, models, values):
         if StructuredDocument in models and values.get("content") is not None:
             body = values.get("body")
@@ -873,32 +900,7 @@ class ReviewSession:
             and values.get("attachment") is None
             and values.get("interpretation") == "supported"
         ):
-            for key in ("baseline", "current"):
-                version = values.get(key)
-                if type(version) is dict and version.get("content") is not None:
-                    version["content"] = self._text(version["content"])
-            if values.get("incoming") is not None:
-                values["incoming"] = self._text(values["incoming"])
-            comparison = values.get("structure")
-            if type(comparison) is dict:
-                for name, version in (
-                    ("original", values.get("baseline")),
-                    ("current", values.get("current")),
-                    ("incoming", values.get("incoming")),
-                ):
-                    document = comparison.get(name)
-                    available = (
-                        version.get("content") if type(version) is dict else version
-                    )
-                    content = (
-                        document.get("content") if type(document) is dict else None
-                    )
-                    if (
-                        type(content) is OpaqueContent
-                        and type(available) is InlineExactContent
-                        and content.identity == available.identity
-                    ):
-                        document["content"] = self._semantic_alias(content, available)
+            self._materialize_subject_semantics(values)
         structure = values.get("structure")
         supported_structure = (
             type(structure) is dict and structure.get("status") == "supported"
@@ -911,47 +913,46 @@ class ReviewSession:
             values["content"] = self._text(values["content"])
         return values
 
+    def _admit_content_value(self, value, path):
+        binding = self._staged_bindings.get(value.occurrence)
+        if binding is not None:
+            if binding.identity != value.identity:
+                raise OSError("Altered registered content value")
+            if binding.historical == value.reference:
+                self._binding(
+                    value.occurrence,
+                    value.identity,
+                    value.reference,
+                    inline=value.data if type(value) is InlineExactContent else None,
+                )
+                return value
+            if type(value) is OpaqueContent:
+                raise OSError("Altered opaque historical reference")
+        if type(value) is OpaqueContent:
+            raise OSError("Opaque content is outside this review session")
+        transaction = self._begin_input(path)
+        try:
+            for start in range(0, len(value.data), 65536):
+                transaction.write(value.data[start : start + 65536])
+            admitted = self._finish_input(transaction, value.reference, inline=False)
+            # A fresh owned registration supplies provenance. Public copies
+            # cannot assign another occurrence or retain changed bytes.
+            return InlineExactContent(
+                data=value.data,
+                identity=value.identity,
+                reference=value.reference,
+                occurrence=admitted.occurrence,
+            )
+        except BaseException:
+            transaction.abort()
+            raise
+
     def _admit_values(self, value, path=()):
         """Register actual new inline inputs; recheck every opaque occurrence."""
         self._ledger.check()
         self._ledger.node(len(path) + 1)
         if type(value) in (InlineExactContent, OpaqueContent):
-            binding = self._staged_bindings.get(value.occurrence)
-            if binding is not None:
-                if binding.identity != value.identity:
-                    raise OSError("Altered registered content value")
-                if binding.historical == value.reference:
-                    self._binding(
-                        value.occurrence,
-                        value.identity,
-                        value.reference,
-                        inline=value.data
-                        if type(value) is InlineExactContent
-                        else None,
-                    )
-                    return value
-                if type(value) is OpaqueContent:
-                    raise OSError("Altered opaque historical reference")
-            if type(value) is OpaqueContent:
-                raise OSError("Opaque content is outside this review session")
-            transaction = self._begin_input(path)
-            try:
-                for start in range(0, len(value.data), 65536):
-                    transaction.write(value.data[start : start + 65536])
-                admitted = self._finish_input(
-                    transaction, value.reference, inline=False
-                )
-                # A fresh owned registration supplies provenance. Public copies
-                # cannot assign another occurrence or retain changed bytes.
-                return InlineExactContent(
-                    data=value.data,
-                    identity=value.identity,
-                    reference=value.reference,
-                    occurrence=admitted.occurrence,
-                )
-            except BaseException:
-                transaction.abort()
-                raise
+            return self._admit_content_value(value, path)
         if isinstance(value, BaseModel):
             if self._batch_current:
                 updates = {}
@@ -1093,24 +1094,7 @@ class ReviewSession:
         )
         return FingerprintResult(request, evidence.sha256, evidence.encoded_size)
 
-    def _answer_created(self, request):
-        self._check()
-        if (
-            self._outstanding is None
-            or self._outstanding.request is not request
-            or request.token.operation is not self._operation_key
-            or request.token.epoch != self._epoch
-            or request.recipe != "review-composition/1"
-            or request.size != sum(span.end - span.start for span in request.spans)
-        ):
-            raise OSError("Created request belongs to another closure")
-        if (
-            type(request.role) is not tuple
-            or len(request.role) != 3
-            or request.role[0] != "composed-document"
-            or any(type(part) is not str for part in request.role)
-        ):
-            raise OSError("Invalid Created output role")
+    def _require_created_sources(self, request):
         self._ledger.retain_metadata(1536 + 80 * (len(self._closure.bindings) + 1))
         for span in request.spans:
             if (
@@ -1132,6 +1116,54 @@ class ReviewSession:
                 published=True,
                 inline=source.inline,
             )
+
+    def _write_created_spans(self, request, transaction):
+        for span in request.spans:
+            source = span.source
+            binding = self._binding(
+                source.occurrence, source.identity, source.reference, published=True
+            )
+            reference = binding.registration.reference
+            if self._comparison.identity(reference) != source.identity:
+                raise OSError("Created source is outside the whole admitted closure")
+            position = 0
+            with closing(
+                self._content._read_owned(
+                    binding.registration.backing,
+                    reference,
+                    self._ledger,
+                    self._scope,
+                )
+            ) as chunks:
+                for block in chunks:
+                    self._ledger.take("step", 1)
+                    start, end = (
+                        max(span.start - position, 0),
+                        min(span.end - position, len(block)),
+                    )
+                    if start < end:
+                        transaction.write(block[start:end])
+                    position += len(block)
+
+    def _answer_created(self, request):
+        self._check()
+        if (
+            self._outstanding is None
+            or self._outstanding.request is not request
+            or request.token.operation is not self._operation_key
+            or request.token.epoch != self._epoch
+            or request.recipe != "review-composition/1"
+            or request.size != sum(span.end - span.start for span in request.spans)
+        ):
+            raise OSError("Created request belongs to another closure")
+        if (
+            type(request.role) is not tuple
+            or len(request.role) != 3
+            or request.role[0] != "composed-document"
+            or any(type(part) is not str for part in request.role)
+        ):
+            raise OSError("Invalid Created output role")
+        self._require_created_sources(request)
         if self._record is None:
             self._initial_review_entry = None
             self._record = uuid4().hex
@@ -1147,34 +1179,7 @@ class ReviewSession:
             request, occurrence, self._ledger, self._scope
         )
         try:
-            for span in request.spans:
-                source = span.source
-                binding = self._binding(
-                    source.occurrence, source.identity, source.reference, published=True
-                )
-                reference = binding.registration.reference
-                if self._comparison.identity(reference) != source.identity:
-                    raise OSError(
-                        "Created source is outside the whole admitted closure"
-                    )
-                position = 0
-                with closing(
-                    self._content._read_owned(
-                        binding.registration.backing,
-                        reference,
-                        self._ledger,
-                        self._scope,
-                    )
-                ) as chunks:
-                    for block in chunks:
-                        self._ledger.take("step", 1)
-                        start, end = (
-                            max(span.start - position, 0),
-                            min(span.end - position, len(block)),
-                        )
-                        if start < end:
-                            transaction.write(block[start:end])
-                        position += len(block)
+            self._write_created_spans(request, transaction)
             registration = transaction.finish(None)
             reference = registration.reference
             identity = ContentIdentity(
@@ -1459,51 +1464,7 @@ class ReviewSession:
             self._ledger.release_failed()
             return result
 
-    def _admit_current(self, admission, facts):
-        """Corroborate only current physical claims, never source/risk authority."""
-        if admission.status != "supported" or not admission.inventory_complete:
-            raise OSError("Complete supported physical admission required")
-        self._ledger.retain_metadata(256 + 64 * len(admission.inventory))
-        inventory = {row.path: row for row in admission.inventory}
-        pending = {} if self._batch_current else None
-
-        def register(path, reference=None):
-            if reference is None:
-                reference = self._content._acquire_current(
-                    path, self._ledger, self._scope
-                )
-            self._physical[path] = self._content._prepare_registered(
-                reference, self._ledger, self._scope
-            )
-
-        def current(path, existence, content):
-            self._ledger.take("step", 1)
-            row = inventory.get(path)
-            if existence in (
-                "absent",
-                "missing",
-                "intentionally_uncreated",
-                "known_source_gap",
-            ):
-                if row is not None:
-                    raise OSError("Absent current claim contradicts fresh inventory")
-                return
-            if existence == "unknown":
-                return
-            if existence != "present" or content is None or row is None:
-                raise OSError("Present current claim lacks fresh physical content")
-            if row.exclusion in ("cache", "temporary") or (row.size, row.sha256) != (
-                content.identity.size,
-                content.identity.sha256,
-            ):
-                raise OSError("Current claim differs from freshly admitted bytes")
-            if path not in self._physical and (pending is None or path not in pending):
-                self._ledger.retain_metadata(1024 + 4 * len(path))
-                if pending is None:
-                    register(path)
-                else:
-                    pending[path] = row
-
+    def _admit_current_claims(self, facts, current):
         for subject in facts.subjects:
             value = subject.current
             current(value.path, value.existence, value.content)
@@ -1527,12 +1488,62 @@ class ReviewSession:
                 for target in targets:
                     if target.canonical_path is not None:
                         current(target.canonical_path, fact.existence, fact.content)
+
+    def _register_current(self, path, reference=None):
+        if reference is None:
+            reference = self._content._acquire_current(path, self._ledger, self._scope)
+        self._physical[path] = self._content._prepare_registered(
+            reference, self._ledger, self._scope
+        )
+
+    def _admit_current_claim(self, inventory, pending, path, existence, content):
+        self._ledger.take("step", 1)
+        row = inventory.get(path)
+        if existence in (
+            "absent",
+            "missing",
+            "intentionally_uncreated",
+            "known_source_gap",
+        ):
+            if row is not None:
+                raise OSError("Absent current claim contradicts fresh inventory")
+            return
+        if existence == "unknown":
+            return
+        if existence != "present" or content is None or row is None:
+            raise OSError("Present current claim lacks fresh physical content")
+        if row.exclusion in ("cache", "temporary") or (row.size, row.sha256) != (
+            content.identity.size,
+            content.identity.sha256,
+        ):
+            raise OSError("Current claim differs from freshly admitted bytes")
+        if path not in self._physical and (pending is None or path not in pending):
+            self._ledger.retain_metadata(1024 + 4 * len(path))
+            if pending is None:
+                self._register_current(path)
+            else:
+                pending[path] = row
+
+    def _admit_current(self, admission, facts):
+        """Corroborate only current physical claims, never source/risk authority."""
+        if admission.status != "supported" or not admission.inventory_complete:
+            raise OSError("Complete supported physical admission required")
+        self._ledger.retain_metadata(256 + 64 * len(admission.inventory))
+        inventory = {row.path: row for row in admission.inventory}
+        pending = {} if self._batch_current else None
+
+        def current(path, existence, content):
+            self._admit_current_claim(inventory, pending, path, existence, content)
+
+        self._admit_current_claims(facts, current)
         if pending:
             references = self._content._acquire_small_current(
                 tuple(pending.values()), self._ledger, self._scope
             )
             for path in pending:
-                register(path, references[path] if references is not None else None)
+                self._register_current(
+                    path, references[path] if references is not None else None
+                )
 
     def resume_review(self, loaded, facts, *, preflight, admission):
         """Resume after an immediate same-reader public scoped ``inspect``.

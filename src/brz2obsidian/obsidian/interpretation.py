@@ -188,6 +188,27 @@ def interpret_structure(
     )
 
 
+def _membership_entry(line, kind, targets):
+    value, scalar_type = _scalar(line[4:].decode().rstrip("\r\n"))
+    if scalar_type != "string":
+        raise _Unsupported("membership_unsupported")
+    if kind == "category":
+        match = re.fullmatch(r"\[\[([^\[\]\r\n|#^]+)(?:\|[^\[\]\r\n]+)?\]\]", value)
+        if (
+            match is None
+            or any(part in ("", ".", "..") for part in match[1].split("/"))
+            or ":" in match[1]
+            or "\\" in match[1]
+        ):
+            raise _Unsupported("membership_unsupported")
+    elif re.fullmatch(r"[\w/-]+", value) is None:
+        raise _Unsupported("membership_unsupported")
+    matches = [t for t in targets if t.kind == kind and value in t.representations]
+    if len(matches) != 1 or matches[0].status != "safe":
+        raise _Unsupported("membership_target_unknown")
+    return MembershipEntry(target=matches[0], representation=value, raw=line)
+
+
 def _memberships(raw, fields, targets):
     if len({t.target_id for t in targets}) != len(targets):
         raise _Unsupported("membership_target_ambiguous")
@@ -206,35 +227,7 @@ def _memberships(raw, fields, targets):
         else:
             if lines[0].rstrip(b"\r\n") != (field.key + ":").encode():
                 raise _Unsupported("membership_unsupported")
-            for line in lines[1:]:
-                value, scalar_type = _scalar(line[4:].decode().rstrip("\r\n"))
-                if scalar_type != "string":
-                    raise _Unsupported("membership_unsupported")
-                if kind == "category":
-                    match = re.fullmatch(
-                        r"\[\[([^\[\]\r\n|#^]+)(?:\|[^\[\]\r\n]+)?\]\]", value
-                    )
-                    if (
-                        match is None
-                        or any(part in ("", ".", "..") for part in match[1].split("/"))
-                        or ":" in match[1]
-                        or "\\" in match[1]
-                    ):
-                        raise _Unsupported("membership_unsupported")
-                elif re.fullmatch(r"[\w/-]+", value) is None:
-                    raise _Unsupported("membership_unsupported")
-                matches = [
-                    t for t in targets if t.kind == kind and value in t.representations
-                ]
-                if (
-                    scalar_type != "string"
-                    or len(matches) != 1
-                    or matches[0].status != "safe"
-                ):
-                    raise _Unsupported("membership_target_unknown")
-                entries.append(
-                    MembershipEntry(target=matches[0], representation=value, raw=line)
-                )
+            entries = [_membership_entry(line, kind, targets) for line in lines[1:]]
         if len({e.target_id for e in entries}) != len(entries):
             raise _Unsupported("membership_duplicate")
         result.append(

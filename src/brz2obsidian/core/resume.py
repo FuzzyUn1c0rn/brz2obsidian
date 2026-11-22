@@ -63,6 +63,16 @@ def _load_result(code, saved=None, effects=None):
     return result
 
 
+def _unsupported_record_result(error):
+    for problem in error.errors():
+        if problem["type"] == "literal_error":
+            if problem["loc"][-1:] == ("schema_id",):
+                return _load_result("unsupported_schema")
+            if problem["loc"][-1:] == ("schema_version",):
+                return _load_result("unsupported_version")
+    return _load_result("invalid_record")
+
+
 def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
     try:
         if isinstance(raw, SavedReview):
@@ -78,13 +88,7 @@ def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
             return _load_result("invalid_record")
         require_inline(saved)
     except ValidationError as error:
-        for problem in error.errors():
-            if problem["type"] == "literal_error":
-                if problem["loc"][-1:] == ("schema_id",):
-                    return _load_result("unsupported_schema")
-                if problem["loc"][-1:] == ("schema_version",):
-                    return _load_result("unsupported_version")
-        return _load_result("invalid_record")
+        return _unsupported_record_result(error)
     except ValueError, RecursionError:
         return _load_result("invalid_record")
     try:

@@ -33,6 +33,51 @@ def _required_fields(value, fields):
         raise ProtocolFailure("Missing required nested safe result content")
 
 
+def _validate_result_content(parsed, result):
+    if parsed.get("operation") == "update":
+        from .update_context_contracts import UpdateContextResult
+
+        _required_fields(result, set(UpdateContextResult.model_fields))
+    else:
+        _validate_one_shot_result_content(result)
+
+
+def _validate_one_shot_result_content(result):
+    required = {
+        "schema",
+        "schema_version",
+        "operation",
+        "outcome",
+        "status",
+        "counts",
+        "findings",
+        "field_errors",
+        "reviewed",
+        "publication",
+        "destination",
+        "checked",
+        "pending",
+        "review_required",
+        "diagnostic_text",
+        "diagnostic_omission",
+    }
+    if not isinstance(result, dict) or not required.issubset(result):
+        raise ProtocolFailure("Missing minimum safe result content")
+    if result["operation"] == "list_brains":
+        _required_fields(result, {"brains"})
+        for brain in result["brains"]:
+            _required_fields(brain, {"brain_id", "name"})
+    for collection in ("findings", "field_errors"):
+        for finding in result[collection]:
+            _required_fields(finding, {"code", "severity", "message", "field", "path"})
+    if result["diagnostic_omission"] is not None:
+        _required_fields(result["diagnostic_omission"], {"findings_count", "reason"})
+    if result["publication"] is not None:
+        _required_fields(
+            result["publication"], {"state", "destination", "receipt_verified"}
+        )
+
+
 def _decode(data, model, maximum):
     if len(data) > maximum or not data.endswith(b"\n") or data.count(b"\n") != 1:
         raise ProtocolFailure("Invalid terminal framing or size")
@@ -61,52 +106,8 @@ def _decode(data, model, maximum):
             ):
                 raise ProtocolFailure("Missing result schema")
         result = parsed.get("result")
-        if (
-            model is WorkerResponse
-            and result is not None
-            and parsed.get("operation") == "update"
-        ):
-            from .update_context_contracts import UpdateContextResult
-
-            _required_fields(result, set(UpdateContextResult.model_fields))
-        elif model is WorkerResponse and result is not None:
-            required = {
-                "schema",
-                "schema_version",
-                "operation",
-                "outcome",
-                "status",
-                "counts",
-                "findings",
-                "field_errors",
-                "reviewed",
-                "publication",
-                "destination",
-                "checked",
-                "pending",
-                "review_required",
-                "diagnostic_text",
-                "diagnostic_omission",
-            }
-            if not isinstance(result, dict) or not required.issubset(result):
-                raise ProtocolFailure("Missing minimum safe result content")
-            if result["operation"] == "list_brains":
-                _required_fields(result, {"brains"})
-                for brain in result["brains"]:
-                    _required_fields(brain, {"brain_id", "name"})
-            for collection in ("findings", "field_errors"):
-                for finding in result[collection]:
-                    _required_fields(
-                        finding, {"code", "severity", "message", "field", "path"}
-                    )
-            if result["diagnostic_omission"] is not None:
-                _required_fields(
-                    result["diagnostic_omission"], {"findings_count", "reason"}
-                )
-            if result["publication"] is not None:
-                _required_fields(
-                    result["publication"], {"state", "destination", "receipt_verified"}
-                )
+        if model is WorkerResponse and result is not None:
+            _validate_result_content(parsed, result)
         if isinstance(result, dict) and result.get("reviewed") is not None:
             review = result["reviewed"]
             if "schema" not in review or "schema_version" not in review:

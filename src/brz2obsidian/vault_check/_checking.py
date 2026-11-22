@@ -24,40 +24,26 @@ from .contracts import (
 )
 
 
-def check_vault(vault: str | Path) -> VaultCheckResult:
-    root = Path(vault).absolute()
-    identity = VaultCheckIdentity(location=str(root), name=root.name)
+def _read_artifact(path, root, artifact, issues):
     try:
-        guard(root)
-        if not root.is_dir():
-            raise OSError("Vault must be an existing directory")
-    except (OSError, UnsafePath) as error:
-        return VaultCheckResult(
-            outcome="failed",
-            vault=identity,
-            counts=VaultCheckCounts(),
-            issues=(
-                unsafe_issue() if isinstance(error, UnsafePath) else read_failure(),
-            ),
-        )
-    files, names, issues, complete = inventory(root)
-    markdown = [path for path in files if path.suffix.lower() == ".md"]
-    bases = [path for path in files if path.suffix.lower() == ".base"]
+        return read_text(path, root)
+    except OSError, UnicodeError:
+        issues.append(read_failure(artifact))
+    except UnsafePath:
+        issues.append(unsafe_issue(artifact))
+    return None
+
+
+def _read_markdown(root, markdown, issues):
     categories = imported = 0
-    read_markdown = read_bases = 0
-    all_notes_read = complete
+    read_markdown = 0
+    all_notes_read = True
     notes = {}
     identities = {}
     for path in markdown:
         artifact = path.relative_to(root).as_posix()
-        try:
-            text = read_text(path, root)
-        except OSError, UnicodeError:
-            issues.append(read_failure(artifact))
-            all_notes_read = False
-            continue
-        except UnsafePath:
-            issues.append(unsafe_issue(artifact))
+        text = _read_artifact(path, root, artifact, issues)
+        if text is None:
             all_notes_read = False
             continue
         read_markdown += 1
@@ -83,15 +69,15 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
         if all(isinstance(value, str) and value.strip() for value in source_pair):
             imported += 1
             identities.setdefault(source_pair, []).append(artifact)
+    return notes, identities, read_markdown, categories, imported, all_notes_read
+
+
+def _read_bases(root, bases, issues):
+    read_bases = 0
     for path in bases:
         artifact = path.relative_to(root).as_posix()
-        try:
-            text = read_text(path, root)
-        except OSError, UnicodeError:
-            issues.append(read_failure(artifact))
-            continue
-        except UnsafePath:
-            issues.append(unsafe_issue(artifact))
+        text = _read_artifact(path, root, artifact, issues)
+        if text is None:
             continue
         read_bases += 1
         try:
@@ -105,34 +91,43 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
                     guidance="Correct the Base YAML; formulas are never evaluated by this checker.",
                 )
             )
+    return read_bases
+
+
+def _category_memberships(root, names, notes, artifact, properties, issues):
+    memberships = set()
+    unavailable_memberships = set()
+    values = properties.get("categories", [])
+    for value in values if isinstance(values, list) else []:
+        if not wikilink(value):
+            continue
+        target, issue = resolve(root, names, value, artifact, "category", "categories")
+        if issue:
+            issues.append(issue)
+        elif target not in notes:
+            unavailable_memberships.add(target)
+        elif not category(notes[target][0], target):
+            issues.append(
+                VaultCheckIssue(
+                    code="invalid_category",
+                    artifact=artifact,
+                    property="categories",
+                    reference=value,
+                    message="Membership target does not have the category folder and native tag role.",
+                    guidance="Link to a Categories note with the categories tag.",
+                )
+            )
+        else:
+            memberships.add(target)
+    return memberships, unavailable_memberships
+
+
+def _check_note_references(root, names, notes, issues):
     providers, owned_icons = {}, set()
     for artifact, (properties, body) in notes.items():
-        memberships = set()
-        unavailable_memberships = set()
-        values = properties.get("categories", [])
-        for value in values if isinstance(values, list) else []:
-            if not wikilink(value):
-                continue
-            target, issue = resolve(
-                root, names, value, artifact, "category", "categories"
-            )
-            if issue:
-                issues.append(issue)
-            elif target not in notes:
-                unavailable_memberships.add(target)
-            elif not category(notes[target][0], target):
-                issues.append(
-                    VaultCheckIssue(
-                        code="invalid_category",
-                        artifact=artifact,
-                        property="categories",
-                        reference=value,
-                        message="Membership target does not have the category folder and native tag role.",
-                        guidance="Link to a Categories note with the categories tag.",
-                    )
-                )
-            else:
-                memberships.add(target)
+        memberships, unavailable_memberships = _category_memberships(
+            root, names, notes, artifact, properties, issues
+        )
         provider = properties.get("appearance_category")
         if not blank(provider) and wikilink(provider):
             target, issue = resolve(
@@ -172,6 +167,9 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
         if issue.property == "appearance_category" and issue.code != "read_failure"
     }
     issues.extend(appearance_issues(notes, providers, owned_icons, invalid_providers))
+
+
+def _check_duplicate_identities(identities, issues):
     for artifacts in identities.values():
         if len(artifacts) > 1:
             for artifact in artifacts:
@@ -184,6 +182,33 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
                         guidance="Review the copies using both opaque identities; titles do not establish identity.",
                     )
                 )
+
+
+def check_vault(vault: str | Path) -> VaultCheckResult:
+    root = Path(vault).absolute()
+    identity = VaultCheckIdentity(location=str(root), name=root.name)
+    try:
+        guard(root)
+        if not root.is_dir():
+            raise OSError("Vault must be an existing directory")
+    except (OSError, UnsafePath) as error:
+        return VaultCheckResult(
+            outcome="failed",
+            vault=identity,
+            counts=VaultCheckCounts(),
+            issues=(
+                unsafe_issue() if isinstance(error, UnsafePath) else read_failure(),
+            ),
+        )
+    files, names, issues, complete = inventory(root)
+    markdown = [path for path in files if path.suffix.lower() == ".md"]
+    bases = [path for path in files if path.suffix.lower() == ".base"]
+    notes, identities, read_markdown, categories, imported, all_notes_read = (
+        _read_markdown(root, markdown, issues)
+    )
+    read_bases = _read_bases(root, bases, issues)
+    _check_note_references(root, names, notes, issues)
+    _check_duplicate_identities(identities, issues)
     ordered = tuple(
         sorted(
             issues,
@@ -209,8 +234,8 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
             base_files=len(bases) if complete else None,
             read_markdown_files=read_markdown,
             read_base_files=read_bases,
-            category_notes=categories if all_notes_read else None,
-            imported_notes=imported if all_notes_read else None,
+            category_notes=categories if complete and all_notes_read else None,
+            imported_notes=imported if complete and all_notes_read else None,
         ),
         issues=ordered,
     )

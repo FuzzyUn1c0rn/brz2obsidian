@@ -1599,6 +1599,10 @@ class ProposedChange(ReconciliationContract):
             raise ValueError(
                 "A changed target path requires the exact reviewed source rename"
             )
+        self._validate_selected_result(unresolved)
+        return self
+
+    def _validate_selected_result(self, unresolved):
         if self.disposition in unresolved:
             if self.result is not None or not self.requires_decision:
                 raise ValueError("Unresolved/refused changes cannot choose a result")
@@ -1623,7 +1627,6 @@ class ProposedChange(ReconciliationContract):
             raise ValueError(
                 "Preservation/no-change results must keep exact current bytes"
             )
-        return self
 
 
 class ReconciliationFinding(ReconciliationContract):
@@ -2165,21 +2168,7 @@ class LinkTargetFacts(ReconciliationContract):
             raise ValueError("File roles must bind exact available target bytes")
         if tuple(a.fragment for a in self.anchors) != self.fragments:
             raise ValueError("Fragment facts require exact available anchors")
-        for anchor in self.anchors:
-            if (
-                not isinstance(self.content, InlineExactContent)
-                or not anchor.spans
-                or len(anchor.spans) != len(anchor.raw_parts)
-            ):
-                raise ValueError("Fragment evidence requires available content")
-            for span, raw in zip(anchor.spans, anchor.raw_parts, strict=True):
-                if (
-                    span.end > len(self.content.data)
-                    or self.content.data[span.start : span.end] != raw
-                ):
-                    raise ValueError("Fragment evidence must bind exact target bytes")
-            if b"#".join(anchor.raw_parts) != anchor.fragment.value.encode("utf-8"):
-                raise ValueError("Fragment value must bind its normalized anchor parts")
+        self._validate_fragment_bytes()
         if self.structure is not None:
             if self.content is None or not same_content(
                 self.structure.content, self.content
@@ -2195,6 +2184,23 @@ class LinkTargetFacts(ReconciliationContract):
         elif self.memberships:
             raise ValueError("Membership facts require exact normalized structure")
         return self
+
+    def _validate_fragment_bytes(self):
+        for anchor in self.anchors:
+            if (
+                not isinstance(self.content, InlineExactContent)
+                or not anchor.spans
+                or len(anchor.spans) != len(anchor.raw_parts)
+            ):
+                raise ValueError("Fragment evidence requires available content")
+            for span, raw in zip(anchor.spans, anchor.raw_parts, strict=True):
+                if (
+                    span.end > len(self.content.data)
+                    or self.content.data[span.start : span.end] != raw
+                ):
+                    raise ValueError("Fragment evidence must bind exact target bytes")
+            if b"#".join(anchor.raw_parts) != anchor.fragment.value.encode("utf-8"):
+                raise ValueError("Fragment value must bind its normalized anchor parts")
 
 
 class LinkMeaning(ReconciliationContract):

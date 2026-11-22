@@ -4,8 +4,10 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.contracts import QUALIFIED_OUTPUT_FORMATS, RunMetadata, SourceIdentity
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
+from brz2obsidian.core.refresh import RefreshWork
 
 from .update_contracts import UpdatePreparation
 from .update_facts import _outputs, output_identity, record
@@ -202,6 +204,55 @@ def _original_payload(operations, history, source, *, _owner=None):
         return None
 
 
+def _retained_original_catalog(
+    original_record,
+    original_record_content,
+    record_key,
+    baseline,
+    outputs,
+    subjects,
+    *,
+    _owner,
+):
+    # The original migration record owns imported paths. Support paths are
+    # declared by the established original output set, never current filenames.
+    paths = (
+        {
+            row["relative_path"]
+            for row in original_record["item_targets"]
+            if row["created"]
+        }
+        | {
+            row["relative_path"]
+            for row in original_record["asset_targets"]
+            if row["relative_path"] is not None
+        }
+        | {
+            output.item_id.removeprefix("support:")
+            for output in baseline.outputs
+            if output.facet == "content" and output.item_id.startswith("support:")
+        }
+    )
+    catalog = _outputs(original_record, dict.fromkeys(paths))
+    original = {}
+    for key in outputs:
+        if key not in catalog:
+            return None
+        path = catalog[key][0]
+        UpdatePreparation.relative_vault_path(path)
+        if path in original:
+            return None
+        content = (
+            original_record_content
+            if key == record_key
+            else subjects[key].baseline.content
+        )
+        original[path] = content if _owner is not None else content.data
+    if set(_outputs(original_record, original)) != set(outputs):
+        return None
+    return original
+
+
 def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
     """Recover the saved original catalog independently of the incoming version."""
     from brz2obsidian.content_values import same_content
@@ -259,43 +310,15 @@ def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
         != baseline.source_version
     ):
         return None
-    # The original migration record owns imported paths. Support paths are
-    # declared by the established original output set, never current filenames.
-    paths = (
-        {
-            row["relative_path"]
-            for row in original_record["item_targets"]
-            if row["created"]
-        }
-        | {
-            row["relative_path"]
-            for row in original_record["asset_targets"]
-            if row["relative_path"] is not None
-        }
-        | {
-            output.item_id.removeprefix("support:")
-            for output in baseline.outputs
-            if output.facet == "content" and output.item_id.startswith("support:")
-        }
+    return _retained_original_catalog(
+        original_record,
+        original_record_content,
+        record_key,
+        baseline,
+        outputs,
+        subjects,
+        _owner=_owner,
     )
-    catalog = _outputs(original_record, dict.fromkeys(paths))
-    original = {}
-    for key in outputs:
-        if key not in catalog:
-            return None
-        path = catalog[key][0]
-        UpdatePreparation.relative_vault_path(path)
-        if path in original:
-            return None
-        content = (
-            original_record_content
-            if key == record_key
-            else subjects[key].baseline.content
-        )
-        original[path] = content if _owner is not None else content.data
-    if set(_outputs(original_record, original)) != set(outputs):
-        return None
-    return original
 
 
 def prepare_onboarding(
@@ -399,10 +422,138 @@ def reobserve_onboarding(operations, preparation, *, _owner=None):
     return _reobserve_onboarding(operations, preparation, history)
 
 
-def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
-    from brz2obsidian.content_fingerprints import canonical_equal
-    from brz2obsidian.core.refresh import RefreshWork
+def _require_current_onboarding(history, preparation, retained):
+    if (
+        history.admission.status != "supported"
+        or not history.admission.inventory_complete
+    ):
+        raise ValueError("current_admission_required")
+    locator = history.checkpoint.locator if history.checkpoint is not None else None
+    if locator != preparation.locator or history.status not in ("absent", "intact"):
+        raise ValueError("association_or_history_changed")
+    if history.status == "intact" and (
+        retained is None
+        or history.checkpoint.manifest.boundary not in ("local", "prepared")
+        or retained.saved.plan.facts.format_operation.kind != "onboarding"
+        or retained.saved.plan.facts.proposal_id
+        != preparation.review.proposal.proposal_id
+    ):
+        raise ValueError("current_onboarding_history_required")
 
+
+def _read_current_onboarding_payload(operations, preparation, *, _owner):
+    directory = Path(preparation.payload_directory).absolute()
+    if directory.name != "incoming" or (
+        directory.parent.parent != Path(tempfile.gettempdir())
+        or not directory.parent.name.startswith("brz2obsidian-update-")
+        if _owner is None
+        else directory.parent != _owner._directory
+    ):
+        raise ValueError("owned_payload_required")
+    if (
+        validate_review(preparation.review).status != "accepted"
+        if _owner is None
+        else _owner._session._replay(preparation.review) is None
+    ):
+        raise ValueError("invalid_review")
+    actual = operations.observe_reviewed_source(directory, preparation.review)
+    if actual != preparation.source_binding:
+        raise ValueError("source_payload_changed")
+    incoming = _read_physical(directory, actual.files, _owner=_owner)
+    if _owner is not None:
+        _owner._session._coadmit()
+    return directory, actual, incoming
+
+
+def _revalidate_onboarding_source(
+    operations, preparation, history, incoming, original, actual, *, _owner
+):
+    if preparation.source_ref is not None:
+        metadata = RunMetadata.model_validate(record(incoming)["run_metadata"])
+        with tempfile.TemporaryDirectory(
+            prefix="brz2obsidian-onboarding-check-"
+        ) as owned:
+            fresh, _, observed_source, _ = _render(
+                operations,
+                preparation.source_ref,
+                original or {},
+                metadata=metadata,
+                directory=Path(owned) / "incoming",
+                _owner=_owner,
+            )
+            fresh_binding = operations.observe_reviewed_source(
+                fresh, preparation.review
+            )
+        if (
+            observed_source != preparation.observed_source
+            or fresh_binding.files != actual.files
+        ):
+            raise ValueError("incoming_source_changed")
+    else:
+        saved_binding = (
+            history.checkpoint.manifest.reviewed_source if history.checkpoint else None
+        )
+        if (
+            saved_binding is None
+            or saved_binding.proposal_id != actual.proposal_id
+            or saved_binding.incoming_identity != actual.incoming_identity
+            or saved_binding.target_source_version != actual.target_source_version
+            or saved_binding.files != actual.files
+            or history.checkpoint.manifest.observed_source
+            != preparation.observed_source
+        ):
+            raise ValueError("persisted_source_authority_required")
+
+
+def _scope_current_onboarding_review(operations, history, facts, review, *, _owner):
+    if _owner is None:
+        history = _scope_review(operations, history, facts, review)
+    else:
+        facts = _owner._session._admit_values(facts)
+        _owner._session._coadmit()
+        scoped_plan = review
+        if not canonical_equal(facts, scoped_plan.facts):
+            provisional = _owner._session._drive(
+                RefreshWork(
+                    scoped_plan,
+                    facts.model_copy(
+                        update={"generation": scoped_plan.proposal.generation + 1}
+                    ),
+                    scoped_plan.preflight,
+                )
+            )
+            if provisional.status != "accepted":
+                raise ValueError("current_selected_scope_unavailable")
+            scoped_plan = provisional.plan
+        history = _owner._scoped(history, facts, scoped_plan)
+    return history, facts
+
+
+def _refresh_current_onboarding_review(
+    operations, history, facts, review, actual, directory, *, _owner
+):
+    changed = (
+        facts != review.facts
+        if _owner is None
+        else not canonical_equal(facts, review.facts)
+    ) or history.admission.preflight != review.preflight
+    if changed:
+        facts = facts.model_copy(update={"generation": facts.generation + 1})
+        transition = (
+            refresh_review(review, facts, preflight=history.admission.preflight)
+            if _owner is None
+            else _owner._session._drive(
+                RefreshWork(review, facts, history.admission.preflight)
+            )
+        )
+        if transition.status != "accepted":
+            raise ValueError("current_review_unavailable")
+        review = transition.plan
+        actual = operations.observe_reviewed_source(directory, review)
+    return review, actual, changed
+
+
+def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
     try:
         retained = (
             history.checkpoint.review
@@ -419,42 +570,10 @@ def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
                 ),
                 None,
             )
-        if (
-            history.admission.status != "supported"
-            or not history.admission.inventory_complete
-        ):
-            raise ValueError("current_admission_required")
-        locator = history.checkpoint.locator if history.checkpoint is not None else None
-        if locator != preparation.locator or history.status not in ("absent", "intact"):
-            raise ValueError("association_or_history_changed")
-        if history.status == "intact" and (
-            retained is None
-            or history.checkpoint.manifest.boundary not in ("local", "prepared")
-            or retained.saved.plan.facts.format_operation.kind != "onboarding"
-            or retained.saved.plan.facts.proposal_id
-            != preparation.review.proposal.proposal_id
-        ):
-            raise ValueError("current_onboarding_history_required")
-        directory = Path(preparation.payload_directory).absolute()
-        if directory.name != "incoming" or (
-            directory.parent.parent != Path(tempfile.gettempdir())
-            or not directory.parent.name.startswith("brz2obsidian-update-")
-            if _owner is None
-            else directory.parent != _owner._directory
-        ):
-            raise ValueError("owned_payload_required")
-        if (
-            validate_review(preparation.review).status != "accepted"
-            if _owner is None
-            else _owner._session._replay(preparation.review) is None
-        ):
-            raise ValueError("invalid_review")
-        actual = operations.observe_reviewed_source(directory, preparation.review)
-        if actual != preparation.source_binding:
-            raise ValueError("source_payload_changed")
-        incoming = _read_physical(directory, actual.files, _owner=_owner)
-        if _owner is not None:
-            _owner._session._coadmit()
+        _require_current_onboarding(history, preparation, retained)
+        directory, actual, incoming = _read_current_onboarding_payload(
+            operations, preparation, _owner=_owner
+        )
         original = _retained_original_payload(
             history, preparation.review.proposal.proposal_id, incoming, _owner=_owner
         )
@@ -465,43 +584,9 @@ def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
                 preparation.original_source_ref or preparation.source_ref,
                 _owner=_owner,
             )
-        if preparation.source_ref is not None:
-            metadata = RunMetadata.model_validate(record(incoming)["run_metadata"])
-            with tempfile.TemporaryDirectory(
-                prefix="brz2obsidian-onboarding-check-"
-            ) as owned:
-                fresh, _, observed_source, _ = _render(
-                    operations,
-                    preparation.source_ref,
-                    original or {},
-                    metadata=metadata,
-                    directory=Path(owned) / "incoming",
-                    _owner=_owner,
-                )
-                fresh_binding = operations.observe_reviewed_source(
-                    fresh, preparation.review
-                )
-            if (
-                observed_source != preparation.observed_source
-                or fresh_binding.files != actual.files
-            ):
-                raise ValueError("incoming_source_changed")
-        else:
-            saved_binding = (
-                history.checkpoint.manifest.reviewed_source
-                if history.checkpoint
-                else None
-            )
-            if (
-                saved_binding is None
-                or saved_binding.proposal_id != actual.proposal_id
-                or saved_binding.incoming_identity != actual.incoming_identity
-                or saved_binding.target_source_version != actual.target_source_version
-                or saved_binding.files != actual.files
-                or history.checkpoint.manifest.observed_source
-                != preparation.observed_source
-            ):
-                raise ValueError("persisted_source_authority_required")
+        _revalidate_onboarding_source(
+            operations, preparation, history, incoming, original, actual, _owner=_owner
+        )
         facts = _facts(
             history,
             original,
@@ -510,45 +595,18 @@ def _reobserve_onboarding(operations, preparation, history, *, _owner=None):
             generation=preparation.review.proposal.generation,
             _owner=_owner,
         )
-        if _owner is None:
-            history = _scope_review(operations, history, facts, preparation.review)
-        else:
-            facts = _owner._session._admit_values(facts)
-            _owner._session._coadmit()
-            scoped_plan = preparation.review
-            if not canonical_equal(facts, scoped_plan.facts):
-                provisional = _owner._session._drive(
-                    RefreshWork(
-                        scoped_plan,
-                        facts.model_copy(
-                            update={"generation": scoped_plan.proposal.generation + 1}
-                        ),
-                        scoped_plan.preflight,
-                    )
-                )
-                if provisional.status != "accepted":
-                    raise ValueError("current_selected_scope_unavailable")
-                scoped_plan = provisional.plan
-            history = _owner._scoped(history, facts, scoped_plan)
-        review = preparation.review
-        changed = (
-            facts != review.facts
-            if _owner is None
-            else not canonical_equal(facts, review.facts)
-        ) or history.admission.preflight != review.preflight
-        if changed:
-            facts = facts.model_copy(update={"generation": facts.generation + 1})
-            transition = (
-                refresh_review(review, facts, preflight=history.admission.preflight)
-                if _owner is None
-                else _owner._session._drive(
-                    RefreshWork(review, facts, history.admission.preflight)
-                )
-            )
-            if transition.status != "accepted":
-                raise ValueError("current_review_unavailable")
-            review = transition.plan
-            actual = operations.observe_reviewed_source(directory, review)
+        history, facts = _scope_current_onboarding_review(
+            operations, history, facts, preparation.review, _owner=_owner
+        )
+        review, actual, changed = _refresh_current_onboarding_review(
+            operations,
+            history,
+            facts,
+            preparation.review,
+            actual,
+            directory,
+            _owner=_owner,
+        )
         result = _prepared(
             history,
             directory,

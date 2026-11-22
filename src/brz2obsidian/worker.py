@@ -15,6 +15,29 @@ from brz2obsidian.application.protocol import (
 from brz2obsidian.application.worker_input import worker_input
 
 
+def _perform_request(request):
+    arguments = request.arguments
+    if request.operation == "list_brains":
+        result = operations.list_brains(arguments.config)
+    elif request.operation == "inspect":
+        result = operations.inspect(arguments.source_selection)
+    elif request.operation == "validate_destination":
+        result = operations.validate_destination(
+            Path(arguments.parent), arguments.vault_name
+        )
+    elif request.operation == "convert_reviewed":
+        result = operations.convert_reviewed(
+            arguments.source_selection,
+            Path(arguments.parent),
+            arguments.vault_name,
+            arguments.reviewed,
+            arguments.proceed_with_warnings,
+        )
+    else:
+        result = operations.check_vault(Path(arguments.vault))
+    return result
+
+
 def main() -> int:
     data = b""
     try:
@@ -37,25 +60,7 @@ def main() -> int:
                 pass
         return 1
     try:
-        arguments = request.arguments
-        if request.operation == "list_brains":
-            result = operations.list_brains(arguments.config)
-        elif request.operation == "inspect":
-            result = operations.inspect(arguments.source_selection)
-        elif request.operation == "validate_destination":
-            result = operations.validate_destination(
-                Path(arguments.parent), arguments.vault_name
-            )
-        elif request.operation == "convert_reviewed":
-            result = operations.convert_reviewed(
-                arguments.source_selection,
-                Path(arguments.parent),
-                arguments.vault_name,
-                arguments.reviewed,
-                arguments.proceed_with_warnings,
-            )
-        else:
-            result = operations.check_vault(Path(arguments.vault))
+        result = _perform_request(request)
         response = WorkerResponse(
             request_id=request.request_id, operation=request.operation, result=result
         )

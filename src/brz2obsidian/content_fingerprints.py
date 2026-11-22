@@ -5,6 +5,7 @@ positions; they neither locate storage nor establish availability.
 """
 
 from dataclasses import dataclass
+from itertools import chain
 from types import UnionType
 from typing import Annotated, ForwardRef, Literal, Union, get_args, get_origin
 
@@ -34,20 +35,16 @@ def _content_branches(annotation, metadata):
     """Recognize only the source-pinned owned callable tagged declaration."""
     if not _CONTENT_DISPATCH_PINNED:
         return None
+    annotation_metadata = ()
+    if get_origin(annotation) is Annotated:
+        arguments = get_args(annotation)
+        annotation, annotation_metadata = arguments[0], arguments[1:]
     discriminator = None
-    for rule in metadata:
+    for rule in chain(metadata, annotation_metadata):
         if type(rule) is Discriminator:
             if discriminator is not None:
                 return None
             discriminator = rule
-    if get_origin(annotation) is Annotated:
-        arguments = get_args(annotation)
-        for rule in arguments[1:]:
-            if type(rule) is Discriminator:
-                if discriminator is not None:
-                    return None
-                discriminator = rule
-        annotation = arguments[0]
     if (
         discriminator is None
         or discriminator.discriminator is not _content_kind
@@ -64,11 +61,10 @@ def _content_branches(annotation, metadata):
         (branches[0], InlineExactContent, "inline"),
         (branches[1], OpaqueContent, "opaque"),
     ):
-        if get_origin(branch) is not Annotated:
-            return None
         arguments = get_args(branch)
         if (
-            len(arguments) != 2
+            get_origin(branch) is not Annotated
+            or len(arguments) != 2
             or arguments[0] is not model
             or type(arguments[1]) is not Tag
             or type(arguments[1].tag) is not str
@@ -240,7 +236,7 @@ class _ModelInventory:
         self.retained = self.temporary = self.nodes = self.steps = 0
         self.text = self.raw_work = self.encoded = 0
 
-    def charge(self, *, nodes=0, steps=0, retained=0, temporary=0):
+    def charge(self, steps=0, *, nodes=0, retained=0, temporary=0):
         if (
             nodes > self.node_limit - self.nodes
             or steps > self.step_limit - self.steps
@@ -261,9 +257,13 @@ class _ModelInventory:
     def mapping(self, count):
         self.charge(steps=count, temporary=256 + 64 * count)
 
-    def error(self, depth):
+    @staticmethod
+    def _error_workspace(depth):
         # Code/context header, input reference and a bounded location tuple.
-        self.charge(temporary=256 + 16 * depth, steps=1)
+        return 256 + 16 * depth
+
+    def error(self, depth):
+        self.charge(temporary=self._error_workspace(depth), steps=1)
 
     @staticmethod
     def field(value, name, default=None):
@@ -334,13 +334,56 @@ class _ModelInventory:
             # Slice materialization and the comparison read of both byte values.
             self.raw_work += 2 * (length + 1) + len(expected) + 1
 
-    def validators(self, model, value, depth):
-        name = model.__name__
-        get = lambda key, default=None: self.field(value, key, default)
+    def validators(self, model, depth):
         # Model-level after validators can raise one error after field parsing.
         for validator in model.__pydantic_decorators__.model_validators:
             self.charge(steps=_VALIDATOR_STEPS[validator])
             self.error(depth)
+
+    def _validator_work(self, name, value, depth):
+        get = lambda key, default=None: self.field(value, key, default)
+        if name == "OperationReversalTarget":
+            return self._reversal_target_work, (get,)
+        if name == "ReconciliationInput":
+            return self._reconciliation_input_work, (get,)
+        if name == "SourceVersionMemory":
+            return self._source_memory_work, (get, depth)
+        if name == "LinkTargetFacts":
+            return self._target_evidence, (get,)
+        if name == "LinkDocument":
+            return self._link_occurrences, (get,)
+        if name in (
+            "InlineExactContent",
+            "ContentIdentity",
+            "SupportedFormatBaseline",
+            "StructureField",
+            "StructuredDocument",
+            "OperationReversalOutput",
+        ):
+            return self._content_validator_work, (name, get)
+        if name in (
+            "UpdateProposal",
+            "ProposedChange",
+            "IdentityAssociationDecision",
+            "SourceMemoryProvenance",
+            "RetainedAttachmentOwnership",
+            "AttachmentRemovalContinuation",
+        ):
+            return self._decision_validator_work, (name, get)
+        return self._evidence_validator_work, (name, get)
+
+    def _reversal_target_work(self, get):
+        owned, rows = get("owned_targets", ()), get("outputs", ())
+        self.sequence(len(owned), pairs=True)
+        self.sequence(len(rows), pairs=True)
+        for count in (len(owned), len(owned), len(rows), len(rows), len(owned)):
+            self.mapping(count)
+        for _ in range(2):
+            self.sequence(len(rows))
+            self.mapping(len(rows))
+        self.charge(steps=len(rows) * len(owned))
+
+    def _content_validator_work(self, name, get):
         if name == "InlineExactContent":
             data = get("data")
             if type(data) is bytes:
@@ -366,55 +409,9 @@ class _ModelInventory:
             self.charge(steps=count)
         elif name == "OperationReversalOutput":
             self.compare_content(get("produced"), get("target"))
-        elif name == "OperationReversalTarget":
-            owned, rows = get("owned_targets", ()), get("outputs", ())
-            self.sequence(len(owned), pairs=True)
-            self.sequence(len(rows), pairs=True)
-            for count in (len(owned), len(owned), len(rows), len(rows), len(owned)):
-                self.mapping(count)
-            for _ in range(2):
-                self.sequence(len(rows))
-                self.mapping(len(rows))
-            self.charge(steps=len(rows) * len(owned))
-        elif name == "ReconciliationInput":
-            subjects, safety = get("subjects", ()), get("safety_facts", ())
-            self.sequence(len(subjects), pairs=True)
-            self.sequence(len(safety))
-            self.mapping(len(subjects))
-            self.mapping(len(safety))
-            self.mapping(len(subjects))
-            for fact in safety:
-                self.charge(steps=1)
-                count = len(self.field(fact, "subjects", ()))
-                self.mapping(count)
-                self.mapping(count)
-            count = len(get("identity_inventory", ()))
-            self.sequence(count)
-            self.mapping(count)
-            association, rename, preservation = (
-                get(key, ())
-                for key in (
-                    "association_decisions",
-                    "rename_decisions",
-                    "preservation_decisions",
-                )
-            )
-            decisions = len(association) + len(rename) + len(preservation)
-            self.sequence(len(association) + len(rename))
-            self.sequence(decisions)
-            self.mapping(decisions)
-            for family in (association, rename, preservation):
-                self.sequence(len(family), pairs=True)
-                self.mapping(len(family))
-                self.mapping(len(family))
-                self.mapping(len(subjects))
-            count = len(get("source_version_memory", ()))
-            self.sequence(count)
-            self.mapping(count)
-            self.mapping(count)
-            self.mapping(decisions)
-            self.mapping(min(count, decisions))
-        elif name == "UpdateProposal":
+
+    def _decision_validator_work(self, name, get):
+        if name == "UpdateProposal":
             count = len(get("changes", ()))
             self.sequence(count)
             self.mapping(count)
@@ -434,70 +431,73 @@ class _ModelInventory:
                 self.mapping(len(self.field(assumption, "fingerprint", "")))
                 self.mapping(16)
                 self.mapping(64)
-        elif name == "SourceVersionMemory":
-            self.sequence(4)
-            scope = tuple(
-                get(key, "")
-                for key in ("module_id", "collection_id", "item_id", "facet")
-            )
-            self.json_hash(scope, depth + 1)
-            context = get("configuration_context")
-            if context is not None:
-                self.json_hash(scope, depth + 1)
-                self.json_hash(context, depth + 1)
-            self.mapping(8)
-            self.mapping(2)
-            self.mapping(10)
-            self.charge(temporary=10 * (64 + 4 * 96) + 64 + 4 * 96)
-            provenance = get("provenance")
-            count = len(self.field(provenance, "reviewed_assumptions", ()))
-            self.mapping(count)
-            self.mapping(count)
-            self.mapping(4)
-            self.charge(steps=3 * count + 10)
         elif name in ("RetainedAttachmentOwnership", "AttachmentRemovalContinuation"):
             self.path(
                 get("source_path" if name == "RetainedAttachmentOwnership" else "path")
             )
-        elif name == "LinkTargetFacts":
-            anchors = get("anchors", ())
-            self.sequence(len(anchors))
-            for anchor in anchors:
-                self.charge(steps=1)
-                total = 0
-                spans = self.field(anchor, "spans", ())
-                parts = self.field(anchor, "raw_parts", ())
-                for span, part in zip(spans, parts):
-                    self.compare_span(get("content"), span, part)
-                for part in parts:
-                    self.charge(steps=1)
-                    length = len(part)
-                    self.charge(temporary=64 + length)
-                    self.raw_work += length + 1
-                    total += length + 1
-                fragment = self.field(anchor, "fragment")
-                encoded = 4 * len(self.field(fragment, "value", ""))
-                self.charge(temporary=128 + total + encoded)
-                self.raw_work += 2 * (total + encoded + 2)
-            structure = get("structure")
-            if structure is not None:
-                self.compare_content(self.field(structure, "content"), get("content"))
-                count = 0
-                for membership in self.field(structure, "memberships", ()):
-                    self.charge(steps=1)
-                    count += len(self.field(membership, "entries", ()))
-                self.sequence(count)
-        elif name == "LinkDocument":
-            occurrences = get("occurrences", ())
-            self.mapping(len(occurrences))
-            for occurrence in occurrences:
-                self.charge(steps=1)
-                self.compare_span(
-                    get("content"),
-                    self.field(occurrence, "span"),
-                    self.field(occurrence, "raw", b""),
-                )
-        elif name in ("LinkDocumentValidation", "AttachmentCandidateValidation"):
+
+    def _reconciliation_input_work(self, get):
+        subjects, safety = get("subjects", ()), get("safety_facts", ())
+        self.sequence(len(subjects), pairs=True)
+        self.sequence(len(safety))
+        self.mapping(len(subjects))
+        self.mapping(len(safety))
+        self.mapping(len(subjects))
+        for fact in safety:
+            self.charge(steps=1)
+            count = len(self.field(fact, "subjects", ()))
+            self.mapping(count)
+            self.mapping(count)
+        count = len(get("identity_inventory", ()))
+        self.sequence(count)
+        self.mapping(count)
+        association, rename, preservation = (
+            get(key, ())
+            for key in (
+                "association_decisions",
+                "rename_decisions",
+                "preservation_decisions",
+            )
+        )
+        decisions = len(association) + len(rename) + len(preservation)
+        self.sequence(len(association) + len(rename))
+        self.sequence(decisions)
+        self.mapping(decisions)
+        for family in (association, rename, preservation):
+            self.sequence(len(family), pairs=True)
+            self.mapping(len(family))
+            self.mapping(len(family))
+            self.mapping(len(subjects))
+        count = len(get("source_version_memory", ()))
+        self.sequence(count)
+        self.mapping(count)
+        self.mapping(count)
+        self.mapping(decisions)
+        self.mapping(min(count, decisions))
+
+    def _source_memory_work(self, get, depth):
+        self.sequence(4)
+        scope = tuple(
+            get(key, "") for key in ("module_id", "collection_id", "item_id", "facet")
+        )
+        self.json_hash(scope, depth + 1)
+        context = get("configuration_context")
+        if context is not None:
+            self.json_hash(scope, depth + 1)
+            self.json_hash(context, depth + 1)
+        self.mapping(8)
+        self.mapping(2)
+        self.mapping(10)
+        self.charge(temporary=10 * (64 + 4 * 96) + 64 + 4 * 96)
+        provenance = get("provenance")
+        count = len(self.field(provenance, "reviewed_assumptions", ()))
+        self.mapping(count)
+        self.mapping(count)
+        self.mapping(4)
+        self.charge(steps=3 * count + 10)
+
+    def _evidence_validator_work(self, name, get):
+        if name in ("LinkDocumentValidation", "AttachmentCandidateValidation"):
             count = len(get("findings", ()))
             if name == "AttachmentCandidateValidation":
                 count += len(get("link_findings", ()))
@@ -518,6 +518,46 @@ class _ModelInventory:
             for path in removals:
                 self.charge(steps=1)
                 self.path(path)
+
+    def _target_evidence(self, get):
+        anchors = get("anchors", ())
+        self.sequence(len(anchors))
+        for anchor in anchors:
+            self.charge(steps=1)
+            total = 0
+            spans = self.field(anchor, "spans", ())
+            parts = self.field(anchor, "raw_parts", ())
+            for span, part in zip(spans, parts):
+                self.compare_span(get("content"), span, part)
+            for part in parts:
+                self.charge(steps=1)
+                length = len(part)
+                self.charge(temporary=64 + length)
+                self.raw_work += length + 1
+                total += length + 1
+            fragment = self.field(anchor, "fragment")
+            encoded = 4 * len(self.field(fragment, "value", ""))
+            self.charge(temporary=128 + total + encoded)
+            self.raw_work += 2 * (total + encoded + 2)
+        structure = get("structure")
+        if structure is not None:
+            self.compare_content(self.field(structure, "content"), get("content"))
+            count = 0
+            for membership in self.field(structure, "memberships", ()):
+                self.charge(steps=1)
+                count += len(self.field(membership, "entries", ()))
+            self.sequence(count)
+
+    def _link_occurrences(self, get):
+        occurrences = get("occurrences", ())
+        self.mapping(len(occurrences))
+        for occurrence in occurrences:
+            self.charge(steps=1)
+            self.compare_span(
+                get("content"),
+                self.field(occurrence, "span"),
+                self.field(occurrence, "raw", b""),
+            )
 
     def _tag_repr_bound(self, value, depth):
         """Bound invalid-tag formatting without invoking caller repr/hash/eq."""
@@ -579,15 +619,16 @@ class _ModelInventory:
             self.charge(temporary=64 + 4 * size + 64 + 4 * size)
             self.raw_work += 4 * size + 1
 
-    def walk(self, annotation, item, depth, *, metadata=()):
+    def walk(self, annotation, item, depth, metadata=()):
         if depth > self.depth_limit:
             raise ModelBudgetError(self.nodes, self.steps)
         self.charge(nodes=1, steps=1)
-        if self.validate:
-            branches = _content_branches(annotation, metadata)
-            if branches is not None:
-                self._tagged_content(branches, item, depth)
-                return
+        if (
+            self.validate
+            and (branches := _content_branches(annotation, metadata)) is not None
+        ):
+            self._tagged_content(branches, item, depth)
+            return
         if self.validate and annotation is type(None) and item is not None:
             # A None leaf checks the existing input, not its descendants.
             # Keep a conservative input-alias and error/location allowance.
@@ -595,80 +636,38 @@ class _ModelInventory:
             self.error(depth)
             return
         origin = get_origin(annotation)
-        if origin is Annotated:
-            self.walk(get_args(annotation)[0], item, depth + 1)
-            return
-        if origin in (Union, UnionType) or type(annotation) is tuple:
-            alternatives = (
-                annotation if type(annotation) is tuple else get_args(annotation)
-            )
-            for alternative in alternatives:
-                # Separate attempted graphs/errors; never merge equal field names.
-                self.walk(alternative, item, depth + 1)
-            return
+        alternatives = (
+            get_args(annotation)[:1]
+            if origin is Annotated
+            else annotation
+            if type(annotation) is tuple
+            else get_args(annotation)
+            if origin in (Union, UnionType)
+            else None
+        )
         selected = (
             annotation
             if isinstance(annotation, type) and issubclass(annotation, BaseModel)
+            else type(item)
+            if annotation is None and isinstance(item, BaseModel)
             else None
         )
-        if selected is None and isinstance(item, BaseModel) and annotation is None:
-            selected = type(item)
-        if selected is not None:
+        if alternatives is not None or selected is not None:
             fields = (
                 resolved_contract_fields(selected)
-                if selected.__module__ == "brz2obsidian.contracts"
+                if selected is not None
+                and selected.__module__ == "brz2obsidian.contracts"
                 else selected.model_fields
+                if selected is not None
+                else None
             )
-            if isinstance(item, selected) and type(item) is not selected:
-                raise ValueError(
-                    "Caller-defined model subclasses are not owned schemas"
-                )
-            if type(item) is not dict and type(item) is not selected:
-                self.error(depth)
-                return
-            self.charge(
-                nodes=1 if self.validate else 0,
-                retained=1024 + 128 * len(fields),
-                temporary=256 + 64 * len(fields) if self.validate else 0,
+            children = (
+                self._model_visits(selected, item, fields, depth)
+                if alternatives is None
+                else self._alternative_visits(alternatives, item, depth)
             )
-            for name, field in fields.items():
-                self.charge(steps=1)
-                child = self.field(
-                    item, name, None if field.is_required() else field.default
-                )
-                self.walk(field.annotation, child, depth + 1, metadata=field.metadata)
-                if self.validate:
-                    self.error(depth + 1)
-                    self.charge(steps=1 + len(field.metadata))
-                    if type(child) is str and any(
-                        getattr(rule, "pattern", None) is not None
-                        for rule in field.metadata
-                    ):
-                        self.charge(steps=len(child))
-                    if name in ("path", "current_path", "source_path", "target_path"):
-                        self.path(child)
-                    if name == "reviewed_assumptions" and type(child) in (tuple, list):
-                        self.mapping(len(child))
-            if self.validate:
-                self.validators(selected, item, depth)
-            if type(item) is dict:
-                for name, child in item.items():
-                    self.charge(steps=1)
-                    if name not in fields:
-                        self.walk(None, name, depth + 1)
-                        if (
-                            self.validate
-                            and selected.__module__ == "brz2obsidian.contracts"
-                            and selected.model_config.get("extra") == "forbid"
-                            and type(name) is str
-                        ):
-                            # Pinned Python-input ExtraForbidden retains the
-                            # already owned input by reference, not a rebuilt
-                            # subtree. Keep key/location and error charges.
-                            self.charge(nodes=1, steps=1, temporary=16)
-                        else:
-                            self.walk(None, child, depth + 1)
-                        self.error(depth + 1)
+            for visit, args in children:
+                visit(*args)
             return
         if type(item) is dict:
             self.charge(retained=256 + 64 * len(item))
@@ -693,21 +692,85 @@ class _ModelInventory:
                 )
                 self.walk(child_type, child, depth + 1)
             return
+        retained, temporary, steps = self._leaf_cost(item, depth)
+        self.charge(retained=retained, temporary=temporary, steps=steps)
+        self.text += len(item) if type(item) is bytes else 0
+
+    def _alternative_visits(self, alternatives, item, depth):
+        for annotation in alternatives:
+            # Separate attempted graphs/errors; never merge equal field names.
+            yield self.walk, (annotation, item, depth + 1)
+
+    def _model_visits(self, selected, item, fields, depth):
+        """Schedule visits at the walker's stack depth and in validation order."""
+        if isinstance(item, selected) and type(item) is not selected:
+            raise ValueError("Caller-defined model subclasses are not owned schemas")
+        if type(item) is not dict and type(item) is not selected:
+            self.charge(temporary=self._error_workspace(depth), steps=1)
+            return
+        self.charge(
+            nodes=1 if self.validate else 0,
+            retained=1024 + 128 * len(fields),
+            temporary=256 + 64 * len(fields) if self.validate else 0,
+        )
+        for name, field in fields.items():
+            self.charge(steps=1)
+            child = self.field(
+                item, name, None if field.is_required() else field.default
+            )
+            yield self.walk, (field.annotation, child, depth + 1, field.metadata)
+            if self.validate:
+                yield from self._field_validation_visits(name, field, child, depth)
+        if self.validate:
+            yield self.validators, (selected, depth)
+            yield self._validator_work(selected.__name__, item, depth)
+        if type(item) is not dict:
+            return
+        for name, child in item.items():
+            self.charge(steps=1)
+            if name not in fields:
+                yield self.walk, (None, name, depth + 1)
+                if (
+                    self.validate
+                    and selected.__module__ == "brz2obsidian.contracts"
+                    and selected.model_config.get("extra") == "forbid"
+                    and type(name) is str
+                ):
+                    # Pinned Python-input ExtraForbidden retains the
+                    # already owned input by reference, not a rebuilt
+                    # subtree. Keep key/location and error charges.
+                    self.charge(nodes=1, steps=1, temporary=16)
+                else:
+                    yield self.walk, (None, child, depth + 1)
+                yield self.error, (depth + 1,)
+
+    def _field_validation_visits(self, name, field, child, depth):
+        yield self.error, (depth + 1,)
+        yield self.charge, (1 + len(field.metadata),)
+        if type(child) is str:
+            for rule in field.metadata:
+                if getattr(rule, "pattern", None) is not None:
+                    yield self.charge, (len(child),)
+                    break
+        if name in ("path", "current_path", "source_path", "target_path"):
+            yield self.path, (child,)
+        if name == "reviewed_assumptions" and type(child) in (tuple, list):
+            yield self.mapping, (len(child),)
+
+    def _leaf_cost(self, item, depth):
         if isinstance(item, BaseModel):
             # A failed ordinary-union alternative does not inspect attributes of
             # a model of another type, but its error/work remains accounted.
-            self.error(depth)
-        elif type(item) is str:
-            self.charge(retained=64 + 4 * len(item))
-        elif type(item) is bytes:
-            self.charge(retained=64)
-            self.text += len(item)
-        elif item is None or type(item) is bool:
-            self.charge(retained=16)
-        elif type(item) is int:
-            self.charge(retained=64 + (item.bit_length() + 7) // 8)
-        else:
-            raise ValueError("Unsupported prospective model value")
+            return 0, self._error_workspace(depth), 1
+        if type(item) is str:
+            return 64 + 4 * len(item), 0, 0
+        if type(item) is bytes:
+            return 64, 0, 0
+        if item is None or type(item) is bool:
+            return 16, 0, 0
+        if type(item) is int:
+            return 64 + (item.bit_length() + 7) // 8, 0, 0
+        raise ValueError("Unsupported prospective model value")
 
 
 def prospective_model(
@@ -1135,46 +1198,19 @@ def advance_work(work, returned=None, *, context=None):
     """One closed pure transition. No IO or caller-supplied executable exists."""
     from .core.attachment_validation import CandidateWork, advance_candidate
     from .core.reconciliation import ReconcileWork, advance_reconciliation
-    from .core.refresh import (
-        AttachmentViewsWork,
-        ClosureWork,
-        RefreshWork,
-        advance_attachment_views,
-        advance_closure,
-        advance_refresh,
-    )
     from .core.resolution import (
         ActionWork,
-        ApprovalWork,
         AttachmentActionWork,
         KeepCurrentWork,
         PlanWork,
-        PreservedMemoryWork,
-        ProducerActionWork,
         advance_action,
-        advance_approval,
         advance_attachment_action,
         advance_keep_current,
         advance_plan,
-        advance_preserved_memory,
-        advance_producer_action,
     )
-    from .core.review_composition import CompositionWork, advance_composition
-    from .core.selected_effects import SelectedEffectsWork, advance_selected_effects
 
     if context is None:
         context = ExecutionContext(object(), 0, 0, 0)
-    if type(work) is CompositionWork:
-        return advance_composition(work, returned, context)
-    if type(work) is SelectedEffectsWork:
-        return advance_selected_effects(work, returned)
-    if type(work) is ProducerActionWork:
-        return advance_producer_action(work, returned)
-    if type(work) is PreservedMemoryWork:
-        return advance_preserved_memory(work, returned)
-    if type(work) is ApprovalWork:
-        return advance_approval(work, returned)
-
     if type(work) is CandidateWork:
         return advance_candidate(work, returned)
     if type(work) is ReconcileWork:
@@ -1187,6 +1223,44 @@ def advance_work(work, returned=None, *, context=None):
         return advance_keep_current(work, returned, context)
     if type(work) is ActionWork:
         return advance_action(work, returned, context)
+    return _advance_review_work(work, returned, context)
+
+
+def _advance_review_work(work, returned, context):
+    from .core.resolution import (
+        ApprovalWork,
+        PreservedMemoryWork,
+        ProducerActionWork,
+        advance_approval,
+        advance_preserved_memory,
+        advance_producer_action,
+    )
+    from .core.review_composition import CompositionWork, advance_composition
+    from .core.selected_effects import SelectedEffectsWork, advance_selected_effects
+
+    if type(work) is CompositionWork:
+        return advance_composition(work, returned, context)
+    if type(work) is SelectedEffectsWork:
+        return advance_selected_effects(work, returned)
+    if type(work) is ProducerActionWork:
+        return advance_producer_action(work, returned)
+    if type(work) is PreservedMemoryWork:
+        return advance_preserved_memory(work, returned)
+    if type(work) is ApprovalWork:
+        return advance_approval(work, returned)
+    return _advance_refresh_work(work, returned)
+
+
+def _advance_refresh_work(work, returned):
+    from .core.refresh import (
+        AttachmentViewsWork,
+        ClosureWork,
+        RefreshWork,
+        advance_attachment_views,
+        advance_closure,
+        advance_refresh,
+    )
+
     if type(work) is AttachmentViewsWork:
         return advance_attachment_views(work, returned)
     if type(work) is ClosureWork:

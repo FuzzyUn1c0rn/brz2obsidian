@@ -183,45 +183,41 @@ class _GitTimeout(OSError):
         self.stdout = stdout
 
 
-def read_git(argv, *, env, input=None, timeout=30):
-    """Bound aggregate input/output and terminate owned work on every exit."""
-    if input is not None and len(input) > OUTPUT_BUDGET:
-        raise OSError("Git observation input exceeds its safe resource budget")
-    job = _WindowsJob() if os.name == "nt" else None
-    process = None
-    threads = []
-    overflow = Event()
-    timed_out = False
-    lock = Lock()
-    used = len(input) if input is not None else 0
-    failures = []
-    outputs = [bytearray(), bytearray()]
+class _ObservationPipes:
+    def __init__(self, input):
+        self.input = input
+        self.process = None
+        self.overflow = Event()
+        self.timed_out = False
+        self.lock = Lock()
+        self.used = len(input) if input is not None else 0
+        self.failures = []
+        self.outputs = [bytearray(), bytearray()]
 
-    def failure(error):
-        with lock:
-            failures.append(error)
-        if process.poll() is None:
-            process.kill()
+    def failure(self, error):
+        with self.lock:
+            self.failures.append(error)
+        if self.process.poll() is None:
+            self.process.kill()
 
-    def reader(stream, output):
-        nonlocal used
+    def reader(self, stream, output):
         try:
             while block := stream.read(65536):
-                with lock:
-                    remaining = OUTPUT_BUDGET - used
+                with self.lock:
+                    remaining = OUTPUT_BUDGET - self.used
                     output.extend(block[:remaining])
-                    used += min(remaining, len(block))
+                    self.used += min(remaining, len(block))
                     if len(block) > remaining:
-                        overflow.set()
-                        process.kill()
+                        self.overflow.set()
+                        self.process.kill()
         except (OSError, ValueError) as error:
-            failure(error)
+            self.failure(error)
         finally:
             stream.close()
 
-    def input_failure(error):
+    def input_failure(self, error):
         if (
-            timed_out
+            self.timed_out
             and isinstance(error, OSError)
             and (
                 error.errno == errno.EPIPE
@@ -230,20 +226,52 @@ def read_git(argv, *, env, input=None, timeout=30):
             )
         ):
             return
-        failure(error)
+        self.failure(error)
 
-    def writer():
+    def writer(self):
         try:
-            if process.stdin.write(input) != len(input):
+            if self.process.stdin.write(self.input) != len(self.input):
                 raise OSError("Incomplete Git observation input")
-            process.stdin.flush()
+            self.process.stdin.flush()
         except (OSError, ValueError) as error:
-            input_failure(error)
+            self.input_failure(error)
         finally:
             try:
-                process.stdin.close()
+                self.process.stdin.close()
             except (OSError, ValueError) as error:
-                input_failure(error)
+                self.input_failure(error)
+
+
+def _stop_observation(job, process, threads):
+    if job:
+        job.close()
+    elif process is not None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    if process is not None:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=2)
+        _cancel(thread)
+        thread.join(timeout=2)
+    if process is not None:
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+
+
+def read_git(argv, *, env, input=None, timeout=30):
+    """Bound aggregate input/output and terminate owned work on every exit."""
+    if input is not None and len(input) > OUTPUT_BUDGET:
+        raise OSError("Git observation input exceeds its safe resource budget")
+    job = _WindowsJob() if os.name == "nt" else None
+    process = None
+    threads = []
+    pipes = _ObservationPipes(input)
 
     try:
         factory = _SuspendedPopen if job else subprocess.Popen
@@ -257,46 +285,42 @@ def read_git(argv, *, env, input=None, timeout=30):
             start_new_session=os.name != "nt",
             **({"job": job} if job else {}),
         )
+        pipes.process = process
         threads = [
-            Thread(target=reader, args=(process.stdout, outputs[0]), daemon=True),
-            Thread(target=reader, args=(process.stderr, outputs[1]), daemon=True),
+            Thread(
+                target=pipes.reader,
+                args=(process.stdout, pipes.outputs[0]),
+                daemon=True,
+            ),
+            Thread(
+                target=pipes.reader,
+                args=(process.stderr, pipes.outputs[1]),
+                daemon=True,
+            ),
         ]
         if input is not None:
-            threads.append(Thread(target=writer, daemon=True))
+            threads.append(Thread(target=pipes.writer, daemon=True))
         for thread in threads:
             thread.start()
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            timed_out = True
+            pipes.timed_out = True
     finally:
-        if job:
-            job.close()
-        elif process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if process is not None:
-            if process.poll() is None:
-                process.kill()
-            process.wait(timeout=5)
-        for thread in threads:
-            thread.join(timeout=2)
-            _cancel(thread)
-            thread.join(timeout=2)
-        if process is not None:
-            for stream in (process.stdin, process.stdout, process.stderr):
-                if stream is not None and not stream.closed:
-                    stream.close()
-    if overflow.is_set() or failures or any(thread.is_alive() for thread in threads):
+        _stop_observation(job, process, threads)
+    if (
+        pipes.overflow.is_set()
+        or pipes.failures
+        or any(thread.is_alive() for thread in threads)
+    ):
         raise OSError("Git observation exceeds its safe resource budget")
-    if timed_out:
-        if outputs[1]:
+    if pipes.timed_out:
+        if pipes.outputs[1]:
             raise OSError("Git reported an error before its observation timed out")
         raise _GitTimeout(
-            "Git observation exceeded its safe time budget", stdout=bytes(outputs[0])
+            "Git observation exceeded its safe time budget",
+            stdout=bytes(pipes.outputs[0]),
         )
     return subprocess.CompletedProcess(
-        argv, process.returncode, bytes(outputs[0]), bytes(outputs[1])
+        argv, process.returncode, bytes(pipes.outputs[0]), bytes(pipes.outputs[1])
     )

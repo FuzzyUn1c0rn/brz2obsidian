@@ -294,9 +294,7 @@ def _rename(
     )
 
 
-def bind_identity(facts, subject, subject_id, *, applicability=()):
-    items = tuple(sorted(facts.identity_inventory, key=lambda item: item.entry_id))
-    by_id = {item.entry_id: item for item in items}
+def _initial_identity_match(facts, subject, items):
     matches = tuple(item for item in items if _same_identity(facts, subject, item))
     selected = (
         matches[0]
@@ -321,37 +319,12 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         ):
             selected = primary[0]
             operation_owned = True
-    safety = tuple(
-        sorted(
-            (
-                fact
-                for fact in facts.safety_facts
-                if not fact.subjects or subject.item_id in fact.subjects
-            ),
-            key=lambda fact: fact.key,
-        )
-    )
-    dependencies = (
-        f"{subject_id}:identity",
-        f"{subject_id}:inventory",
-        *(f"safety:{fact.key}" for fact in safety),
-    )
-    query = ProposalAssumption(
-        key=f"identity-review:{subject_id}",
-        kind="identity",
-        fingerprint=_digest(
-            (
-                facts.incoming_identity.module_id,
-                facts.incoming_identity.collection_id,
-                subject.item_id,
-                subject.facet,
-                facts.inventory,
-                [_claim_fact(item) for item in matches],
-                [fact.model_dump(mode="json", exclude={"subjects"}) for fact in safety],
-            )
-        ),
-        depends_on=dependencies,
-    )
+    return matches, selected, operation_owned
+
+
+def _identity_candidates(
+    facts, subject, subject_id, items, selected, operation_owned, query, dependencies
+):
     candidates = []
     for item in items:
         same = _same_identity(facts, subject, item)
@@ -402,6 +375,105 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
                 assumptions=(assumption,),
             )
         )
+    return candidates
+
+
+def _selected_target_problem(
+    current, selected, candidate_by_id, disassociate, implicit, finding
+):
+    candidate = candidate_by_id[selected.entry_id]
+    affected = (candidate,) + tuple(candidate_by_id[entry] for entry in disassociate)
+    unsafe = tuple(
+        a.key
+        for affected_candidate in affected
+        if not affected_candidate.target_safe
+        for a in affected_candidate.assumptions
+    )
+    if unsafe:
+        finding("unsafe_identity_target", True, unsafe)
+        return "refused", "target_unsafe"
+    if implicit and (
+        current.existence,
+        content_key(current.content),
+    ) != (
+        selected.current.existence,
+        content_key(selected.current.content),
+    ):
+        finding("current_inventory_mismatch", True)
+        return "refused", "current_mismatch"
+    return None
+
+
+def _association_status(
+    facts, subject, matches, selected, status, reason, repair_required
+):
+    if (
+        status == "association_proposed"
+        and reason == "association_proposed"
+        and subject.prior_reservation
+        and not subject.previously_generated
+        and facts.format_operation.kind == "format_transition"
+        and facts.incoming_identity.output_format == 9
+        and selected.identity_state == "missing"
+        and selected.current.existence == "present"
+        and selected.current.path == subject.path
+        and not matches
+    ):
+        return "matched", "reserved_path_adoption", False
+    if (
+        selected is not None
+        and not repair_required
+        and status == "association_proposed"
+    ):
+        return "matched", "unique_identity", repair_required
+    return status, reason, repair_required
+
+
+def bind_identity(facts, subject, subject_id, *, applicability=()):
+    items = tuple(sorted(facts.identity_inventory, key=lambda item: item.entry_id))
+    by_id = {item.entry_id: item for item in items}
+    matches, selected, operation_owned = _initial_identity_match(facts, subject, items)
+    safety = tuple(
+        sorted(
+            (
+                fact
+                for fact in facts.safety_facts
+                if not fact.subjects or subject.item_id in fact.subjects
+            ),
+            key=lambda fact: fact.key,
+        )
+    )
+    dependencies = (
+        f"{subject_id}:identity",
+        f"{subject_id}:inventory",
+        *(f"safety:{fact.key}" for fact in safety),
+    )
+    query = ProposalAssumption(
+        key=f"identity-review:{subject_id}",
+        kind="identity",
+        fingerprint=_digest(
+            (
+                facts.incoming_identity.module_id,
+                facts.incoming_identity.collection_id,
+                subject.item_id,
+                subject.facet,
+                facts.inventory,
+                [_claim_fact(item) for item in matches],
+                [fact.model_dump(mode="json", exclude={"subjects"}) for fact in safety],
+            )
+        ),
+        depends_on=dependencies,
+    )
+    candidates = _identity_candidates(
+        facts,
+        subject,
+        subject_id,
+        items,
+        selected,
+        operation_owned,
+        query,
+        dependencies,
+    )
     candidate_by_id = {candidate.entry_id: candidate for candidate in candidates}
     status = "matched" if selected is not None else "unresolved"
     reason = (
@@ -483,28 +555,16 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         else subject.model_copy(update={"current": selected.current})
     )
     if selected is not None:
-        candidate = candidate_by_id[selected.entry_id]
-        affected = (candidate,) + tuple(
-            candidate_by_id[entry] for entry in disassociate
+        issue = _selected_target_problem(
+            subject.current,
+            selected,
+            candidate_by_id,
+            disassociate,
+            decision is None,
+            finding,
         )
-        unsafe = tuple(
-            a.key
-            for affected_candidate in affected
-            if not affected_candidate.target_safe
-            for a in affected_candidate.assumptions
-        )
-        if unsafe:
-            status, reason = "refused", "target_unsafe"
-            finding("unsafe_identity_target", True, unsafe)
-        elif decision is None and (
-            subject.current.existence,
-            content_key(subject.current.content),
-        ) != (
-            selected.current.existence,
-            content_key(selected.current.content),
-        ):
-            status, reason = "refused", "current_mismatch"
-            finding("current_inventory_mismatch", True)
+        if issue is not None:
+            status, reason = issue
     repair_required = selected is None or (
         not operation_owned
         and (
@@ -513,26 +573,9 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
             or len(matches) != 1
         )
     )
-    if (
-        status == "association_proposed"
-        and reason == "association_proposed"
-        and subject.prior_reservation
-        and not subject.previously_generated
-        and facts.format_operation.kind == "format_transition"
-        and facts.incoming_identity.output_format == 9
-        and selected.identity_state == "missing"
-        and selected.current.existence == "present"
-        and selected.current.path == subject.path
-        and not matches
-    ):
-        status, reason = "matched", "reserved_path_adoption"
-        repair_required = False
-    elif (
-        selected is not None
-        and not repair_required
-        and status == "association_proposed"
-    ):
-        status, reason = "matched", "unique_identity"
+    status, reason, repair_required = _association_status(
+        facts, subject, matches, selected, status, reason, repair_required
+    )
     review = IdentityReview(
         status=status,
         reason=reason,

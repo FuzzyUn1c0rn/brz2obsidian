@@ -16,24 +16,25 @@ from .source_gaps import source_gap_issues, validate_source_gaps
 from .text import validate_image_notice_evidence, validate_text_adaptations
 
 
-def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
-    def refuse(code, message, *, affected=(), evidence=()):
-        raise MigrationRefused(
-            (
-                Issue(
-                    code=code,
-                    phase="analysis",
-                    message=message,
-                    affected=affected,
-                    evidence=evidence,
-                    guidance="Correct the source or select a compatible reviewed source profile.",
-                ),
-            )
+def _refuse(code, message, *, affected=(), evidence=()):
+    raise MigrationRefused(
+        (
+            Issue(
+                code=code,
+                phase="analysis",
+                message=message,
+                affected=affected,
+                evidence=evidence,
+                guidance="Correct the source or select a compatible reviewed source profile.",
+            ),
         )
+    )
 
+
+def _validate_compatibility(snapshot, policy):
     identity = snapshot.identity
     if snapshot.contract_version != 7 or policy.contract_version != 7:
-        refuse(
+        _refuse(
             "unsupported_format",
             "Only source snapshot and policy contract version 7 is supported",
         )
@@ -48,84 +49,93 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         policy.format_version,
         policy.contract_version,
     ):
-        refuse(
+        _refuse(
             "unsupported_format",
             "Source identity and reviewed profile are incompatible",
         )
+
+
+def _source_inventory(snapshot):
     items = {item.key: item for item in snapshot.items}
     if len(items) != len(snapshot.items):
-        refuse("invalid_source", "Duplicate canonical item keys")
+        _refuse("invalid_source", "Duplicate canonical item keys")
     if len({i.original_identity for i in snapshot.items}) != len(snapshot.items):
-        refuse("invalid_source", "Duplicate original item identities")
+        _refuse("invalid_source", "Duplicate original item identities")
     if (
         snapshot.entry_key not in items
         or not items[snapshot.entry_key].live
         or items[snapshot.entry_key].role != "ordinary"
     ):
-        refuse("invalid_entry", "A valid live ordinary entry item is required")
+        _refuse("invalid_entry", "A valid live ordinary entry item is required")
     documents = {document.key: document for document in snapshot.documents}
     assets = {asset.asset_id: asset for asset in snapshot.assets}
     if len(documents) != len(snapshot.documents) or len(assets) != len(snapshot.assets):
-        refuse("invalid_source", "Duplicate canonical document or asset identity")
+        _refuse("invalid_source", "Duplicate canonical document or asset identity")
+    return items, documents, assets
+
+
+def _validate_item_content(snapshot, documents, assets):
     for item in snapshot.items:
         if any(key not in documents for key in item.document_ids) or any(
             key not in assets for key in item.resource_ids
         ):
-            refuse(
+            _refuse(
                 "invalid_reference", "Item references an absent document or resource"
             )
         if any(documents[key].owner != item.key for key in item.document_ids) or any(
             assets[key].owner != item.key for key in item.resource_ids
         ):
-            refuse("invalid_reference", "Item references another owner's content")
+            _refuse("invalid_reference", "Item references another owner's content")
+
+
+def _validate_payload_ownership(snapshot, items, assets):
     for document in snapshot.documents:
         if document.original_copy_omitted:
             if document.owner not in items or document.original_asset_id is not None:
-                refuse(
+                _refuse(
                     "invalid_reference",
                     "Omitted original must have a valid owner and no copied asset",
                 )
             continue
         if document.owner not in items or document.original_asset_id not in assets:
-            refuse("invalid_reference", "Document owner/original payload is invalid")
+            _refuse("invalid_reference", "Document owner/original payload is invalid")
         original = assets[document.original_asset_id]
         if (
             original.owner != document.owner
             or original.role != "note_original"
             or original.availability != "present"
         ):
-            refuse(
+            _refuse(
                 "invalid_reference",
                 "Document original must be its owner's present note-original asset",
             )
     for asset in snapshot.assets:
         if asset.owner not in items:
-            refuse("invalid_reference", "Asset owner is invalid")
+            _refuse("invalid_reference", "Asset owner is invalid")
         if asset.availability == "present" and (
             asset.actual_length is None or asset.actual_sha256 is None
         ):
-            refuse("invalid_source", "Present asset lacks actual byte inventory")
+            _refuse("invalid_source", "Present asset lacks actual byte inventory")
         if asset.availability == "external" and (
             asset.role not in {"file", "url", "directory"} or not asset.external_uri
         ):
-            refuse(
+            _refuse(
                 "invalid_reference",
                 "External resource lacks its destination URI or supported role",
             )
-    validate_text_adaptations(snapshot)
-    validate_image_notice_evidence(snapshot)
-    validate_references(snapshot)
-    validate_appearance(snapshot, refuse)
+
+
+def _validate_relationships(snapshot, items):
     if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
-        refuse("invalid_source", "Duplicate canonical relationship keys")
+        _refuse("invalid_source", "Duplicate canonical relationship keys")
     for relation in snapshot.relationships:
         if relation.item_a not in items or relation.item_b not in items:
-            refuse("invalid_reference", "Relationship endpoint is absent")
+            _refuse("invalid_reference", "Relationship endpoint is absent")
         endpoints = items[relation.item_a], items[relation.item_b]
         if relation.kind == "tag" and (
             endpoints[0].role != "tag" or relation.item_a == relation.item_b
         ):
-            refuse(
+            _refuse(
                 "invalid_reference",
                 "Tag classification requires a source tag and a distinct assigned item",
             )
@@ -133,22 +143,16 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             relation.kind != "system"
             and any(item.role == "system" for item in endpoints)
         ):
-            refuse(
+            _refuse(
                 "invalid_reference",
                 "Navigation relationship endpoint is not a live nonsystem item",
             )
-    entries = snapshot.accounting.entries
-    validate_classifications(snapshot, refuse)
-    if len({entry.identity for entry in entries}) != len(entries) or any(
-        entry.disposition == "unresolved" or not entry.references for entry in entries
-    ):
-        refuse(
-            "invalid_source",
-            "Declared source accounting is duplicate, unresolved or incomplete",
-        )
+
+
+def _qualified_findings(snapshot, policy, items, documents, assets):
     dispositions = {d.rule_id: d for d in policy.finding_dispositions}
     if len(dispositions) != len(policy.finding_dispositions):
-        refuse("unsupported_feature", "Reviewed finding dispositions are ambiguous")
+        _refuse("unsupported_feature", "Reviewed finding dispositions are ambiguous")
     if any(
         d.disposition == "warning"
         and d.issue_code
@@ -159,12 +163,12 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         }
         for d in policy.finding_dispositions
     ):
-        refuse(
+        _refuse(
             "unsupported_feature",
             "A reviewed profile cannot downgrade required refusal codes to warnings",
         )
     issues = list(image_presentation_issues(snapshot))
-    known_evidence = {e.identity for e in entries} | {
+    known_evidence = {e.identity for e in snapshot.accounting.entries} | {
         e.key for e in snapshot.original_evidence
     }
     known_subjects = (
@@ -183,7 +187,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             or not set(finding.evidence) <= known_evidence
             or not set(finding.affected) <= known_subjects
         ):
-            refuse(
+            _refuse(
                 "unsupported_feature",
                 "Source finding lacks a compatible reviewed disposition or evidence",
             )
@@ -211,10 +215,33 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         a.availability == "absent" and a.asset_id not in recognized_absences
         for a in assets.values()
     ):
-        refuse(
+        _refuse(
             "missing_required_payload", "Absent asset lacks a reviewed source finding"
         )
-    validate_source_gaps(snapshot, policy, refuse)
+    return issues
+
+
+def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
+    _validate_compatibility(snapshot, policy)
+    items, documents, assets = _source_inventory(snapshot)
+    _validate_item_content(snapshot, documents, assets)
+    _validate_payload_ownership(snapshot, items, assets)
+    validate_text_adaptations(snapshot)
+    validate_image_notice_evidence(snapshot)
+    validate_references(snapshot)
+    validate_appearance(snapshot, _refuse)
+    _validate_relationships(snapshot, items)
+    entries = snapshot.accounting.entries
+    validate_classifications(snapshot, _refuse)
+    if len({entry.identity for entry in entries}) != len(entries) or any(
+        entry.disposition == "unresolved" or not entry.references for entry in entries
+    ):
+        _refuse(
+            "invalid_source",
+            "Declared source accounting is duplicate, unresolved or incomplete",
+        )
+    issues = _qualified_findings(snapshot, policy, items, documents, assets)
+    validate_source_gaps(snapshot, policy, _refuse)
     counts = Counts(
         image_presentation_normalizations=sum(
             bool(r.presentation_normalization)

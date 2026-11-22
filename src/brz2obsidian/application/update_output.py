@@ -60,34 +60,62 @@ class UpdateOutput:
             self._condition.notify()
         self._thread.join()
 
+    def _take_pending_output(self):
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: (
+                        self._stopping
+                        or self._control is not None
+                        or self._work is not None
+                        or self._latest is not None
+                    )
+                )
+                current = self._control or self._work
+                if current is not None:
+                    if self._control is current:
+                        self._control = None
+                    else:
+                        self._work = None
+                    return current, None
+                elif self._latest is not None:
+                    delay = self._next_progress_at - monotonic()
+                    if delay > 0:
+                        self._condition.wait(timeout=delay)
+                        continue
+                    observation, self._latest = self._latest, None
+                    return None, observation
+                elif self._stopping:
+                    return None, None
+
+    def _write_progress(self, observation):
+        request, value, started = observation
+        elapsed = int((monotonic() - started) * 1000)
+        scope = (request.request_id, request.sequence)
+        if scope != self._scope:
+            self._scope, self._ordinal = scope, 0
+        self._ordinal += 1
+        self._output.write(
+            encode_progress(
+                WorkerProgress(
+                    request_id=request.request_id,
+                    sequence=request.sequence,
+                    ordinal=self._ordinal,
+                    elapsed_ms=elapsed,
+                    value=value,
+                )
+            )
+        )
+        self._output.flush()
+        self._next_progress_at = monotonic() + 0.1
+
     def _write(self):
         current = None
         try:
             while True:
-                with self._condition:
-                    self._condition.wait_for(
-                        lambda: (
-                            self._stopping
-                            or self._control is not None
-                            or self._work is not None
-                            or self._latest is not None
-                        )
-                    )
-                    current = self._control or self._work
-                    if current is not None:
-                        if self._control is current:
-                            self._control = None
-                        else:
-                            self._work = None
-                        observation = None
-                    elif self._latest is not None:
-                        delay = self._next_progress_at - monotonic()
-                        if delay > 0:
-                            self._condition.wait(timeout=delay)
-                            continue
-                        observation, self._latest = self._latest, None
-                    elif self._stopping:
-                        return
+                current, observation = self._take_pending_output()
+                if current is None and observation is None:
+                    return
                 if current is not None:
                     request, terminal, end, done = current
                     self._output.write(terminal)
@@ -97,25 +125,7 @@ class UpdateOutput:
                     done.set()
                     current = None
                 else:
-                    request, value, started = observation
-                    elapsed = int((monotonic() - started) * 1000)
-                    scope = (request.request_id, request.sequence)
-                    if scope != self._scope:
-                        self._scope, self._ordinal = scope, 0
-                    self._ordinal += 1
-                    self._output.write(
-                        encode_progress(
-                            WorkerProgress(
-                                request_id=request.request_id,
-                                sequence=request.sequence,
-                                ordinal=self._ordinal,
-                                elapsed_ms=elapsed,
-                                value=value,
-                            )
-                        )
-                    )
-                    self._output.flush()
-                    self._next_progress_at = monotonic() + 0.1
+                    self._write_progress(observation)
         except Exception:  # noqa: BLE001 -- I/O observation cannot grant publication authority.
             with self._condition:
                 self._broken = True

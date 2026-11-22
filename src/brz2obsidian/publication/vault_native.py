@@ -259,42 +259,24 @@ def _check_owned_directory(path, anchor):
         raise OSError("Content scratch identity changed")
 
 
-def _observed_chunks(
-    root,
-    path,
-    *,
-    writable=False,
-    expected_size=None,
-    read_chunk_limit=1024 * 1024,
-    owned_identity=None,
-):
-    """Internal traversal; its return value exists only after verified EOF."""
-    if (
-        expected_size is not None
-        and (type(expected_size) is not int or not 0 <= expected_size < 1 << 63)
-        or type(read_chunk_limit) is not int
-        or not 1 <= read_chunk_limit <= 1024 * 1024
-    ):
-        raise OSError("Invalid bounded native read")
+def _read_observation_blocks(stream, expected_size, read_chunk_limit):
+    if expected_size is None:
+        while block := stream.read(read_chunk_limit):
+            yield block
+    else:
+        remaining = expected_size
+        while remaining:
+            request = min(read_chunk_limit, remaining)
+            block = stream.read(request)
+            if len(block) != request:
+                raise OSError("Short bounded native read")
+            remaining -= request
+            yield block
+        if stream.read(1):
+            raise OSError("Expected content has trailing bytes")
 
-    def blocks(stream):
-        if expected_size is None:
-            while block := stream.read(read_chunk_limit):
-                yield block
-        else:
-            remaining = expected_size
-            while remaining:
-                request = min(read_chunk_limit, remaining)
-                block = stream.read(request)
-                if len(block) != request:
-                    raise OSError("Short bounded native read")
-                remaining -= request
-                yield block
-            if stream.read(1):
-                raise OSError("Expected content has trailing bytes")
 
-    root, path = Path(root).absolute(), Path(path).absolute()
-    path.relative_to(root)
+def _observation_ancestors(root, path, owned_identity):
     ancestors = []
     if owned_identity is None:
         parent = path.parent
@@ -307,28 +289,11 @@ def _observed_chunks(
         if path.parent != root:
             raise OSError("Owned backing is outside its scratch directory")
         _check_owned_directory(root, owned_identity[0])
-    before = path.lstat()
-    if (
-        owned_identity is not None
-        and (before.st_dev, before.st_ino) != owned_identity[1]
-    ):
-        raise OSError("Owned backing identity changed")
-    values = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns)
+    return ancestors
 
-    def check_opened(opened):
-        if expected_size is not None and values(opened) != values(before):
-            raise OSError("Opened file identity/size differs before reading")
 
-    if (
-        not _physical(before)
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
-    ):
-        raise OSError("File is not an independent physical file")
-    if expected_size is not None and before.st_size != expected_size:
-        raise OSError("File size differs from expected content before reading")
-    content = hashlib.sha256()
-    buffering = -1 if expected_size is None else 0
+@contextmanager
+def _observation_stream(path, writable, buffering):
     if os.name == "nt":
         import msvcrt
 
@@ -350,21 +315,69 @@ def _observed_chunks(
                 raise ctypes.WinError(ctypes.get_last_error())
             fd = msvcrt.open_osfhandle(duplicate.value, os.O_RDONLY | os.O_BINARY)
             with os.fdopen(fd, "rb", buffering=buffering) as stream:
-                opened = os.fstat(stream.fileno())
-                check_opened(opened)
-                for block in blocks(stream):
-                    content.update(block)
-                    yield block
-                finished = os.fstat(stream.fileno())
+                yield stream, owner
     else:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(fd, "rb", buffering=buffering) as stream:
-            opened = os.fstat(stream.fileno())
-            check_opened(opened)
-            for block in blocks(stream):
-                content.update(block)
-                yield block
-            finished = os.fstat(stream.fileno())
+            yield stream, None
+
+
+def _observation_file_stat(path, owned_identity, expected_size):
+    before = path.lstat()
+    if (
+        owned_identity is not None
+        and (before.st_dev, before.st_ino) != owned_identity[1]
+    ):
+        raise OSError("Owned backing identity changed")
+    if (
+        not _physical(before)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+    ):
+        raise OSError("File is not an independent physical file")
+    if expected_size is not None and before.st_size != expected_size:
+        raise OSError("File size differs from expected content before reading")
+    return before
+
+
+def _observed_chunks(
+    root,
+    path,
+    *,
+    writable=False,
+    expected_size=None,
+    read_chunk_limit=1024 * 1024,
+    owned_identity=None,
+):
+    """Internal traversal; its return value exists only after verified EOF."""
+    if (
+        expected_size is not None
+        and (type(expected_size) is not int or not 0 <= expected_size < 1 << 63)
+        or type(read_chunk_limit) is not int
+        or not 1 <= read_chunk_limit <= 1024 * 1024
+    ):
+        raise OSError("Invalid bounded native read")
+
+    root, path = Path(root).absolute(), Path(path).absolute()
+    path.relative_to(root)
+    ancestors = _observation_ancestors(root, path, owned_identity)
+    before = _observation_file_stat(path, owned_identity, expected_size)
+    values = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns)
+
+    def check_opened(opened):
+        if expected_size is not None and values(opened) != values(before):
+            raise OSError("Opened file identity/size differs before reading")
+
+    content = hashlib.sha256()
+    buffering = -1 if expected_size is None else 0
+    with _observation_stream(path, writable, buffering) as (stream, owner):
+        opened = os.fstat(stream.fileno())
+        check_opened(opened)
+        for block in _read_observation_blocks(stream, expected_size, read_chunk_limit):
+            content.update(block)
+            yield block
+        finished = os.fstat(stream.fileno())
+    if owner is None:
         owner = str(opened.st_uid)
     after = path.lstat()
     if any(values(s) != values(before) for s in (opened, finished, after)):

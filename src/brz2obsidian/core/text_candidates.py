@@ -179,6 +179,175 @@ def moved_navigation_valid(references, occurrences, current_occurrences):
     return True
 
 
+def _candidate_navigation_matches(subject, context, change, candidate):
+    if not subject.moved_navigation:
+        return True
+    current_documents = (
+        tuple(
+            doc
+            for doc in context.current_documents
+            if doc.source_path == change.path
+            and same_content(doc.content, change.current)
+        )
+        if context is not None and change.current is not None
+        else ()
+    )
+    if change.current is not None and len(current_documents) != 1:
+        return False
+    return moved_navigation_valid(
+        subject.moved_navigation,
+        candidate.links.occurrences,
+        current_documents[0].occurrences if current_documents else (),
+    )
+
+
+def _candidate_links_bound(facts, subject, change, candidate):
+    baseline = None
+    context = facts.link_context
+    if context is not None and change.current is not None:
+        candidates = tuple(
+            d
+            for d in context.current_documents
+            if d.document_id == candidate.links.document_id
+            and d.source_path == change.target_path
+            and same_content(d.content, change.current)
+        )
+        if len(candidates) == 1:
+            baseline = LinkValidationBaseline(
+                schema_id="brz2obsidian.link-validation-baseline",
+                schema_version=1,
+                document=candidates[0],
+                targets=context.current_targets,
+                target_facts=context.current_target_facts,
+                inventory=context.inventory,
+            )
+    if not _validate_link_document(
+        candidate.links,
+        expected_content=candidate.content,
+        expected_path=change.target_path,
+        targets=candidate.link_targets,
+        target_facts=candidate.link_target_facts,
+        inventory=candidate.links.inventory,
+        baseline=baseline,
+    ).valid:
+        return False
+    return _candidate_navigation_matches(subject, context, change, candidate)
+
+
+def _candidate_properties(candidate, owner):
+    document = candidate.document
+    keys = [p.key for p in document.properties]
+    if len(set(keys)) != len(keys):
+        return None
+    components = [
+        p.identity_component
+        for p in document.properties
+        if p.identity_component is not None
+    ]
+    if len(set(components)) != len(components):
+        return None
+    expected = dict(zip(("collection", "module", "item"), owner, strict=True))
+    end = 0
+    declared = set()
+    category_representations = set()
+    for prop in document.properties:
+        if (
+            prop.span.start < end
+            or prop.span.end > document.body.start
+            or candidate.content.data[prop.span.start : prop.span.end] != prop.raw
+        ):
+            return None
+        end = prop.span.end
+        if prop.identity_component is not None:
+            if prop.identity_value != expected[prop.identity_component]:
+                return None
+            declared.add((prop.key, prop.identity_component))
+        if prop.membership_kind:
+            if len(prop.representations) != len(prop.targets) or any(
+                t.kind != prop.membership_kind or r not in t.representations
+                for r, t in zip(prop.representations, prop.targets, strict=True)
+            ):
+                return None
+            validate_targets(prop.targets)
+            if prop.membership_kind == "category":
+                category_representations.update(
+                    r for t in prop.targets for r in t.representations
+                )
+    return declared, category_representations
+
+
+def _safe_candidate_appearance(subject, document, choice, category_representations):
+    if (
+        document.appearance
+        and document.appearance not in category_representations
+        and choice != "current"
+    ):
+        if subject.structure is None:
+            return False
+        local = subject.structure.current
+        field = next((f for f in local.fields if f.key == local.appearance_field), None)
+        previously_valid = any(
+            field and field.value in e.target.representations
+            for m in local.memberships
+            if m.kind == "category"
+            for e in m.entries
+        )
+        if field is None or field.value != document.appearance or previously_valid:
+            return False
+    return True
+
+
+def _candidate_metadata_safe(subject, change, candidate, owner, choice, mapping_choice):
+    document = candidate.document
+    validate_targets(
+        (
+            ReferenceTarget(
+                schema_id="brz2obsidian.reference-target",
+                schema_version=1,
+                target_id=change.subject_id,
+                kind="relationship",
+                canonical_path=change.target_path,
+                identity=candidate.identity,
+                target=candidate.target,
+                representations=(change.subject_id,),
+                validation_fingerprint=candidate.validation_fingerprint,
+                status=candidate.status,
+            ),
+        )
+    )
+    property_facts = _candidate_properties(candidate, owner)
+    if property_facts is None:
+        return False
+    declared, category_representations = property_facts
+    if not _known_memberships(subject, document, choice, mapping_choice=mapping_choice):
+        return False
+    if (
+        change.identity_review.reason == "reserved_path_adoption"
+        and not {
+            ("source_collection_id", "collection"),
+            ("source_item_id", "item"),
+        }
+        <= declared
+    ):
+        return False
+    if subject.structure is not None:
+        required = {
+            (f.key, f.identity_component)
+            for d in (
+                subject.structure.original,
+                subject.structure.current,
+                subject.structure.incoming,
+            )
+            for f in d.fields
+            if f.identity_component is not None
+        }
+        if not required <= declared:
+            return False
+    return _safe_candidate_appearance(
+        subject, document, choice, category_representations
+    )
+
+
 def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=False):
     subject = next(
         s
@@ -219,54 +388,8 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
     )
     if selected is None or not same_content(selected, candidate.content):
         return False
-    baseline = None
-    context = facts.link_context
-    if context is not None and change.current is not None:
-        candidates = tuple(
-            d
-            for d in context.current_documents
-            if d.document_id == candidate.links.document_id
-            and d.source_path == change.target_path
-            and same_content(d.content, change.current)
-        )
-        if len(candidates) == 1:
-            baseline = LinkValidationBaseline(
-                schema_id="brz2obsidian.link-validation-baseline",
-                schema_version=1,
-                document=candidates[0],
-                targets=context.current_targets,
-                target_facts=context.current_target_facts,
-                inventory=context.inventory,
-            )
-    if not _validate_link_document(
-        candidate.links,
-        expected_content=candidate.content,
-        expected_path=change.target_path,
-        targets=candidate.link_targets,
-        target_facts=candidate.link_target_facts,
-        inventory=candidate.links.inventory,
-        baseline=baseline,
-    ).valid:
+    if not _candidate_links_bound(facts, subject, change, candidate):
         return False
-    if subject.moved_navigation:
-        current_documents = (
-            tuple(
-                doc
-                for doc in context.current_documents
-                if doc.source_path == change.path
-                and same_content(doc.content, change.current)
-            )
-            if context is not None and change.current is not None
-            else ()
-        )
-        if change.current is not None and len(current_documents) != 1:
-            return False
-        if not moved_navigation_valid(
-            subject.moved_navigation,
-            candidate.links.occurrences,
-            current_documents[0].occurrences if current_documents else (),
-        ):
-            return False
     if any(
         t.identity is not None and t.identity != candidate.identity
         for t in candidate.link_targets
@@ -274,104 +397,8 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
     ):
         return False
     try:
-        validate_targets(
-            (
-                ReferenceTarget(
-                    schema_id="brz2obsidian.reference-target",
-                    schema_version=1,
-                    target_id=change.subject_id,
-                    kind="relationship",
-                    canonical_path=change.target_path,
-                    identity=candidate.identity,
-                    target=candidate.target,
-                    representations=(change.subject_id,),
-                    validation_fingerprint=candidate.validation_fingerprint,
-                    status=candidate.status,
-                ),
-            )
+        return _candidate_metadata_safe(
+            subject, change, candidate, owner, choice, mapping_choice
         )
-        keys = [p.key for p in document.properties]
-        if len(set(keys)) != len(keys):
-            return False
-        components = [
-            p.identity_component
-            for p in document.properties
-            if p.identity_component is not None
-        ]
-        if len(set(components)) != len(components):
-            return False
-        expected = dict(zip(("collection", "module", "item"), owner, strict=True))
-        end = 0
-        declared = set()
-        category_representations = set()
-        for prop in document.properties:
-            if (
-                prop.span.start < end
-                or prop.span.end > document.body.start
-                or candidate.content.data[prop.span.start : prop.span.end] != prop.raw
-            ):
-                return False
-            end = prop.span.end
-            if prop.identity_component is not None:
-                if prop.identity_value != expected[prop.identity_component]:
-                    return False
-                declared.add((prop.key, prop.identity_component))
-            if prop.membership_kind:
-                if len(prop.representations) != len(prop.targets) or any(
-                    t.kind != prop.membership_kind or r not in t.representations
-                    for r, t in zip(prop.representations, prop.targets, strict=True)
-                ):
-                    return False
-                validate_targets(prop.targets)
-                if prop.membership_kind == "category":
-                    category_representations.update(
-                        r for t in prop.targets for r in t.representations
-                    )
-        if not _known_memberships(
-            subject, document, choice, mapping_choice=mapping_choice
-        ):
-            return False
-        if (
-            change.identity_review.reason == "reserved_path_adoption"
-            and not {
-                ("source_collection_id", "collection"),
-                ("source_item_id", "item"),
-            }
-            <= declared
-        ):
-            return False
-        if subject.structure is not None:
-            required = {
-                (f.key, f.identity_component)
-                for d in (
-                    subject.structure.original,
-                    subject.structure.current,
-                    subject.structure.incoming,
-                )
-                for f in d.fields
-                if f.identity_component is not None
-            }
-            if not required <= declared:
-                return False
-        if (
-            document.appearance
-            and document.appearance not in category_representations
-            and choice != "current"
-        ):
-            if subject.structure is None:
-                return False
-            local = subject.structure.current
-            field = next(
-                (f for f in local.fields if f.key == local.appearance_field), None
-            )
-            previously_valid = any(
-                field and field.value in e.target.representations
-                for m in local.memberships
-                if m.kind == "category"
-                for e in m.entries
-            )
-            if field is None or field.value != document.appearance or previously_valid:
-                return False
     except ValueError:
         return False
-    return True

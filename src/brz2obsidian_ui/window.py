@@ -1318,54 +1318,190 @@ class MainWindow(QMainWindow):
         self._next_offset = page.next_offset
         self.next_page.setVisible(page.next_offset is not None)
 
+    def _render_review_tab(self):
+        state = self.workbench.snapshot
+        undo_visible, undo_ready = self._undo_footer(state)
+        source_review = state is not None and isinstance(
+            state.binding, UpdateContextBinding
+        )
+        self.primary.setVisible(source_review or undo_visible)
+        self.primary.setText(
+            "Execute reviewed undo" if undo_visible else "Apply update"
+        )
+        self.primary.setAccessibleName(self.primary.text())
+        self.primary.setEnabled(
+            undo_ready
+            or source_review
+            and state.ready
+            and not self.workbench.busy
+            and "apply_update" in state.next_actions
+        )
+        self.heading.setText("Review incoming update")
+        self.explanation.setText("Review the proposal and your decisions.")
+        self.guidance.setText(self.workbench.status_text)
+        if (
+            state is not None
+            and not state.active_request_id
+            and state.reply is not None
+            and state.reply.operation is not None
+        ):
+            self.guidance.setText(state.reply.operation.message)
+        active = bool(state and state.active_request_id)
+        self.activity.setAccessibleName("Update operation progress")
+        self.activity.setVisible(active)
+        progress = state.progress.value if active and state.progress else None
+        if (
+            progress
+            and progress.total_units is not None
+            and progress.completed_units is not None
+        ):
+            self.activity.setRange(0, progress.total_units)
+            self.activity.setValue(progress.completed_units)
+        else:
+            self.activity.setRange(0, 0)
+        self.tabs.setEnabled(not (active or self.snapshot.active_request_id))
+        self.workbench.setEnabled(not self.snapshot.active_request_id)
+
+    def _render_operation_results(self, mode):
+        result = self.snapshot.result
+        self.vault_error.setText(
+            "\n".join(
+                error.message
+                for error in result.field_errors
+                if error.field == "vault" and error not in result.findings
+            )
+            if mode == 2 and result is not None and result.operation == "check_vault"
+            else ""
+        )
+        self.vault_error.setVisible(bool(self.vault_error.text()))
+        severity = "info"
+        if self.snapshot.active_request_id:
+            self.findings.setPlainText(
+                (
+                    "Checking vault"
+                    if self.snapshot.busy_operation == "check_vault"
+                    else "Loading accessible Brains"
+                    if self.snapshot.busy_operation == "list_brains"
+                    else "Converting source"
+                    if self.snapshot.busy_operation == "convert_reviewed"
+                    and self.snapshot.source_kind == "local-api"
+                    else "Inspecting Brain"
+                    if self.snapshot.busy_operation == "inspect"
+                    and self.snapshot.source_kind == "local-api"
+                    else "Converting archive"
+                    if self.snapshot.busy_operation == "convert_reviewed"
+                    else "Inspecting archive"
+                )
+                + "\nPlease wait..."
+            )
+        elif self.snapshot.feedback:
+            self.findings.setPlainText(self.snapshot.feedback)
+            severity = "error"
+        elif result is not None:
+            self.findings.setPlainText(
+                TITLES.get(result.status, result.status)
+                + (
+                    "\nThis read-only check covers current vault structure and conventions. It does not repair files or prove preservation of source content."
+                    if result.operation == "check_vault"
+                    else ""
+                )
+                + (
+                    "\n"
+                    + "\n".join(
+                        f.message
+                        + (
+                            "\n"
+                            + (
+                                "Affected file: "
+                                if result.operation == "check_vault"
+                                else "Reported leftover: "
+                            )
+                            + f.path
+                            if f.path
+                            and not (mode == 0 and f in self.snapshot.recovery_findings)
+                            else ""
+                        )
+                        for f in result.findings[:100]
+                    )
+                    if result.findings
+                    else ""
+                    if result.operation == "check_vault"
+                    else "\nVerified publication. The generated vault has not been checked."
+                    if result.operation == "convert_reviewed"
+                    and result.publication.receipt_verified
+                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
+                    if result.operation == "convert_reviewed"
+                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
+                    if result.outcome in ("failed", "refused")
+                    else "\nReview the planned contents and pending checks below."
+                )
+                + (
+                    f"\n{len(result.findings) - 100} further findings are available in Diagnostic details."
+                    if len(result.findings) > 100
+                    else ""
+                )
+                + (
+                    "\nDiagnostic findings were omitted because the response limit was reached."
+                    if result.diagnostic_omission
+                    else ""
+                )
+            )
+            severity = (
+                "warning"
+                if result.outcome in ("warnings", "issues")
+                else "error"
+                if result.outcome in ("refused", "failed")
+                else "info"
+            )
+        else:
+            self.findings.setPlainText(
+                "Choose an existing vault folder to check its current structure and conventions. This read-only check does not repair files."
+                if mode == 2
+                else "Inspect the archive to see its planned contents. Nothing is written during inspection."
+            )
+        self.findings.setProperty("severity", severity)
+        self.findings.style().unpolish(self.findings)
+        self.findings.style().polish(self.findings)
+        self.counts.setText(
+            "    ".join(
+                f"{title}: {getattr(result.counts, name) if getattr(result.counts, name) is not None else 'unavailable'}"
+                for name, title in (
+                    ("inventory_files", "Inventory files"),
+                    ("markdown_files", "Markdown files"),
+                    ("base_files", "Base files"),
+                    ("read_markdown_files", "Markdown files read"),
+                    ("read_base_files", "Base files read"),
+                    ("category_notes", "Category notes"),
+                    ("imported_notes", "Imported notes"),
+                )
+            )
+            if result and result.operation == "check_vault"
+            else "\n".join(
+                (
+                    f"Planned notes: {result.counts.planned_notes if result.counts.planned_notes is not None else 'unavailable'}    Planned resources: {result.counts.planned_assets if result.counts.planned_assets is not None else 'unavailable'}",
+                    f"Planned categories: {result.counts.planned_category_notes if result.counts.planned_category_notes is not None else 'unavailable'}    Actual notes: {result.counts.actual_notes if result.counts.actual_notes is not None else 'unavailable'}",
+                )
+            )
+            if result
+            else ""
+        )
+        self.pending.setText(
+            "Pending: "
+            + "; ".join(
+                CHECK_LABELS.get(check, "additional backend check")
+                for check in result.pending
+            )
+            if result and result.pending
+            else ""
+        )
+
     def _render(self, *_):
         reviewing = self.tabs.currentIndex() == 3
         self.operation_pages.setCurrentIndex(1 if reviewing else 0)
         for button in (self.primary, self.recovery, self.close_button):
             button.setVisible(not reviewing)
         if reviewing:
-            state = self.workbench.snapshot
-            undo_visible, undo_ready = self._undo_footer(state)
-            source_review = state is not None and isinstance(
-                state.binding, UpdateContextBinding
-            )
-            self.primary.setVisible(source_review or undo_visible)
-            self.primary.setText(
-                "Execute reviewed undo" if undo_visible else "Apply update"
-            )
-            self.primary.setAccessibleName(self.primary.text())
-            self.primary.setEnabled(
-                undo_ready
-                or source_review
-                and state.ready
-                and not self.workbench.busy
-                and "apply_update" in state.next_actions
-            )
-            self.heading.setText("Review incoming update")
-            self.explanation.setText("Review the proposal and your decisions.")
-            self.guidance.setText(self.workbench.status_text)
-            if (
-                state is not None
-                and not state.active_request_id
-                and state.reply is not None
-                and state.reply.operation is not None
-            ):
-                self.guidance.setText(state.reply.operation.message)
-            active = bool(state and state.active_request_id)
-            self.activity.setAccessibleName("Update operation progress")
-            self.activity.setVisible(active)
-            progress = state.progress.value if active and state.progress else None
-            if (
-                progress
-                and progress.total_units is not None
-                and progress.completed_units is not None
-            ):
-                self.activity.setRange(0, progress.total_units)
-                self.activity.setValue(progress.completed_units)
-            else:
-                self.activity.setRange(0, 0)
-            self.tabs.setEnabled(not (active or self.snapshot.active_request_id))
-            self.workbench.setEnabled(not self.snapshot.active_request_id)
+            self._render_review_tab()
             return
         self.activity.setAccessibleName("Operation in progress")
         self.activity.setRange(0, 0)
@@ -1563,137 +1699,7 @@ class MainWindow(QMainWindow):
             else "Choose an output parent folder."
         )
         self.validation_status.setVisible(bool(self.validation_status.text()))
-        result = self.snapshot.result
-        self.vault_error.setText(
-            "\n".join(
-                error.message
-                for error in result.field_errors
-                if error.field == "vault" and error not in result.findings
-            )
-            if mode == 2 and result is not None and result.operation == "check_vault"
-            else ""
-        )
-        self.vault_error.setVisible(bool(self.vault_error.text()))
-        severity = "info"
-        if self.snapshot.active_request_id:
-            self.findings.setPlainText(
-                (
-                    "Checking vault"
-                    if self.snapshot.busy_operation == "check_vault"
-                    else "Loading accessible Brains"
-                    if self.snapshot.busy_operation == "list_brains"
-                    else "Converting source"
-                    if self.snapshot.busy_operation == "convert_reviewed"
-                    and self.snapshot.source_kind == "local-api"
-                    else "Inspecting Brain"
-                    if self.snapshot.busy_operation == "inspect"
-                    and self.snapshot.source_kind == "local-api"
-                    else "Converting archive"
-                    if self.snapshot.busy_operation == "convert_reviewed"
-                    else "Inspecting archive"
-                )
-                + "\nPlease wait..."
-            )
-        elif self.snapshot.feedback:
-            self.findings.setPlainText(self.snapshot.feedback)
-            severity = "error"
-        elif result is not None:
-            self.findings.setPlainText(
-                TITLES.get(result.status, result.status)
-                + (
-                    "\nThis read-only check covers current vault structure and conventions. It does not repair files or prove preservation of source content."
-                    if result.operation == "check_vault"
-                    else ""
-                )
-                + (
-                    "\n"
-                    + "\n".join(
-                        f.message
-                        + (
-                            "\n"
-                            + (
-                                "Affected file: "
-                                if result.operation == "check_vault"
-                                else "Reported leftover: "
-                            )
-                            + f.path
-                            if f.path
-                            and not (mode == 0 and f in self.snapshot.recovery_findings)
-                            else ""
-                        )
-                        for f in result.findings[:100]
-                    )
-                    if result.findings
-                    else ""
-                    if result.operation == "check_vault"
-                    else "\nVerified publication. The generated vault has not been checked."
-                    if result.operation == "convert_reviewed"
-                    and result.publication.receipt_verified
-                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
-                    if result.operation == "convert_reviewed"
-                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
-                    if result.outcome in ("failed", "refused")
-                    else "\nReview the planned contents and pending checks below."
-                )
-                + (
-                    f"\n{len(result.findings) - 100} further findings are available in Diagnostic details."
-                    if len(result.findings) > 100
-                    else ""
-                )
-                + (
-                    "\nDiagnostic findings were omitted because the response limit was reached."
-                    if result.diagnostic_omission
-                    else ""
-                )
-            )
-            severity = (
-                "warning"
-                if result.outcome in ("warnings", "issues")
-                else "error"
-                if result.outcome in ("refused", "failed")
-                else "info"
-            )
-        else:
-            self.findings.setPlainText(
-                "Choose an existing vault folder to check its current structure and conventions. This read-only check does not repair files."
-                if mode == 2
-                else "Inspect the archive to see its planned contents. Nothing is written during inspection."
-            )
-        self.findings.setProperty("severity", severity)
-        self.findings.style().unpolish(self.findings)
-        self.findings.style().polish(self.findings)
-        self.counts.setText(
-            "    ".join(
-                f"{title}: {getattr(result.counts, name) if getattr(result.counts, name) is not None else 'unavailable'}"
-                for name, title in (
-                    ("inventory_files", "Inventory files"),
-                    ("markdown_files", "Markdown files"),
-                    ("base_files", "Base files"),
-                    ("read_markdown_files", "Markdown files read"),
-                    ("read_base_files", "Base files read"),
-                    ("category_notes", "Category notes"),
-                    ("imported_notes", "Imported notes"),
-                )
-            )
-            if result and result.operation == "check_vault"
-            else "\n".join(
-                (
-                    f"Planned notes: {result.counts.planned_notes if result.counts.planned_notes is not None else 'unavailable'}    Planned resources: {result.counts.planned_assets if result.counts.planned_assets is not None else 'unavailable'}",
-                    f"Planned categories: {result.counts.planned_category_notes if result.counts.planned_category_notes is not None else 'unavailable'}    Actual notes: {result.counts.actual_notes if result.counts.actual_notes is not None else 'unavailable'}",
-                )
-            )
-            if result
-            else ""
-        )
-        self.pending.setText(
-            "Pending: "
-            + "; ".join(
-                CHECK_LABELS.get(check, "additional backend check")
-                for check in result.pending
-            )
-            if result and result.pending
-            else ""
-        )
+        self._render_operation_results(mode)
         self._render_api(mode, locked)
         self._elapsed()
 

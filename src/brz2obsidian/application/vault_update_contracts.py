@@ -43,6 +43,33 @@ class VaultOperationIntent(ReconciliationContract):
         default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
     )
 
+    def _require_affected_metadata(self, before, proposed, changes):
+        for rows, inventory in (
+            (self.before_metadata, before),
+            (self.result_metadata, proposed),
+        ):
+            paths = [row.path for row in rows]
+            if paths != sorted(set(paths)) or set(paths) != changes & set(inventory):
+                raise ValueError("Affected metadata must cover exact file roles")
+            for row in rows:
+                self.relative_vault_path(row.path)
+
+    def _require_created_directories(self, before, proposed, changes):
+        directories = [row.path for row in self.created_directories]
+        if directories != sorted(set(directories)):
+            raise ValueError("Created directory paths must be unique and sorted")
+        for path in directories:
+            self.relative_vault_path(path)
+            if (
+                path in before
+                or path in proposed
+                or not any(
+                    changed_path in proposed and changed_path.startswith(path + "/")
+                    for changed_path in changes
+                )
+            ):
+                raise ValueError("Created directory must parent a changed result file")
+
     @model_validator(mode="after")
     def complete_transition(self):
         if self.undo_of_receipt_commit is not None and self.kind != "undo":
@@ -69,29 +96,8 @@ class VaultOperationIntent(ReconciliationContract):
             or set(self.protected_paths) != set(before) - changes
         ):
             raise ValueError("Intent path roles must match exact inventories")
-        for rows, inventory in (
-            (self.before_metadata, before),
-            (self.result_metadata, proposed),
-        ):
-            paths = [row.path for row in rows]
-            if paths != sorted(set(paths)) or set(paths) != changes & set(inventory):
-                raise ValueError("Affected metadata must cover exact file roles")
-            for row in rows:
-                self.relative_vault_path(row.path)
-        directories = [row.path for row in self.created_directories]
-        if directories != sorted(set(directories)):
-            raise ValueError("Created directory paths must be unique and sorted")
-        for path in directories:
-            self.relative_vault_path(path)
-            if (
-                path in before
-                or path in proposed
-                or not any(
-                    changed_path in proposed and changed_path.startswith(path + "/")
-                    for changed_path in changes
-                )
-            ):
-                raise ValueError("Created directory must parent a changed result file")
+        self._require_affected_metadata(before, proposed, changes)
+        self._require_created_directories(before, proposed, changes)
         return self
 
 

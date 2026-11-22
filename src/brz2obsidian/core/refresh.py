@@ -123,6 +123,26 @@ class AttachmentViewsWork:
     results: tuple = ()
 
 
+def _find_attachment_origin(work, decision_id):
+    if work.history_index == len(work.plan.history.events):
+        return replace(work, phase="view")
+    event = work.plan.history.events[work.history_index]
+    if (
+        isinstance(event, ReviewAction)
+        and event.decision_id == decision_id
+        or isinstance(event, ReviewKeepCurrentGroup)
+        and any(a.decision_id == decision_id for a in event.actions)
+    ):
+        return replace(work, phase="view")
+    return replace(
+        work,
+        history_index=work.history_index + 1,
+        original=event.facts
+        if isinstance(event, ReviewRefreshEvent)
+        else work.original,
+    )
+
+
 def advance_attachment_views(work, returned=None):
     if work.index == len(work.approvals):
         return CompletedWork(work.results)
@@ -137,23 +157,7 @@ def advance_attachment_views(work, returned=None):
             history_index=0,
         )
     if work.phase == "origin":
-        if work.history_index == len(work.plan.history.events):
-            return replace(work, phase="view")
-        event = work.plan.history.events[work.history_index]
-        if (
-            isinstance(event, ReviewAction)
-            and event.decision_id == approval.decision_id
-            or isinstance(event, ReviewKeepCurrentGroup)
-            and any(a.decision_id == approval.decision_id for a in event.actions)
-        ):
-            return replace(work, phase="view")
-        return replace(
-            work,
-            history_index=work.history_index + 1,
-            original=event.facts
-            if isinstance(event, ReviewRefreshEvent)
-            else work.original,
-        )
+        return _find_attachment_origin(work, approval.decision_id)
     if work.phase == "view":
         inputs = retained_attachment_inputs(
             work.facts,
@@ -319,7 +323,221 @@ def _refresh(plan, facts, preflight):
     return drive_inline(RefreshWork(plan, facts, preflight))
 
 
-def advance_refresh(work, returned=None):
+def _retain_refresh_approvals(work):
+    plan, facts, preflight = work.plan, work.facts, work.preflight
+    invalidated = work.invalidated
+    applicability = tuple(
+        b
+        for b in work.applicability
+        if not (
+            {a.key for a in b.reviewed_assumptions}
+            | {"producer-choice:" + b.original.decision_id}
+        )
+        & invalidated
+    )
+    current = {change.subject_id: change for change in work.tentative.proposal.changes}
+    old_changes = {change.change_id: change for change in plan.proposal.changes}
+    surviving = []
+    try:
+        for approval in work.retained:
+            before = old_changes[approval.change_id]
+            after = current.get(before.subject_id)
+            keys = {a.key for a in approval.assumptions} | {
+                "effect:" + before.subject_id
+            }
+            origin = next(
+                a for a in plan.actions if a.decision_id == approval.decision_id
+            )
+            if (
+                after is not None
+                and not keys & invalidated
+                and after.change_id == approval.change_id
+                and _approval_safe(
+                    work.producer_facts,
+                    after,
+                    approval,
+                    origin,
+                    work.attachment_applicability,
+                )
+            ):
+                surviving.append(approval)
+    except ValueError:
+        return CompletedWork(_transition(plan, "refused", "dependency_graph_invalid"))
+    if tuple(surviving) != work.retained or applicability != work.applicability:
+        originals = tuple(binding.original for binding in applicability)
+        producer = work.producer_facts.model_copy(
+            update={
+                "association_decisions": tuple(
+                    d
+                    for d in work.producer_facts.association_decisions
+                    if d in originals
+                ),
+                "rename_decisions": tuple(
+                    d for d in work.producer_facts.rename_decisions if d in originals
+                ),
+            }
+        )
+        return replace(
+            work,
+            phase="iteration",
+            retained=tuple(surviving),
+            applicability=applicability,
+            producer_facts=producer,
+        )
+    bindings = []
+    for approval in work.retained:
+        before = old_changes[approval.change_id]
+        origin = next(a for a in plan.actions if a.decision_id == approval.decision_id)
+        keys = {a.key for a in approval.assumptions} | {"effect:" + before.subject_id}
+        bindings.append(
+            ReviewRetention(
+                schema_id="brz2obsidian.review-retention",
+                schema_version=1,
+                decision_id=approval.decision_id,
+                subject_id=before.subject_id,
+                domain=approval.domain,
+                origin_generation=origin.expected_generation,
+                origin_change_id=approval.change_id,
+                current_change_id=approval.change_id,
+                dependency_keys=tuple(sorted(keys)),
+            )
+        )
+    return ChildWork(
+        PlanWork(
+            facts,
+            preflight,
+            actions=plan.actions,
+            approvals=work.retained,
+            producer_facts=work.producer_facts,
+            producer_applicability=work.applicability,
+            attachment_applicability=work.attachment_applicability,
+        ),
+        replace(work, phase="consents", bindings=tuple(bindings)),
+    )
+
+
+def _retain_refresh_consents(work, returned):
+    plan, facts, preflight = work.plan, work.facts, work.preflight
+    consent_nodes = {
+        r.change_id: r.assumptions
+        for r in consent_requirements(preflight, returned.proposal, returned.approvals)
+    }
+    consents = tuple(
+        c
+        for c in plan.consents
+        if "consent:" + c.consent_id not in work.invalidated
+        and consent_nodes.get("consent:" + c.consent_id) == c.assumptions
+    )
+    old, new = (
+        {node.key: node for node in work.old},
+        {node.key: node for node in work.new},
+    )
+    event = ReviewRefreshEvent(
+        schema_id="brz2obsidian.review-refresh-event",
+        schema_version=1,
+        expected_generation=plan.proposal.generation,
+        facts=facts,
+        preflight=preflight,
+        previous_dependencies=tuple(old[key] for key in sorted(old)),
+        dependencies=tuple(new[key] for key in sorted(new)),
+        changed_keys=tuple(sorted(work.changed)),
+        invalidated_keys=tuple(sorted(work.invalidated)),
+        retained=work.bindings,
+        producer_applicability=work.applicability,
+        attachment_applicability=work.attachment_applicability,
+    )
+    return ChildWork(
+        PlanWork(
+            facts,
+            preflight,
+            actions=plan.actions,
+            approvals=work.retained,
+            consents=consents,
+            producer_facts=work.producer_facts,
+            producer_applicability=work.applicability,
+            attachment_applicability=work.attachment_applicability,
+        ),
+        replace(work, phase="finish", event=event),
+    )
+
+
+def _refresh_producer_choices(work, returned):
+    plan, facts, preflight = work.plan, work.facts, work.preflight
+    try:
+        producer, applicability = _producer_choices(plan, facts, returned)
+    except ValueError:
+        return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
+    return ChildWork(
+        PlanWork(
+            facts,
+            preflight,
+            actions=plan.actions,
+            producer_facts=producer,
+            producer_applicability=applicability,
+        ),
+        replace(
+            work,
+            phase="fresh",
+            producer_facts=producer,
+            applicability=applicability,
+        ),
+    )
+
+
+def _prepare_refresh_retention(work, returned):
+    plan = work.plan
+    current_ids = {change.change_id for change in returned.proposal.changes}
+    retained = tuple(a for a in plan.approvals if a.change_id in current_ids)
+    try:
+        old = review_dependencies(plan)
+    except ValueError:
+        return CompletedWork(_transition(plan, "refused", "dependency_graph_invalid"))
+    return replace(work, phase="iteration", retained=retained, old=tuple(old.values()))
+
+
+def _compare_refresh_dependencies(work, returned):
+    plan = work.plan
+    try:
+        new = review_dependencies(returned)
+    except ValueError:
+        return CompletedWork(_transition(plan, "refused", "dependency_graph_invalid"))
+    old = {node.key: node for node in work.old}
+    changed = frozenset(
+        key for key in old.keys() | new.keys() if old.get(key) != new.get(key)
+    )
+    return ChildWork(
+        ClosureWork(work.old, changed),
+        replace(
+            work,
+            phase="close_old",
+            tentative=returned,
+            new=tuple(new.values()),
+            changed=changed,
+        ),
+    )
+
+
+def _close_refresh_dependencies(work, returned):
+    if work.phase == "close_old":
+        return ChildWork(
+            ClosureWork(work.old, returned),
+            replace(work, phase="close_new", closure_start=returned),
+        )
+    if work.phase == "close_new":
+        return ChildWork(
+            ClosureWork(work.new, returned), replace(work, phase="closure_result")
+        )
+    if work.phase == "closure_result":
+        if returned != work.closure_start:
+            return ChildWork(
+                ClosureWork(work.old, returned),
+                replace(work, phase="close_new", closure_start=returned),
+            )
+        return replace(work, phase="retention", invalidated=returned)
+    raise ValueError("Unknown refresh phase")
+
+
+def _advance_refresh_observation(work, returned=None):
     plan, facts, preflight = work.plan, work.facts, work.preflight
     if work.phase == "initial":
         if facts.proposal_id != plan.proposal.proposal_id:
@@ -331,37 +549,9 @@ def advance_refresh(work, returned=None):
             replace(work, phase="producer"),
         )
     if work.phase == "producer":
-        try:
-            producer, applicability = _producer_choices(plan, facts, returned)
-        except ValueError:
-            return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
-        return ChildWork(
-            PlanWork(
-                facts,
-                preflight,
-                actions=plan.actions,
-                producer_facts=producer,
-                producer_applicability=applicability,
-            ),
-            replace(
-                work,
-                phase="fresh",
-                producer_facts=producer,
-                applicability=applicability,
-            ),
-        )
+        return _refresh_producer_choices(work, returned)
     if work.phase == "fresh":
-        current_ids = {change.change_id for change in returned.proposal.changes}
-        retained = tuple(a for a in plan.approvals if a.change_id in current_ids)
-        try:
-            old = review_dependencies(plan)
-        except ValueError:
-            return CompletedWork(
-                _transition(plan, "refused", "dependency_graph_invalid")
-            )
-        return replace(
-            work, phase="iteration", retained=retained, old=tuple(old.values())
-        )
+        return _prepare_refresh_retention(work, returned)
     if work.phase == "iteration":
         return ChildWork(
             AttachmentViewsWork(plan, work.producer_facts, work.retained),
@@ -383,191 +573,31 @@ def advance_refresh(work, returned=None):
             replace(work, phase="dependencies", attachment_applicability=views),
         )
     if work.phase == "dependencies":
-        try:
-            new = review_dependencies(returned)
-        except ValueError:
-            return CompletedWork(
-                _transition(plan, "refused", "dependency_graph_invalid")
-            )
-        old = {node.key: node for node in work.old}
-        changed = frozenset(
-            key for key in old.keys() | new.keys() if old.get(key) != new.get(key)
-        )
-        return ChildWork(
-            ClosureWork(work.old, changed),
-            replace(
-                work,
-                phase="close_old",
-                tentative=returned,
-                new=tuple(new.values()),
-                changed=changed,
-            ),
-        )
-    if work.phase == "close_old":
-        return ChildWork(
-            ClosureWork(work.old, returned),
-            replace(work, phase="close_new", closure_start=returned),
-        )
-    if work.phase == "close_new":
-        return ChildWork(
-            ClosureWork(work.new, returned), replace(work, phase="closure_result")
-        )
-    if work.phase == "closure_result":
-        if returned != work.closure_start:
-            return ChildWork(
-                ClosureWork(work.old, returned),
-                replace(work, phase="close_new", closure_start=returned),
-            )
-        return replace(work, phase="retention", invalidated=returned)
+        return _compare_refresh_dependencies(work, returned)
+    raise ValueError("Unknown refresh phase")
+
+
+def advance_refresh(work, returned=None):
+    if work.phase in (
+        "initial",
+        "producer",
+        "fresh",
+        "iteration",
+        "views",
+        "dependencies",
+    ):
+        return _advance_refresh_observation(work, returned)
+    if work.phase in ("close_old", "close_new", "closure_result"):
+        return _close_refresh_dependencies(work, returned)
     if work.phase == "retention":
-        invalidated = work.invalidated
-        applicability = tuple(
-            b
-            for b in work.applicability
-            if not (
-                {a.key for a in b.reviewed_assumptions}
-                | {"producer-choice:" + b.original.decision_id}
-            )
-            & invalidated
-        )
-        current = {
-            change.subject_id: change for change in work.tentative.proposal.changes
-        }
-        old_changes = {change.change_id: change for change in plan.proposal.changes}
-        surviving = []
-        try:
-            for approval in work.retained:
-                before = old_changes[approval.change_id]
-                after = current.get(before.subject_id)
-                keys = {a.key for a in approval.assumptions} | {
-                    "effect:" + before.subject_id
-                }
-                origin = next(
-                    a for a in plan.actions if a.decision_id == approval.decision_id
-                )
-                if (
-                    after is not None
-                    and not keys & invalidated
-                    and after.change_id == approval.change_id
-                    and _approval_safe(
-                        work.producer_facts,
-                        after,
-                        approval,
-                        origin,
-                        work.attachment_applicability,
-                    )
-                ):
-                    surviving.append(approval)
-        except ValueError:
-            return CompletedWork(
-                _transition(plan, "refused", "dependency_graph_invalid")
-            )
-        if tuple(surviving) != work.retained or applicability != work.applicability:
-            originals = tuple(binding.original for binding in applicability)
-            producer = work.producer_facts.model_copy(
-                update={
-                    "association_decisions": tuple(
-                        d
-                        for d in work.producer_facts.association_decisions
-                        if d in originals
-                    ),
-                    "rename_decisions": tuple(
-                        d
-                        for d in work.producer_facts.rename_decisions
-                        if d in originals
-                    ),
-                }
-            )
-            return replace(
-                work,
-                phase="iteration",
-                retained=tuple(surviving),
-                applicability=applicability,
-                producer_facts=producer,
-            )
-        bindings = []
-        for approval in work.retained:
-            before = old_changes[approval.change_id]
-            origin = next(
-                a for a in plan.actions if a.decision_id == approval.decision_id
-            )
-            keys = {a.key for a in approval.assumptions} | {
-                "effect:" + before.subject_id
-            }
-            bindings.append(
-                ReviewRetention(
-                    schema_id="brz2obsidian.review-retention",
-                    schema_version=1,
-                    decision_id=approval.decision_id,
-                    subject_id=before.subject_id,
-                    domain=approval.domain,
-                    origin_generation=origin.expected_generation,
-                    origin_change_id=approval.change_id,
-                    current_change_id=approval.change_id,
-                    dependency_keys=tuple(sorted(keys)),
-                )
-            )
-        return ChildWork(
-            PlanWork(
-                facts,
-                preflight,
-                actions=plan.actions,
-                approvals=work.retained,
-                producer_facts=work.producer_facts,
-                producer_applicability=work.applicability,
-                attachment_applicability=work.attachment_applicability,
-            ),
-            replace(work, phase="consents", bindings=tuple(bindings)),
-        )
+        return _retain_refresh_approvals(work)
     if work.phase == "consents":
-        consent_nodes = {
-            r.change_id: r.assumptions
-            for r in consent_requirements(
-                preflight, returned.proposal, returned.approvals
-            )
-        }
-        consents = tuple(
-            c
-            for c in plan.consents
-            if "consent:" + c.consent_id not in work.invalidated
-            and consent_nodes.get("consent:" + c.consent_id) == c.assumptions
-        )
-        old, new = (
-            {node.key: node for node in work.old},
-            {node.key: node for node in work.new},
-        )
-        event = ReviewRefreshEvent(
-            schema_id="brz2obsidian.review-refresh-event",
-            schema_version=1,
-            expected_generation=plan.proposal.generation,
-            facts=facts,
-            preflight=preflight,
-            previous_dependencies=tuple(old[key] for key in sorted(old)),
-            dependencies=tuple(new[key] for key in sorted(new)),
-            changed_keys=tuple(sorted(work.changed)),
-            invalidated_keys=tuple(sorted(work.invalidated)),
-            retained=work.bindings,
-            producer_applicability=work.applicability,
-            attachment_applicability=work.attachment_applicability,
-        )
-        return ChildWork(
-            PlanWork(
-                facts,
-                preflight,
-                actions=plan.actions,
-                approvals=work.retained,
-                consents=consents,
-                producer_facts=work.producer_facts,
-                producer_applicability=work.applicability,
-                attachment_applicability=work.attachment_applicability,
-            ),
-            replace(work, phase="finish", event=event),
-        )
+        return _retain_refresh_consents(work, returned)
     if work.phase == "finish":
         updated = returned.model_copy(
             update={
-                "history": plan.history.model_copy(
-                    update={"events": plan.history.events + (work.event,)}
+                "history": work.plan.history.model_copy(
+                    update={"events": work.plan.history.events + (work.event,)}
                 )
             }
         )

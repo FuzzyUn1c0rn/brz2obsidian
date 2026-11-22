@@ -1,5 +1,7 @@
 """Validated interrupted-operation discovery and reviewed recovery roles."""
 
+from __future__ import annotations
+
 import hashlib
 import io
 import os
@@ -10,13 +12,16 @@ import tempfile
 import time
 import unicodedata
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from brz2obsidian.application.update_facts import link_state
 from brz2obsidian.application.update_subjects import review_subjects
-from brz2obsidian.application.vault_contracts import VaultSubject
+from brz2obsidian.application.vault_contracts import VaultFile, VaultSubject
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_update_contracts import (
+    VaultApplyResult,
+    VaultOperationIntent,
     VaultOperationLock,
     VaultOperationReceipt,
     VaultOperationStop,
@@ -27,6 +32,7 @@ from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     QUALIFIED_OUTPUT_FORMATS,
+    ContentValue,
     ContentVersion,
     CurrentContent,
     ExactContent,
@@ -37,6 +43,9 @@ from brz2obsidian.contracts import (
     OperationReversalTarget,
     ReconciliationSubject,
     ReferenceTarget,
+    ReviewPlan,
+    SelectedReviewEffects,
+    SelectedReviewFile,
     SupportedFormatBaseline,
     reconciliation_subject_id,
 )
@@ -68,6 +77,7 @@ from brz2obsidian.publication.vault_apply import (
     _metadata_matches,
     _NativeExecutor,
     _operation_history_fingerprint,
+    _OperationObservation,
     _outcome,
     _park,
     _prepare_parents,
@@ -175,40 +185,7 @@ def _current_record_format(facts, path, content):
     return facts.incoming_identity.output_format
 
 
-def _review_observation(
-    root,
-    observed,
-    *,
-    direction,
-    authority,
-    next_generation=None,
-    undo_target=None,
-    _owner=None,
-):
-    """Bind original S1 facts to independently observed current vault bytes."""
-    git = _Git(root)
-    original, intent, origin_commit, retained = authority
-    if intent.operation_id != observed.operation_id and not any(
-        graph.receipt is not None and graph.origin_intent_commit == origin_commit
-        for graph in retained.graphs
-    ):
-        raise OSError("Validated operation authority changed")
-    selected = (
-        select_review_effects(original)
-        if _owner is None
-        else _owner._history_origin.historical_effects
-    )
-    if selected.status != "selected":
-        raise OSError("Original prepared review is not selected")
-    selected_files = {row.path: row.content for row in selected.files}
-    ownership_proposed = {
-        row.path: row
-        for row in (
-            undo_target.graph.authorities[-1][1].proposed
-            if undo_target is not None
-            else intent.proposed
-        )
-    }
+def _admit_recovery_review(root, original, selected, retained, *, _owner):
     query_plan, query_effects = original, selected
     pending = retained.checkpoint
     if (
@@ -238,32 +215,13 @@ def _review_observation(
         or admission.preflight.state_status != "supported"
     ):
         raise OSError("Current recovery policy or inventory is unavailable")
-    inventory = {row.path: row for row in admission.inventory}
-    paths = (
-        {subject.current.path for subject in original.facts.subjects}
-        | {item.current.path for item in original.facts.identity_inventory}
-        | set(intent.affected_paths)
-    )
-    target_paths = {
-        row.path
-        for row in (intent.proposed if direction == "finish" else intent.before)
-    }
-    selected_removal = bool(selected.remove_paths) or any(
-        path in inventory and path not in target_paths for path in intent.affected_paths
-    )
-    if original.facts.link_context is not None:
-        paths.update(
-            document.source_path
-            for document in original.facts.link_context.current_documents
-        )
-        if selected_removal:
-            # Every present authored note can own an inbound link to a target
-            # selected for removal, including notes added after the stop.
-            paths.update(
-                row.path
-                for row in admission.inventory
-                if row.path.casefold().endswith(".md")
-            )
+    return admission, query_plan, query_subjects
+
+
+def _require_recovery_tracking_consent(
+    original, query_plan, query_subjects, retained, admission, paths, inventory
+):
+    pending = retained.checkpoint
     granted_plans = [original, query_plan]
     active_prepared = retained.graph.intent.prepared_commit
     if active_prepared in retained.owned:
@@ -305,6 +263,9 @@ def _review_observation(
             )
         ):
             raise OSError("Excluded recovery bytes lack current scoped consent")
+
+
+def _observe_recovery_bytes(root, paths, inventory, *, _owner):
     needed = sum(inventory[path].size for path in paths if path in inventory)
     if _owner is None and available_memory() < 9 * needed + 64 * 1024 * 1024:
         raise OSError("Insufficient memory to review exact current recovery bytes")
@@ -340,430 +301,543 @@ def _review_observation(
         current[path] = CurrentContent(
             existence="present", path=path, content=ExactContent(data=data)
         )
-    original_facts = original.facts
-    context = original_facts.link_context
-    identity_inventory = list(original_facts.identity_inventory)
-    if context is not None:
-        from brz2obsidian.core.identity import _paths_collide
-        from brz2obsidian.core.reference_targets import validate_targets
-        from brz2obsidian.core.review_links import (
-            consumed_context,
-            current_lookup_coverage,
-            current_observation_problem,
-        )
+    return current
 
-        target_by_id = {target.target_id: target for target in context.current_targets}
-        state_by_id = {state.target_id: state for state in context.current_target_facts}
-        file_target_ids = {
-            target.target_id
-            for target in context.current_targets
-            if target.kind != "tag"
-        }
-        unobserved = file_target_ids - set(state_by_id)
+
+def _unobserved_recovery_targets(
+    original_facts, admission, inventory, identity_inventory
+):
+    context = original_facts.link_context
+    from brz2obsidian.core.identity import _paths_collide
+    from brz2obsidian.core.reference_targets import validate_targets
+    from brz2obsidian.core.review_links import (
+        current_lookup_coverage,
+        current_observation_problem,
+    )
+
+    target_by_id = {target.target_id: target for target in context.current_targets}
+    state_by_id = {state.target_id: state for state in context.current_target_facts}
+    file_target_ids = {
+        target.target_id for target in context.current_targets if target.kind != "tag"
+    }
+    unobserved = file_target_ids - set(state_by_id)
+    if (
+        len(target_by_id) != len(context.current_targets)
+        or len(state_by_id) != len(context.current_target_facts)
+        or set(state_by_id) - file_target_ids
+        or unobserved
+        and (
+            current_observation_problem(original_facts) is not None
+            or not current_lookup_coverage(original_facts)
+        )
+    ):
+        raise OSError("Current recovery target lookup is incomplete")
+    for target_id in unobserved:
+        target = target_by_id[target_id]
+        path = target.canonical_path
         if (
-            len(target_by_id) != len(context.current_targets)
-            or len(state_by_id) != len(context.current_target_facts)
-            or set(state_by_id) - file_target_ids
-            or unobserved
-            and (
-                current_observation_problem(original_facts) is not None
-                or not current_lookup_coverage(original_facts)
+            target.kind != "resource"
+            or target.identity is not None
+            or path is None
+            or not _safe_relative(path)
+            or target.representations != (path,)
+            or path.casefold().endswith(".md")
+            or path not in inventory
+            or any(entry.current.path == path for entry in identity_inventory)
+            or any(
+                d.source_path == path
+                for d in context.current_documents + context.incoming_documents
+            )
+            or any(
+                other.path != path and _paths_collide(path, other.path)
+                for other in admission.inventory
             )
         ):
-            raise OSError("Current recovery target lookup is incomplete")
-        for target_id in unobserved:
-            target = target_by_id[target_id]
-            path = target.canonical_path
-            if (
-                target.kind != "resource"
-                or target.identity is not None
-                or path is None
-                or not _safe_relative(path)
-                or target.representations != (path,)
-                or path.casefold().endswith(".md")
-                or path not in inventory
-                or any(entry.current.path == path for entry in identity_inventory)
-                or any(
-                    d.source_path == path
-                    for d in context.current_documents + context.incoming_documents
-                )
-                or any(
-                    other.path != path and _paths_collide(path, other.path)
-                    for other in admission.inventory
-                )
-            ):
-                raise OSError(
-                    "Unobserved recovery resource is not bounded physical metadata"
-                )
-            validate_targets((target,))
-        target_facts = []
-        for target in context.current_targets:
-            if target.kind == "tag" or target.target_id in unobserved:
-                continue
-            old = state_by_id[target.target_id]
-            observed_target = current.get(target.canonical_path)
-            retained_absence = old.existence == "missing" or (
-                original_facts.incoming_identity.output_format == 9
-                and old.existence == "intentionally_uncreated"
+            raise OSError(
+                "Unobserved recovery resource is not bounded physical metadata"
             )
-            if observed_target is None or (
-                observed_target.content == old.content
-                and observed_target.existence
-                == ("absent" if retained_absence else old.existence)
-            ):
-                target_facts.append(old)
-            else:
-                target_facts.append(
-                    link_state(
-                        observed_target.content,
-                        target_id=target.target_id,
-                        existence="missing"
-                        if observed_target.existence == "absent"
-                        else "present",
-                        membership_targets=context.current_targets,
-                        source_path=target.canonical_path,
-                        output_format=old.structure.output_format
-                        if old.structure is not None
-                        else 7
-                        if original_facts.baseline_identity.output_format == 6
-                        else original_facts.baseline_identity.output_format,
-                        qualify_roles=original_facts.incoming_identity.output_format
-                        in QUALIFIED_OUTPUT_FORMATS,
-                        _owner=None if _owner is None else _owner._session,
-                    )
-                )
-        new_documents = []
-        current_targets = list(context.current_targets)
-        incoming_targets = list(context.incoming_targets)
-        incoming_target_facts = list(context.incoming_target_facts)
-        incoming_documents = list(context.incoming_documents)
-        known_document_paths = {
-            document.source_path for document in context.current_documents
-        }
-        known_identity_paths = {item.current.path for item in identity_inventory}
-        operation_owned_notes = {
-            target.canonical_path
-            for target in context.incoming_targets
-            if target.kind in ("note", "category", "relationship")
-            and target.canonical_path in intent.affected_paths
-            and target.canonical_path in selected_files
-        }
-        for path in sorted(
-            row.path
-            for row in admission.inventory
-            if (selected_removal or row.path in operation_owned_notes)
-            and row.path.casefold().endswith(".md")
-            and row.path not in known_document_paths
+        validate_targets((target,))
+    return unobserved, state_by_id
+
+
+def _observed_recovery_target_facts(
+    original_facts, current, unobserved, state_by_id, *, _owner
+):
+    context = original_facts.link_context
+    target_facts = []
+    for target in context.current_targets:
+        if target.kind == "tag" or target.target_id in unobserved:
+            continue
+        old = state_by_id[target.target_id]
+        observed_target = current.get(target.canonical_path)
+        retained_absence = old.existence == "missing" or (
+            original_facts.incoming_identity.output_format == 9
+            and old.existence == "intentionally_uncreated"
+        )
+        if observed_target is None or (
+            observed_target.content == old.content
+            and observed_target.existence
+            == ("absent" if retained_absence else old.existence)
         ):
-            observed_document = current[path]
-            if observed_document.content is None:
-                raise OSError("New current recovery document is unavailable")
-            retained_targets = tuple(
-                target
-                for target in context.incoming_targets
-                if target.canonical_path == path
-                and target.kind in ("note", "category", "relationship")
-            )
-            if path in operation_owned_notes and retained_targets:
-                # The original selected effect can move one real note identity
-                # from its old physical path to this approved new path. Reuse
-                # that target/document authority for the fresh observation.
-                if len(retained_targets) != 1 or path not in selected_files:
-                    raise OSError("Operation-owned recovery note is ambiguous")
-                retained_target = retained_targets[0]
-                retained_document = tuple(
-                    doc
-                    for doc in context.incoming_documents
-                    if doc.source_path == path
-                    and doc.document_id == retained_target.target_id
-                    and doc.status == "supported"
-                )
-                original_target = tuple(
-                    target
-                    for target in current_targets
-                    if target.target_id == retained_target.target_id
-                )
-                owner = tuple(
-                    item
-                    for item in identity_inventory
-                    if item.identity_state == "valid"
-                    and item.identity == retained_target.identity
-                    and item.facet == "content"
-                )
-                row = ownership_proposed.get(path)
-                content = selected_files[path]
-                if (
-                    len(retained_document) != 1
-                    or len(original_target) != 1
-                    or len(owner) != 1
-                    or retained_target.identity is None
-                    or row is None
-                    or row.size != content_size(content)
-                    or row.sha256 != content_sha(content)
-                    or (path in known_identity_paths and owner[0].current.path != path)
-                ):
-                    raise OSError("Operation-owned recovery note lacks retained proof")
-                index = next(
-                    i
-                    for i, target in enumerate(current_targets)
-                    if target.target_id == retained_target.target_id
-                )
-                current_targets[index] = retained_target
-                state_index = next(
-                    i
-                    for i, state in enumerate(target_facts)
-                    if state.target_id == retained_target.target_id
-                )
-                target_facts[state_index] = link_state(
-                    observed_document.content,
-                    target_id=retained_target.target_id,
-                    existence="present",
-                    membership_targets=tuple(current_targets),
-                    source_path=path,
+            target_facts.append(old)
+        else:
+            target_facts.append(
+                link_state(
+                    observed_target.content,
+                    target_id=target.target_id,
+                    existence="missing"
+                    if observed_target.existence == "absent"
+                    else "present",
+                    membership_targets=context.current_targets,
+                    source_path=target.canonical_path,
+                    output_format=old.structure.output_format
+                    if old.structure is not None
+                    else 7
+                    if original_facts.baseline_identity.output_format == 6
+                    else original_facts.baseline_identity.output_format,
+                    qualify_roles=original_facts.incoming_identity.output_format
+                    in QUALIFIED_OUTPUT_FORMATS,
                     _owner=None if _owner is None else _owner._session,
                 )
-                parsed = interpret_links(
-                    observed_document.content,
-                    document_id=retained_document[0].document_id,
-                    source_path=path,
-                    path_mode=retained_document[0].path_mode,
-                    targets=tuple(current_targets),
-                    target_facts=tuple(target_facts),
-                    inventory="complete",
-                    output_format=original_facts.incoming_identity.output_format,
-                    record_format=_current_record_format(
-                        original_facts, path, observed_document.content
-                    ),
-                )
-                if parsed.status != "supported":
-                    raise OSError("Operation-owned recovery note interpretation failed")
-                new_documents.append(parsed)
-                if owner[0].current.path == path:
-                    pass
-                elif direction == "finish":
-                    if current[owner[0].current.path].existence != "absent":
-                        raise OSError("Both renamed recovery endpoints are present")
-                    # The approved rename has one logical current location.
-                    # Its old physical path is absent in the actual inventory;
-                    # finish reviews the exact new-path version under that
-                    # same retained identity.
-                    identity_inventory[
-                        next(
-                            i
-                            for i, item in enumerate(identity_inventory)
-                            if item.entry_id == owner[0].entry_id
-                        )
-                    ] = owner[0].model_copy(
-                        update={
-                            "current": observed_document,
-                            "target": retained_target.target,
-                        }
-                    )
-                else:
-                    identity_inventory.append(
-                        owner[0].model_copy(
-                            update={
-                                "entry_id": "recovery-output:"
-                                + hashlib.sha256(path.encode()).hexdigest(),
-                                "current": observed_document,
-                                "target": retained_target.target,
-                            }
-                        )
-                    )
-                known_identity_paths.add(path)
-                continue
-            # A new authored note has no imported item identity. Its safe
-            # physical path is still a real lookup entry and document owner.
-            if path in known_identity_paths or any(
-                target.canonical_path == path
-                for target in current_targets + incoming_targets
-            ):
-                raise OSError("New current recovery document has ambiguous identity")
-            target_id = "recovery-note:" + hashlib.sha256(path.encode()).hexdigest()
-            target = IdentityTargetFacts(
-                normalized_path=unicodedata.normalize(
-                    "NFC", unicodedata.normalize("NFC", path).casefold()
-                ),
-                containment="contained",
-                status="safe",
             )
-            reference = ReferenceTarget(
-                schema_id="brz2obsidian.reference-target",
-                schema_version=1,
-                target_id=target_id,
-                kind="note",
-                canonical_path=path,
-                identity=None,
-                target=target,
-                representations=(path,),
-                validation_fingerprint=hashlib.sha256(
-                    (path + ":" + inventory[path].sha256).encode()
-                ).hexdigest(),
-                status="safe",
+    return target_facts
+
+
+def _observe_operation_owned_note(
+    path,
+    retained_targets,
+    original_facts,
+    current,
+    selected_files,
+    ownership_proposed,
+    lookup,
+    identity_inventory,
+    *,
+    path_known,
+    direction,
+    _owner,
+):
+    context = original_facts.link_context
+    observed_document = current[path]
+    current_targets, target_facts, new_documents = lookup
+    # The original selected effect can move one real note identity
+    # from its old physical path to this approved new path. Reuse
+    # that target/document authority for the fresh observation.
+    if len(retained_targets) != 1 or path not in selected_files:
+        raise OSError("Operation-owned recovery note is ambiguous")
+    retained_target = retained_targets[0]
+    retained_document = tuple(
+        doc
+        for doc in context.incoming_documents
+        if doc.source_path == path
+        and doc.document_id == retained_target.target_id
+        and doc.status == "supported"
+    )
+    original_target = tuple(
+        target
+        for target in current_targets
+        if target.target_id == retained_target.target_id
+    )
+    owner = tuple(
+        item
+        for item in identity_inventory
+        if item.identity_state == "valid"
+        and item.identity == retained_target.identity
+        and item.facet == "content"
+    )
+    row = ownership_proposed.get(path)
+    content = selected_files[path]
+    if (
+        len(retained_document) != 1
+        or len(original_target) != 1
+        or len(owner) != 1
+        or retained_target.identity is None
+        or row is None
+        or row.size != content_size(content)
+        or row.sha256 != content_sha(content)
+        or (path_known and owner[0].current.path != path)
+    ):
+        raise OSError("Operation-owned recovery note lacks retained proof")
+    index = next(
+        i
+        for i, target in enumerate(current_targets)
+        if target.target_id == retained_target.target_id
+    )
+    current_targets[index] = retained_target
+    state_index = next(
+        i
+        for i, state in enumerate(target_facts)
+        if state.target_id == retained_target.target_id
+    )
+    target_facts[state_index] = link_state(
+        observed_document.content,
+        target_id=retained_target.target_id,
+        existence="present",
+        membership_targets=tuple(current_targets),
+        source_path=path,
+        _owner=None if _owner is None else _owner._session,
+    )
+    parsed = interpret_links(
+        observed_document.content,
+        document_id=retained_document[0].document_id,
+        source_path=path,
+        path_mode=retained_document[0].path_mode,
+        targets=tuple(current_targets),
+        target_facts=tuple(target_facts),
+        inventory="complete",
+        output_format=original_facts.incoming_identity.output_format,
+        record_format=_current_record_format(
+            original_facts, path, observed_document.content
+        ),
+    )
+    if parsed.status != "supported":
+        raise OSError("Operation-owned recovery note interpretation failed")
+    new_documents.append(parsed)
+    if owner[0].current.path == path:
+        pass
+    elif direction == "finish":
+        if current[owner[0].current.path].existence != "absent":
+            raise OSError("Both renamed recovery endpoints are present")
+        # The approved rename has one logical current location.
+        # Its old physical path is absent in the actual inventory;
+        # finish reviews the exact new-path version under that
+        # same retained identity.
+        identity_inventory[
+            next(
+                i
+                for i, item in enumerate(identity_inventory)
+                if item.entry_id == owner[0].entry_id
             )
-            state = interpret_link_target(
-                observed_document.content,
-                target_id=target_id,
-                existence="present",
-                memberships=(),
-                source_path=path,
+        ] = owner[0].model_copy(
+            update={
+                "current": observed_document,
+                "target": retained_target.target,
+            }
+        )
+    else:
+        identity_inventory.append(
+            owner[0].model_copy(
+                update={
+                    "entry_id": "recovery-output:"
+                    + hashlib.sha256(path.encode()).hexdigest(),
+                    "current": observed_document,
+                    "target": retained_target.target,
+                }
             )
-            parsed = interpret_links(
-                observed_document.content,
-                document_id=target_id,
-                source_path=path,
-                path_mode="vault",
-                targets=tuple(current_targets) + (reference,),
-                target_facts=tuple(target_facts) + (state,),
-                inventory="complete",
-                output_format=original_facts.incoming_identity.output_format,
-                record_format=_current_record_format(
-                    original_facts, path, observed_document.content
-                ),
-            )
-            # A newly authored note's link mode has no retained S1 proof.
-            # Plain notes can join the complete inventory; link-bearing or
-            # opaque notes need an explicit qualified observation first.
-            if parsed.status != "supported" or parsed.occurrences:
-                raise OSError("New current recovery links need qualified review")
-            current_targets.append(reference)
-            incoming_targets.append(reference)
-            target_facts.append(state)
-            incoming_target_facts.append(state)
-            new_documents.append(parsed)
-            incoming_documents.append(parsed)
-            identity_inventory.append(
-                IdentityInventoryItem(
-                    entry_id=target_id,
-                    facet=None,
-                    identity_state="missing",
-                    identity=None,
-                    raw_identity=None,
-                    title=Path(path).stem,
-                    current=observed_document,
-                    target=target,
-                )
+        )
+
+
+def _observe_authored_recovery_note(
+    path,
+    observed_document,
+    inventory,
+    original_facts,
+    current_targets,
+    incoming_targets,
+    target_facts,
+    known_identity_paths,
+):
+    # A new authored note has no imported item identity. Its safe
+    # physical path is still a real lookup entry and document owner.
+    if path in known_identity_paths or any(
+        target.canonical_path == path for target in current_targets + incoming_targets
+    ):
+        raise OSError("New current recovery document has ambiguous identity")
+    target_id = "recovery-note:" + hashlib.sha256(path.encode()).hexdigest()
+    target = IdentityTargetFacts(
+        normalized_path=unicodedata.normalize(
+            "NFC", unicodedata.normalize("NFC", path).casefold()
+        ),
+        containment="contained",
+        status="safe",
+    )
+    reference = ReferenceTarget(
+        schema_id="brz2obsidian.reference-target",
+        schema_version=1,
+        target_id=target_id,
+        kind="note",
+        canonical_path=path,
+        identity=None,
+        target=target,
+        representations=(path,),
+        validation_fingerprint=hashlib.sha256(
+            (path + ":" + inventory[path].sha256).encode()
+        ).hexdigest(),
+        status="safe",
+    )
+    state = interpret_link_target(
+        observed_document.content,
+        target_id=target_id,
+        existence="present",
+        memberships=(),
+        source_path=path,
+    )
+    parsed = interpret_links(
+        observed_document.content,
+        document_id=target_id,
+        source_path=path,
+        path_mode="vault",
+        targets=tuple(current_targets) + (reference,),
+        target_facts=tuple(target_facts) + (state,),
+        inventory="complete",
+        output_format=original_facts.incoming_identity.output_format,
+        record_format=_current_record_format(
+            original_facts, path, observed_document.content
+        ),
+    )
+    # A newly authored note's link mode has no retained S1 proof.
+    # Plain notes can join the complete inventory; link-bearing or
+    # opaque notes need an explicit qualified observation first.
+    if parsed.status != "supported" or parsed.occurrences:
+        raise OSError("New current recovery links need qualified review")
+    return parsed, reference, state
+
+
+def _refresh_recovery_link_context(
+    original_facts,
+    admission,
+    inventory,
+    identity_inventory,
+    current,
+    intent,
+    selected_files,
+    ownership_proposed,
+    *,
+    selected_removal,
+    direction,
+    _owner,
+):
+    context = original_facts.link_context
+    unobserved, state_by_id = _unobserved_recovery_targets(
+        original_facts, admission, inventory, identity_inventory
+    )
+    target_facts = _observed_recovery_target_facts(
+        original_facts, current, unobserved, state_by_id, _owner=_owner
+    )
+    new_documents = []
+    current_targets = list(context.current_targets)
+    incoming_targets = list(context.incoming_targets)
+    incoming_target_facts = list(context.incoming_target_facts)
+    incoming_documents = list(context.incoming_documents)
+    known_document_paths = {
+        document.source_path for document in context.current_documents
+    }
+    known_identity_paths = {item.current.path for item in identity_inventory}
+    operation_owned_notes = {
+        target.canonical_path
+        for target in context.incoming_targets
+        if target.kind in ("note", "category", "relationship")
+        and target.canonical_path in intent.affected_paths
+        and target.canonical_path in selected_files
+    }
+    for path in sorted(
+        row.path
+        for row in admission.inventory
+        if (selected_removal or row.path in operation_owned_notes)
+        and row.path.casefold().endswith(".md")
+        and row.path not in known_document_paths
+    ):
+        observed_document = current[path]
+        if observed_document.content is None:
+            raise OSError("New current recovery document is unavailable")
+        retained_targets = tuple(
+            target
+            for target in context.incoming_targets
+            if target.canonical_path == path
+            and target.kind in ("note", "category", "relationship")
+        )
+        if path in operation_owned_notes and retained_targets:
+            _observe_operation_owned_note(
+                path,
+                retained_targets,
+                original_facts,
+                current,
+                selected_files,
+                ownership_proposed,
+                (current_targets, target_facts, new_documents),
+                identity_inventory,
+                path_known=path in known_identity_paths,
+                direction=direction,
+                _owner=_owner,
             )
             known_identity_paths.add(path)
-        lookup_targets = tuple(current_targets)
-        lookup_states = tuple(target_facts)
-        lookup_unchanged = (
-            lookup_targets == context.current_targets
-            and lookup_states == context.current_target_facts
-            and context.inventory == "complete"
+            continue
+        parsed, reference, state = _observe_authored_recovery_note(
+            path,
+            observed_document,
+            inventory,
+            original_facts,
+            current_targets,
+            incoming_targets,
+            target_facts,
+            known_identity_paths,
         )
-        documents = []
-        for document in context.current_documents:
-            observed_document = current[document.source_path]
-            if observed_document.content is None:
-                continue
-            documents.append(
-                document
-                if (
-                    lookup_unchanged
-                    and observed_document.content == document.content
-                    and observed_document.path == document.source_path
-                    and document.inventory == "complete"
-                )
-                else interpret_links(
-                    observed_document.content,
-                    document_id=document.document_id,
-                    source_path=observed_document.path,
-                    path_mode=document.path_mode,
-                    targets=lookup_targets,
-                    target_facts=lookup_states,
-                    inventory="complete",
-                    output_format=original_facts.incoming_identity.output_format,
-                    record_format=_current_record_format(
-                        original_facts,
-                        observed_document.path,
-                        observed_document.content,
-                    ),
-                )
+        current_targets.append(reference)
+        incoming_targets.append(reference)
+        target_facts.append(state)
+        incoming_target_facts.append(state)
+        new_documents.append(parsed)
+        incoming_documents.append(parsed)
+        identity_inventory.append(
+            IdentityInventoryItem(
+                entry_id=reference.target_id,
+                facet=None,
+                identity_state="missing",
+                identity=None,
+                raw_identity=None,
+                title=Path(path).stem,
+                current=observed_document,
+                target=reference.target,
             )
-        documents.extend(
-            interpret_links(
-                document.content,
+        )
+        known_identity_paths.add(path)
+    lookup_targets = tuple(current_targets)
+    lookup_states = tuple(target_facts)
+    lookup_unchanged = (
+        lookup_targets == context.current_targets
+        and lookup_states == context.current_target_facts
+        and context.inventory == "complete"
+    )
+    documents = []
+    for document in context.current_documents:
+        observed_document = current[document.source_path]
+        if observed_document.content is None:
+            continue
+        documents.append(
+            document
+            if (
+                lookup_unchanged
+                and observed_document.content == document.content
+                and observed_document.path == document.source_path
+                and document.inventory == "complete"
+            )
+            else interpret_links(
+                observed_document.content,
                 document_id=document.document_id,
-                source_path=document.source_path,
+                source_path=observed_document.path,
                 path_mode=document.path_mode,
                 targets=lookup_targets,
                 target_facts=lookup_states,
                 inventory="complete",
                 output_format=original_facts.incoming_identity.output_format,
                 record_format=_current_record_format(
-                    original_facts, document.source_path, document.content
+                    original_facts,
+                    observed_document.path,
+                    observed_document.content,
                 ),
             )
-            for document in new_documents
         )
-        context = context.model_copy(
-            update={
-                "current_targets": lookup_targets,
-                "incoming_targets": tuple(incoming_targets),
-                "current_target_facts": lookup_states,
-                "incoming_target_facts": tuple(incoming_target_facts),
-                "current_documents": tuple(documents),
-                "incoming_documents": tuple(incoming_documents),
-            }
+    documents.extend(
+        interpret_links(
+            document.content,
+            document_id=document.document_id,
+            source_path=document.source_path,
+            path_mode=document.path_mode,
+            targets=lookup_targets,
+            target_facts=lookup_states,
+            inventory="complete",
+            output_format=original_facts.incoming_identity.output_format,
+            record_format=_current_record_format(
+                original_facts, document.source_path, document.content
+            ),
         )
+        for document in new_documents
+    )
+    context = context.model_copy(
+        update={
+            "current_targets": lookup_targets,
+            "incoming_targets": tuple(incoming_targets),
+            "current_target_facts": lookup_states,
+            "incoming_target_facts": tuple(incoming_target_facts),
+            "current_documents": tuple(documents),
+            "incoming_documents": tuple(incoming_documents),
+        }
+    )
+    return context, unobserved
+
+
+def _recovery_subject_current(
+    subject,
+    facts,
+    current,
+    intent,
+    selected,
+    selected_files,
+    original_before,
+    original_proposed,
+    *,
+    direction,
+):
+    observed = current[subject.current.path]
+    if (
+        direction != "finish"
+        or observed.existence != "absent"
+        or subject.current.path != subject.path
+    ):
+        return observed
+    owners = tuple(
+        item
+        for item in facts.identity_inventory
+        if item.identity_state == "valid"
+        and item.identity is not None
+        and (
+            item.identity.module_id,
+            item.identity.collection_id,
+        )
+        == (
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+        )
+        and (item.identity.item_id, item.facet) == (subject.item_id, subject.facet)
+    )
+    if len(owners) != 1:
+        return observed
+    old_path = owners[0].current.path
+    old = original_before.get(old_path)
+    new = original_proposed.get(subject.path)
+    selected_new = selected_files.get(subject.path)
+    old_current = current.get(old_path)
+    if (
+        old_path != subject.path
+        and old_path in selected.remove_paths
+        and old_path in intent.affected_paths
+        and subject.path in intent.affected_paths
+        and old is not None
+        and owners[0].current.content is not None
+        and old.size == content_size(owners[0].current.content)
+        and old.sha256 == content_sha(owners[0].current.content)
+        and new is not None
+        and selected_new is not None
+        and new.size == content_size(selected_new)
+        and new.sha256 == content_sha(selected_new)
+        and old_current is not None
+        and old_current.existence == "present"
+    ):
+        # The approved rename has not made its first physical move. The
+        # real retained item still lives at its independently observed
+        # old path; the new path is the selected output, currently absent.
+        return old_current
+    return observed
+
+
+def _reobserve_recovery_subjects(
+    original_facts, current, intent, selected, selected_files, context, *, direction
+):
     original_before = {row.path: row for row in intent.before}
     original_proposed = {row.path: row for row in intent.proposed}
 
-    def observed_subject_current(subject):
-        observed = current[subject.current.path]
-        if (
-            direction != "finish"
-            or observed.existence != "absent"
-            or subject.current.path != subject.path
-        ):
-            return observed
-        owners = tuple(
-            item
-            for item in original_facts.identity_inventory
-            if item.identity_state == "valid"
-            and item.identity is not None
-            and (
-                item.identity.module_id,
-                item.identity.collection_id,
-            )
-            == (
-                original_facts.incoming_identity.module_id,
-                original_facts.incoming_identity.collection_id,
-            )
-            and (item.identity.item_id, item.facet) == (subject.item_id, subject.facet)
-        )
-        if len(owners) != 1:
-            return observed
-        old_path = owners[0].current.path
-        old = original_before.get(old_path)
-        new = original_proposed.get(subject.path)
-        selected_new = selected_files.get(subject.path)
-        old_current = current.get(old_path)
-        if (
-            old_path != subject.path
-            and old_path in selected.remove_paths
-            and old_path in intent.affected_paths
-            and subject.path in intent.affected_paths
-            and old is not None
-            and owners[0].current.content is not None
-            and old.size == content_size(owners[0].current.content)
-            and old.sha256 == content_sha(owners[0].current.content)
-            and new is not None
-            and selected_new is not None
-            and new.size == content_size(selected_new)
-            and new.sha256 == content_sha(selected_new)
-            and old_current is not None
-            and old_current.existence == "present"
-        ):
-            # The approved rename has not made its first physical move. The
-            # real retained item still lives at its independently observed
-            # old path; the new path is the selected output, currently absent.
-            return old_current
-        return observed
-
     def observed_subject(subject):
-        observed = observed_subject_current(subject)
+        observed = _recovery_subject_current(
+            subject,
+            original_facts,
+            current,
+            intent,
+            selected,
+            selected_files,
+            original_before,
+            original_proposed,
+            direction=direction,
+        )
         comparison = subject.structure
         if comparison is not None and observed.content is not None:
             targets = (
@@ -797,11 +871,134 @@ def _review_observation(
             )
         return subject.model_copy(update={"current": observed, "structure": comparison})
 
+    return tuple(observed_subject(subject) for subject in original_facts.subjects)
+
+
+def _require_bound_recovery_links(facts, context, unobserved):
+    from brz2obsidian.core.review_links import (
+        consumed_context,
+        current_lookup_coverage,
+        current_observation_problem,
+    )
+
+    if current_observation_problem(facts) is not None or not current_lookup_coverage(
+        facts
+    ):
+        raise OSError("Fresh recovery link lookup is unbound")
+    for documents, targets, states in (
+        (
+            context.current_documents,
+            context.current_targets,
+            context.current_target_facts,
+        ),
+        (
+            context.incoming_documents,
+            context.incoming_targets,
+            context.incoming_target_facts,
+        ),
+    ):
+        _, _, used, _ = consumed_context(documents, targets, states, context.inventory)
+        if unobserved.intersection(target.target_id for target in used):
+            raise OSError(
+                "Current recovery consumes unobserved physical resource metadata"
+            )
+
+
+def _review_observation(
+    root,
+    observed,
+    *,
+    direction,
+    authority,
+    next_generation=None,
+    undo_target=None,
+    _owner=None,
+):
+    """Bind original S1 facts to independently observed current vault bytes."""
+    git = _Git(root)
+    original, intent, origin_commit, retained = authority
+    if intent.operation_id != observed.operation_id and not any(
+        graph.receipt is not None and graph.origin_intent_commit == origin_commit
+        for graph in retained.graphs
+    ):
+        raise OSError("Validated operation authority changed")
+    selected = (
+        select_review_effects(original)
+        if _owner is None
+        else _owner._history_origin.historical_effects
+    )
+    if selected.status != "selected":
+        raise OSError("Original prepared review is not selected")
+    selected_files = {row.path: row.content for row in selected.files}
+    ownership_proposed = {
+        row.path: row
+        for row in (
+            undo_target.graph.authorities[-1][1].proposed
+            if undo_target is not None
+            else intent.proposed
+        )
+    }
+    admission, query_plan, query_subjects = _admit_recovery_review(
+        root, original, selected, retained, _owner=_owner
+    )
+    inventory = {row.path: row for row in admission.inventory}
+    paths = (
+        {subject.current.path for subject in original.facts.subjects}
+        | {item.current.path for item in original.facts.identity_inventory}
+        | set(intent.affected_paths)
+    )
+    target_paths = {
+        row.path
+        for row in (intent.proposed if direction == "finish" else intent.before)
+    }
+    selected_removal = bool(selected.remove_paths) or any(
+        path in inventory and path not in target_paths for path in intent.affected_paths
+    )
+    if original.facts.link_context is not None:
+        paths.update(
+            document.source_path
+            for document in original.facts.link_context.current_documents
+        )
+        if selected_removal:
+            # Every present authored note can own an inbound link to a target
+            # selected for removal, including notes added after the stop.
+            paths.update(
+                row.path
+                for row in admission.inventory
+                if row.path.casefold().endswith(".md")
+            )
+    _require_recovery_tracking_consent(
+        original, query_plan, query_subjects, retained, admission, paths, inventory
+    )
+    current = _observe_recovery_bytes(root, paths, inventory, _owner=_owner)
+    original_facts = original.facts
+    context = original_facts.link_context
+    identity_inventory = list(original_facts.identity_inventory)
+    if context is not None:
+        context, unobserved = _refresh_recovery_link_context(
+            original_facts,
+            admission,
+            inventory,
+            identity_inventory,
+            current,
+            intent,
+            selected_files,
+            ownership_proposed,
+            selected_removal=selected_removal,
+            direction=direction,
+            _owner=_owner,
+        )
     facts = original_facts.model_copy(
         update={
             "generation": next_generation or original.proposal.generation + 1,
-            "subjects": tuple(
-                observed_subject(subject) for subject in original_facts.subjects
+            "subjects": _reobserve_recovery_subjects(
+                original_facts,
+                current,
+                intent,
+                selected,
+                selected_files,
+                context,
+                direction=direction,
             ),
             "identity_inventory": tuple(
                 item.model_copy(update={"current": current[item.current.path]})
@@ -811,29 +1008,7 @@ def _review_observation(
         }
     )
     if context is not None and unobserved:
-        if current_observation_problem(
-            facts
-        ) is not None or not current_lookup_coverage(facts):
-            raise OSError("Fresh recovery link lookup is unbound")
-        for documents, targets, states in (
-            (
-                context.current_documents,
-                context.current_targets,
-                context.current_target_facts,
-            ),
-            (
-                context.incoming_documents,
-                context.incoming_targets,
-                context.incoming_target_facts,
-            ),
-        ):
-            _, _, used, _ = consumed_context(
-                documents, targets, states, context.inventory
-            )
-            if unobserved.intersection(target.target_id for target in used):
-                raise OSError(
-                    "Current recovery consumes unobserved physical resource metadata"
-                )
+        _require_bound_recovery_links(facts, context, unobserved)
     # The checkpoint locator advances during the already-authorized operation.
     # Only that validated movement is neutralized: changed policy, consents,
     # current bytes, or a broken graph still reach the ordinary refresh rules.
@@ -1111,15 +1286,9 @@ def _retained_source(root, git, rows):
         yield source
 
 
-def _restore_link_context(original, facts, before, affected, git, *, _owner=None):
-    """Interpret the exact original target inventory with current link owners."""
-    context = facts.link_context
-    if context is None:
-        return None
-    original_context = original.facts.link_context
-    current_states = {state.target_id: state for state in context.current_target_facts}
-    if len(current_states) != len(context.current_target_facts):
-        raise OSError("Current recovery lookup is ambiguous")
+def _restore_target_states(
+    original, context, current_states, before, affected, git, *, _owner
+):
     target_states = []
     target_state = (
         interpret_link_target
@@ -1151,6 +1320,21 @@ def _restore_link_context(original, facts, before, affected, git, *, _owner=None
         # The completed recovery observation admits an unaffected ordinary
         # physical resource without content state. Preserve that absence while
         # retaining its exact reference target; affected paths still use BEFORE.
+    return target_states
+
+
+def _restore_link_context(original, facts, before, affected, git, *, _owner=None):
+    """Interpret the exact original target inventory with current link owners."""
+    context = facts.link_context
+    if context is None:
+        return None
+    original_context = original.facts.link_context
+    current_states = {state.target_id: state for state in context.current_target_facts}
+    if len(current_states) != len(context.current_target_facts):
+        raise OSError("Current recovery lookup is ambiguous")
+    target_states = _restore_target_states(
+        original, context, current_states, before, affected, git, _owner=_owner
+    )
     candidates = {doc.source_path: doc for doc in context.current_documents}
     if original_context is not None:
         for doc in original_context.current_documents:
@@ -1437,27 +1621,7 @@ def _operation_document_subjects_from_owned(
     return tuple(subjects)
 
 
-def _restore_review(
-    root, observed, *, previous=None, authority=None, undo_target=None, _owner=None
-):
-    original, intent, origin_commit, git, facts, preflight, current, retained = (
-        _review_observation(
-            root,
-            observed,
-            direction="restore",
-            authority=authority,
-            next_generation=(previous.proposal.generation + 1 if previous else None),
-            undo_target=undo_target,
-            _owner=_owner,
-        )
-    )
-    before = {row.path: row for row in intent.before}
-    produced = {row.path: row for row in intent.proposed}
-    source_prepared = retained.owned[intent.prepared_commit][0]
-    produced_source = {row.path: row for row in source_prepared.source}
-    subjects = []
-    baseline_outputs = []
-    output_references = {}
+def _restore_subject_queries(original, intent, facts):
     approved = {approval.change_id: approval for approval in original.approvals}
     document_keys = {
         (subject.item_id, subject.facet)
@@ -1495,21 +1659,40 @@ def _restore_review(
                 if approval is None
                 else (approval.change_id, approval.decision_id)
             )
-    owned_outputs = (
-        review_owned_outputs(original, tuple(ownership_queries))
-        if _owner is None
-        else _owner._history_owned_outputs(original, tuple(ownership_queries))
-    )
+    return ownership_subjects, ownership_queries, document_keys
+
+
+@dataclass(frozen=True)
+class _RestoreEvidence:
+    original: ReviewPlan
+    intent: VaultOperationIntent
+    origin_commit: str
+    git: _Git
+    retained: _OperationObservation
+    before: dict[str, object]
+    produced: dict[str, object]
+    source_prepared: object
+    produced_source: dict[str, object]
+
+
+def _reverse_owned_subjects(
+    evidence, ownership_subjects, owned_outputs, current, document_keys, *, _owner
+):
+    subjects = []
+    baseline_outputs = []
+    output_references = {}
     owned_groups = iter(owned_outputs.target_groups)
     for subject, changes, approval, context_only in ownership_subjects:
         owned = () if context_only else next(owned_groups)
         rows = []
         for reference in owned:
             path = reference.canonical_path
-            if path not in intent.affected_paths:
+            if path not in evidence.intent.affected_paths:
                 continue
-            old = _owned_content(git, before.get(path), _owner=_owner)
-            new = _owned_content(git, produced.get(path), _owner=_owner)
+            old = _owned_content(evidence.git, evidence.before.get(path), _owner=_owner)
+            new = _owned_content(
+                evidence.git, evidence.produced.get(path), _owner=_owner
+            )
             if (old is None) == (new is None):
                 continue
             rows.append(
@@ -1527,23 +1710,29 @@ def _restore_review(
         protected = (
             context_only
             or bool(document_keys)
-            and _inactive_attachment_proof(original, intent, subject)
+            and _inactive_attachment_proof(evidence.original, evidence.intent, subject)
         )
-        if subject.path not in intent.affected_paths and not rows and not protected:
+        if (
+            subject.path not in evidence.intent.affected_paths
+            and not rows
+            and not protected
+        ):
             continue
-        old = _owned_content(git, before.get(subject.path), _owner=_owner)
+        old = _owned_content(
+            evidence.git, evidence.before.get(subject.path), _owner=_owner
+        )
         if old is None and not rows:
             continue
         proof = (
             OperationReversalTarget(
                 schema_id="brz2obsidian.operation-reversal-target",
                 schema_version=1,
-                operation_id=intent.operation_id,
-                operation_kind=intent.kind,
+                operation_id=evidence.intent.operation_id,
+                operation_kind=evidence.intent.kind,
                 direction="restore",
-                operation_generation=intent.generation,
+                operation_generation=evidence.intent.generation,
                 history_fingerprint=_operation_history_fingerprint(
-                    origin_commit, intent
+                    evidence.origin_commit, evidence.intent
                 ),
                 origin_change_id=changes[0].change_id,
                 origin_decision_id=None if approval is None else approval.decision_id,
@@ -1556,9 +1745,12 @@ def _restore_review(
         generated = subject.incoming or (
             subject.baseline.content if subject.baseline.status == "known" else None
         )
-        if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
+        if (
+            evidence.intent.kind == "undo"
+            and evidence.intent.undo_of_receipt_commit is not None
+        ):
             generated = _owned_content(
-                git, produced_source.get(subject.path), _owner=_owner
+                evidence.git, evidence.produced_source.get(subject.path), _owner=_owner
             )
         subjects.append(
             subject.model_copy(
@@ -1569,7 +1761,7 @@ def _restore_review(
                         unavailable_digest=None,
                     ),
                     "incoming": old
-                    if subject.path in intent.affected_paths
+                    if subject.path in evidence.intent.affected_paths
                     else subject.incoming,
                     "operation_reversal": proof,
                     "structure": None,
@@ -1582,39 +1774,39 @@ def _restore_review(
                     item_id=subject.item_id, facet=subject.facet, content=generated
                 )
             )
-    for subject in _operation_document_subjects_from_owned(
-        original,
-        intent,
-        origin_commit,
-        git,
-        current,
-        owned_outputs.documents,
-        direction="restore",
-        _owner=_owner,
-    ):
-        if subject.path in output_references or any(
-            row.path == subject.path for row in subjects
-        ):
-            raise OSError("Dependent recovery document has multiple owners")
-        subjects.append(subject)
-        output_references[subject.path] = subject.operation_reversal.owned_targets[0]
+    return subjects, baseline_outputs, output_references
+
+
+def _restore_associated_documents(
+    evidence,
+    owned_outputs,
+    facts,
+    output_references,
+    current,
+    subjects,
+    baseline_outputs,
+    *,
+    _owner,
+):
     covered = {
         path
         for subject in subjects
-        for path in ((subject.path,) if subject.path in intent.affected_paths else ())
+        for path in (
+            (subject.path,) if subject.path in evidence.intent.affected_paths else ()
+        )
     } | set(output_references)
-    source_lineage = retained.owned[source_prepared.previous][0]
+    source_lineage = evidence.retained.owned[evidence.source_prepared.previous][0]
     generated_files = {row.path: row for row in source_lineage.source}
     original_files = {row.path: row.content for row in owned_outputs.effects.files}
     original_documents = (
         set()
-        if original.facts.link_context is None
+        if evidence.original.facts.link_context is None
         else {
             document.source_path
-            for document in original.facts.link_context.current_documents
+            for document in evidence.original.facts.link_context.current_documents
         }
     )
-    for path in sorted(set(intent.affected_paths) - covered):
+    for path in sorted(set(evidence.intent.affected_paths) - covered):
         owners = tuple(
             item
             for item in facts.identity_inventory
@@ -1627,16 +1819,16 @@ def _restore_review(
                 item.identity.collection_id,
             )
             == (
-                original.facts.incoming_identity.module_id,
-                original.facts.incoming_identity.collection_id,
+                evidence.original.facts.incoming_identity.module_id,
+                evidence.original.facts.incoming_identity.collection_id,
             )
         )
         if (
             len(owners) != 1
             or path not in original_documents
             or path not in original_files
-            or before.get(path) is None
-            or produced.get(path) is None
+            or evidence.before.get(path) is None
+            or evidence.produced.get(path) is None
             or current[path].content is None
             or facts.link_context is None
             or not any(
@@ -1646,8 +1838,10 @@ def _restore_review(
         ):
             raise OSError("Associated recovery document lacks retained authority")
         owner = owners[0]
-        generated = _owned_content(git, generated_files.get(path), _owner=_owner)
-        target = _owned_content(git, before[path], _owner=_owner)
+        generated = _owned_content(
+            evidence.git, generated_files.get(path), _owner=_owner
+        )
+        target = _owned_content(evidence.git, evidence.before[path], _owner=_owner)
         if generated is None or target is None:
             raise OSError("Associated recovery document source is unavailable")
         subjects.append(
@@ -1675,8 +1869,11 @@ def _restore_review(
                 content=generated,
             )
         )
-    if not subjects:
-        raise OSError("Retained operation has no reviewed recovery subjects")
+
+
+def _restore_review_context(
+    evidence, facts, subjects, output_references, current, *, _owner
+):
     identity_inventory = list(facts.identity_inventory)
     target_state = (
         interpret_link_target
@@ -1717,12 +1914,14 @@ def _restore_review(
                     memberships=(),
                     source_path=path,
                     output_format=7
-                    if original.facts.incoming_identity.output_format == 6
-                    else original.facts.incoming_identity.output_format,
+                    if evidence.original.facts.incoming_identity.output_format == 6
+                    else evidence.original.facts.incoming_identity.output_format,
                 )
             )
         if reference.target_id not in {target.target_id for target in incoming_refs}:
-            target = _owned_content(git, before.get(path), _owner=_owner)
+            target = _owned_content(
+                evidence.git, evidence.before.get(path), _owner=_owner
+            )
             incoming_refs.append(reference)
             incoming_states.append(
                 target_state(
@@ -1732,8 +1931,8 @@ def _restore_review(
                     memberships=(),
                     source_path=path,
                     output_format=7
-                    if original.facts.incoming_identity.output_format == 6
-                    else original.facts.incoming_identity.output_format,
+                    if evidence.original.facts.incoming_identity.output_format == 6
+                    else evidence.original.facts.incoming_identity.output_format,
                 )
             )
         context = context.model_copy(
@@ -1761,21 +1960,109 @@ def _restore_review(
                         targets=context.current_targets,
                         target_facts=context.current_target_facts,
                         inventory="complete",
-                        output_format=original.facts.incoming_identity.output_format,
+                        output_format=evidence.original.facts.incoming_identity.output_format,
                         record_format=_current_record_format(
-                            original.facts, document.source_path, document.content
+                            evidence.original.facts,
+                            document.source_path,
+                            document.content,
                         ),
                     )
                     for document in context.current_documents
                 ),
             }
         )
-    context = _protected_resource_context(facts, subjects, context, retained, git)
+    context = _protected_resource_context(
+        facts, subjects, context, evidence.retained, evidence.git
+    )
     facts = facts.model_copy(
         update={
             "identity_inventory": tuple(identity_inventory),
             "link_context": context,
         }
+    )
+    return facts
+
+
+def _restore_review(
+    root, observed, *, previous=None, authority=None, undo_target=None, _owner=None
+):
+    original, intent, origin_commit, git, facts, preflight, current, retained = (
+        _review_observation(
+            root,
+            observed,
+            direction="restore",
+            authority=authority,
+            next_generation=(previous.proposal.generation + 1 if previous else None),
+            undo_target=undo_target,
+            _owner=_owner,
+        )
+    )
+    before = {row.path: row for row in intent.before}
+    produced = {row.path: row for row in intent.proposed}
+    source_prepared = retained.owned[intent.prepared_commit][0]
+    produced_source = {row.path: row for row in source_prepared.source}
+    evidence = _RestoreEvidence(
+        original,
+        intent,
+        origin_commit,
+        git,
+        retained,
+        before,
+        produced,
+        source_prepared,
+        produced_source,
+    )
+    ownership_subjects, ownership_queries, document_keys = _restore_subject_queries(
+        original, intent, facts
+    )
+    owned_outputs = (
+        review_owned_outputs(original, tuple(ownership_queries))
+        if _owner is None
+        else _owner._history_owned_outputs(original, tuple(ownership_queries))
+    )
+    subjects, baseline_outputs, output_references = _reverse_owned_subjects(
+        evidence,
+        ownership_subjects,
+        owned_outputs,
+        current,
+        document_keys,
+        _owner=_owner,
+    )
+    for subject in _operation_document_subjects_from_owned(
+        original,
+        intent,
+        origin_commit,
+        git,
+        current,
+        owned_outputs.documents,
+        direction="restore",
+        _owner=_owner,
+    ):
+        if subject.path in output_references or any(
+            row.path == subject.path for row in subjects
+        ):
+            raise OSError("Dependent recovery document has multiple owners")
+        subjects.append(subject)
+        output_references[subject.path] = subject.operation_reversal.owned_targets[0]
+    _restore_associated_documents(
+        evidence,
+        owned_outputs,
+        facts,
+        output_references,
+        current,
+        subjects,
+        baseline_outputs,
+        _owner=_owner,
+    )
+    if not subjects:
+        raise OSError("Retained operation has no reviewed recovery subjects")
+    facts = _restore_review_context(
+        evidence,
+        facts,
+        subjects,
+        output_references,
+        current,
+        _owner=_owner,
     )
     format_operation = facts.format_operation.model_copy(
         update={
@@ -1806,7 +2093,7 @@ def _restore_review(
             "baseline_identity": facts.incoming_identity,
             "incoming_identity": facts.baseline_identity,
             "subjects": tuple(subjects),
-            "identity_inventory": tuple(identity_inventory),
+            "identity_inventory": facts.identity_inventory,
             "format_operation": format_operation,
             "link_context": _restore_link_context(
                 original, facts, before, set(intent.affected_paths), git, _owner=_owner
@@ -1848,51 +2135,24 @@ def _recovery_preparation(
     )
 
 
-def _prepare_recovery_observed(
-    root, observed, authority, *, direction=None, previous=None, _owner=None
-):
-    """Use one fully validated operation walk and a fresh current observation."""
-    if direction not in (None, "finish", "restore"):
-        return _recovery_preparation("refused", "unsupported_recovery_direction")
-    if authority is not None and authority.graph.receipt is not None:
-        if direction is not None:
-            return _recovery_preparation("refused", "terminal_direction_unavailable")
-        if observed.code == "terminal_cleanup_required" and observed.recovery_required:
-            try:
-                if not _marker_valid(root, observed.operation_id):
-                    raise OSError("Terminal owner marker changed")
-            except OSError, ValueError, TypeError, UnicodeError:
-                return _recovery_preparation("unavailable", "operation_marker_invalid")
-            return _recovery_preparation(
-                "cleanup", "terminal_cleanup_required", observed=observed
-            )
-        return _recovery_preparation("refused", observed.code)
-    if authority is None or not (
-        (
-            observed.status in ("cancelled", "incomplete", "content_complete")
-            or observed.code == "unknown_current_bytes"
-        )
-        and observed.recovery_required
-        and observed.intent_commit is not None
-        and observed.operation_id is not None
-        and observed.generation is not None
-    ):
+def _prepare_terminal_cleanup(root, observed, direction):
+    if direction is not None:
+        return _recovery_preparation("refused", "terminal_direction_unavailable")
+    if observed.code == "terminal_cleanup_required" and observed.recovery_required:
+        try:
+            if not _marker_valid(root, observed.operation_id):
+                raise OSError("Terminal owner marker changed")
+        except OSError, ValueError, TypeError, UnicodeError:
+            return _recovery_preparation("unavailable", "operation_marker_invalid")
         return _recovery_preparation(
-            "unavailable" if observed.recovery_required else "refused", observed.code
+            "cleanup", "terminal_cleanup_required", observed=observed
         )
-    try:
-        if not _marker_valid(root, observed.operation_id):
-            raise ValueError("Operation marker is torn or belongs to another owner")
-    except OSError, ValueError, TypeError, UnicodeError:
-        return _recovery_preparation("unavailable", "operation_marker_invalid")
-    active = authority.graph.intent
-    directions = (
-        (active.direction,)
-        if isinstance(active, VaultRecoveryIntent)
-        else ("finish", "restore")
-    )
-    if direction is not None and direction not in directions:
-        return _recovery_preparation("refused", "saved_recovery_direction_required")
+    return _recovery_preparation("refused", observed.code)
+
+
+def _build_recovery_review(
+    root, observed, authority, directions, *, direction, previous, _owner
+):
     origin_commit, origin = authority.graph.authorities[-1]
     loaded = authority.owned[origin.prepared_commit][1]
     if loaded is None:
@@ -1942,6 +2202,51 @@ def _prepare_recovery_observed(
         directions=directions,
         direction=direction,
         review=review,
+    )
+
+
+def _prepare_recovery_observed(
+    root, observed, authority, *, direction=None, previous=None, _owner=None
+):
+    """Use one fully validated operation walk and a fresh current observation."""
+    if direction not in (None, "finish", "restore"):
+        return _recovery_preparation("refused", "unsupported_recovery_direction")
+    if authority is not None and authority.graph.receipt is not None:
+        return _prepare_terminal_cleanup(root, observed, direction)
+    if authority is None or not (
+        (
+            observed.status in ("cancelled", "incomplete", "content_complete")
+            or observed.code == "unknown_current_bytes"
+        )
+        and observed.recovery_required
+        and observed.intent_commit is not None
+        and observed.operation_id is not None
+        and observed.generation is not None
+    ):
+        return _recovery_preparation(
+            "unavailable" if observed.recovery_required else "refused", observed.code
+        )
+    try:
+        if not _marker_valid(root, observed.operation_id):
+            raise ValueError("Operation marker is torn or belongs to another owner")
+    except OSError, ValueError, TypeError, UnicodeError:
+        return _recovery_preparation("unavailable", "operation_marker_invalid")
+    active = authority.graph.intent
+    directions = (
+        (active.direction,)
+        if isinstance(active, VaultRecoveryIntent)
+        else ("finish", "restore")
+    )
+    if direction is not None and direction not in directions:
+        return _recovery_preparation("refused", "saved_recovery_direction_required")
+    return _build_recovery_review(
+        root,
+        observed,
+        authority,
+        directions,
+        direction=direction,
+        previous=previous,
+        _owner=_owner,
     )
 
 
@@ -2188,6 +2493,975 @@ def _cleanup_verified_terminal(root, saved, *, start, _owners=None):
         )
 
 
+@dataclass(frozen=True)
+class _RecoveryPublication:
+    root: Path
+    saved: VaultRecoveryPreparation
+    observed: VaultApplyResult
+    authority: _OperationObservation
+    subjects: tuple[VaultSubject, ...]
+    selected: SelectedReviewEffects
+    export: object
+    owners: ExitStack | None
+    start: float
+    progress: object
+
+
+@dataclass(frozen=True)
+class _RecoveryLineage:
+    history: object
+    association: object
+    origin_commit: str
+    origin: VaultOperationIntent
+    source_manifest: object
+
+
+@dataclass(frozen=True)
+class _RecoveryPaths:
+    before: dict[str, VaultFile]
+    selected_rows: dict[str, SelectedReviewFile]
+    selected_files: dict[str, ContentValue]
+    removals: set[str]
+    changed: set[str]
+
+
+@dataclass(frozen=True)
+class _RecoveryStage:
+    proposed_root: Path
+    before_metadata: dict
+    result_metadata: dict
+    prepared_parents: dict
+    parent_metadata: dict
+
+
+@dataclass(frozen=True)
+class _RecoveryJournal:
+    git: _Git
+    manifest: object
+    intent: VaultRecoveryIntent
+    ref: str
+
+
+@dataclass
+class _RecoveryProgress:
+    acquired: bool = False
+    phase: str = "admission"
+    prepared_commit: str | None = None
+    recovery_commit: str | None = None
+    result_commit: str | None = None
+    receipt_commit: str | None = None
+    published: int = 0
+    planned: int = 0
+    failure_code: str = "recovery_unavailable"
+    generation: int | None = None
+
+
+def _read_recovery_operation(root, owners):
+    return (
+        _inspect_update_observation(root)
+        if owners is None
+        else _inspect_update_observation(root, _owners=owners)
+    )
+
+
+def _recovery_prelease_refusal(known, code, start, owner):
+    outcome = (
+        _outcome(
+            "refused",
+            code,
+            start=start,
+            publication="unknown",
+            history="unknown",
+            recovery=True,
+        )
+        if known is None
+        else _refuse_known_recovery(known, code, start=start)
+    )
+    if owner is not None and owner._cancel.is_set():
+        return outcome.model_copy(
+            update={
+                "status": "cancelled",
+                "code": "cancelled_before_recovery_lease",
+            }
+        )
+    return outcome
+
+
+def _revalidate_recovery_review(root, observed, authority, saved, *, start, owner):
+    fresh = _prepare_recovery_observed(
+        root, observed, authority, direction=saved.direction, _owner=owner
+    )
+    if (
+        fresh.status != "offered"
+        or not _same_recovery_review(fresh, saved)
+        or (owner is not None and fresh.generation != saved.generation)
+    ):
+        if authority is not None and observed.operation_id == saved.operation_id:
+            return _refuse_known_recovery(
+                observed, "recovery_review_stale", start=start
+            )
+        return _outcome("refused", "recovery_review_stale", start=start)
+
+
+def _export_recovery_authority_matches(observed, authority, saved):
+    return not (
+        authority is None
+        or not observed.recovery_required
+        or (
+            observed.operation_id,
+            observed.kind,
+            observed.generation,
+            observed.intent_commit,
+        )
+        != (
+            saved.operation_id,
+            saved.kind,
+            saved.generation,
+            saved.intent_commit,
+        )
+        or observed.review_generation is not None
+        and observed.direction != saved.direction
+    )
+
+
+def _observe_recovery_for_execute(vault, root, owner, owners):
+    if owner is None:
+        return _read_recovery_operation(root, owners)
+    owner._observe(vault, _recovery=True)
+    return owner.observed._recovery_status, owner.observed._terminal
+
+
+def _select_recovery_publication(
+    vault, root, saved, *, start, progress, _owner, _owners
+):
+    known = (
+        None
+        if _owner is None or _owner.observed is None
+        else _owner.observed._recovery_status
+    )
+
+    try:
+        selected = (
+            select_review_effects(saved.review)
+            if _owner is None
+            else _owner._session.select_review_effects(saved.review)
+        )
+        if selected.status != "selected":
+            if _owner is not None and known is not None:
+                return _recovery_prelease_refusal(known, selected.code, start, _owner)
+            return _outcome("refused", selected.code, start=start)
+        if not supported_durable_volume(root):
+            return _outcome("refused", "unsupported_durable_volume", start=start)
+
+        observed, authority = _observe_recovery_for_execute(
+            vault, root, _owner, _owners
+        )
+        known = observed
+        refusal = _revalidate_recovery_review(
+            root, observed, authority, saved, start=start, owner=_owner
+        )
+        if refusal is not None:
+            return refusal
+        try:
+            subjects = _review_subjects(saved.review, selected)
+        except OSError, ValueError, TypeError:
+            return _refuse_known_recovery(
+                observed, "invalid_recovery_scope", start=start
+            )
+        export = None if _owner is None else _owner._publication_export(saved.review)
+        if export is not None:
+            selected = export.effects
+            observed, authority = _read_recovery_operation(root, _owners)
+            known = observed
+            if not _export_recovery_authority_matches(observed, authority, saved):
+                return _refuse_known_recovery(
+                    observed, "recovery_review_stale", start=start
+                )
+    except OSError, ValueError, TypeError, UnicodeError:
+        if _owner is None:
+            raise
+        return _recovery_prelease_refusal(
+            known, "recovery_review_unavailable", start, _owner
+        )
+    return _RecoveryPublication(
+        root,
+        saved,
+        observed,
+        authority,
+        subjects,
+        selected,
+        export,
+        _owners,
+        start,
+        progress,
+    )
+
+
+def _adopt_recovery(publication, state):
+    before_lease = _inspect_vault_for_recovery(
+        publication.root, publication.authority, subjects=publication.subjects
+    )
+    origin = publication.authority.graph.authorities[-1][1]
+    original_prepared, original_saved = publication.authority.owned[
+        origin.prepared_commit
+    ]
+    if (
+        before_lease.status != "supported"
+        or not _current_review_matches(publication.saved.review, before_lease)
+        or _review_preflight(
+            before_lease,
+            original_prepared,
+            original_saved.saved.plan,
+            publication.authority,
+        )
+        != publication.saved.review.preflight
+    ):
+        return _refuse_known_recovery(
+            publication.observed, "recovery_review_stale", start=publication.start
+        )
+    _adopt(publication.root, publication.saved.operation_id)
+    state.acquired = True
+    if not owns_operation(publication.root, publication.saved.operation_id):
+        raise OSError("Recovery operation lease is unavailable")
+    return before_lease
+
+
+def _observe_recovery_lineage(publication, before_lease):
+    history = _inspect_retained_history(
+        publication.root,
+        publication.authority,
+        subjects=publication.subjects,
+        active_operation=publication.saved.operation_id,
+    )
+    if (
+        history.status != "intact"
+        or history.admission.status != "supported"
+        or history.admission.inventory != before_lease.inventory
+        or history.admission.policy_fingerprint != before_lease.policy_fingerprint
+    ):
+        return _refuse_known_recovery(
+            publication.observed, "recovery_admission_required", start=publication.start
+        )
+    association = history.checkpoint.locator.association
+    origin_commit, origin = publication.authority.graph.authorities[-1]
+    original_prepared = publication.authority.owned[origin.prepared_commit][0]
+    source_manifest = (
+        original_prepared
+        if publication.saved.direction == "finish"
+        else publication.authority.owned[original_prepared.previous][0]
+    )
+    if (
+        publication.observed.operation_id != publication.saved.operation_id
+        or publication.observed.intent_commit != publication.saved.intent_commit
+        or (
+            isinstance(publication.authority.graph.intent, VaultRecoveryIntent)
+            and publication.observed.direction != publication.saved.direction
+        )
+        or association.association_id != origin.association_id
+        or publication.saved.review.facts.incoming_identity != source_manifest.identity
+        or _operation_history_fingerprint(origin_commit, origin)
+        != _operation_history_fingerprint(
+            publication.authority.graph.origin_intent_commit, origin
+        )
+    ):
+        return _refuse_known_recovery(
+            publication.observed,
+            "recovery_source_lineage_changed",
+            start=publication.start,
+        )
+    return _RecoveryLineage(
+        history, association, origin_commit, origin, source_manifest
+    )
+
+
+def _plan_recovery_paths(publication, lineage, state):
+    selected = publication.selected
+    accepted_tracking = {
+        subject_id
+        for requirement in lineage.history.admission.preflight.consents
+        if requirement.kind == "tracking"
+        and any(
+            decision.consent_id == requirement.consent_id
+            and decision.kind == requirement.kind
+            and decision.choice == "accept"
+            for decision in publication.saved.review.consents
+        )
+        for subject_id in requirement.subjects
+    }
+    included_paths = {
+        subject.path
+        for subject in publication.subjects
+        if subject.subject_id in accepted_tracking
+    }
+    before = {
+        row.path: row
+        for row in lineage.history.admission.inventory
+        if not row.excluded or row.path in included_paths
+    }
+    selected_rows = {row.path: row for row in selected.files}
+    selected_files = {path: row.content for path, row in selected_rows.items()}
+    removals = set(selected.remove_paths)
+    from .attachment_ownership import (
+        review_ownership_claims,
+        validate_removal_continuations,
+    )
+
+    satisfied = validate_removal_continuations(
+        review_ownership_claims(publication.saved.review, selected)[0],
+        origin=lineage.origin,
+        original=publication.authority.owned[lineage.origin.prepared_commit][
+            1
+        ].saved.plan,
+        origin_commit=lineage.origin_commit,
+        before=tuple(before.values()),
+        direction=publication.saved.direction,
+        effects=publication.authority.owned[lineage.origin.prepared_commit][
+            1
+        ].historical_effects,
+    )
+    removals -= satisfied
+    if any(not _safe_relative(path) for path in (*selected_files, *removals)):
+        return _refuse_known_recovery(
+            publication.observed, "unsafe_recovery_path", start=publication.start
+        )
+    if any(path not in before for path in removals):
+        return _refuse_known_recovery(
+            publication.observed, "recovery_removal_missing", start=publication.start
+        )
+    changed = {
+        path
+        for path, data in selected_files.items()
+        if path not in before
+        or before[path].size != content_size(data)
+        or before[path].sha256 != content_sha(data)
+    } | removals
+    if not changed.issubset(lineage.origin.affected_paths):
+        return _refuse_known_recovery(
+            publication.observed, "recovery_scope_changed", start=publication.start
+        )
+    state.planned = len(changed)
+    stage_need = (
+        sum(row.size for path, row in before.items() if path not in removals)
+        + sum(content_size(data) for data in selected_files.values())
+        + sum(row.size for row in lineage.source_manifest.source)
+        + 128 * 1024 * 1024
+        + 4096
+        * (len(before) + len(selected_files) + len(lineage.source_manifest.source))
+    )
+    if shutil.disk_usage(publication.root.parent).free < stage_need:
+        return _refuse_known_recovery(
+            publication.observed,
+            "insufficient_recovery_stage_resources",
+            start=publication.start,
+        )
+    return _RecoveryPaths(before, selected_rows, selected_files, removals, changed)
+
+
+def _write_recovery_stage(publication, paths, proposed_root, result_metadata):
+    for path, data in paths.selected_files.items():
+        target = proposed_root / path
+        stage_parent_security(publication.root, proposed_root, Path(path).parent)
+        with target.open("wb") as stream:
+            if publication.export is None:
+                stream.write(data.data)
+            else:
+                publication.export.stage(paths.selected_rows[path], stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if publication.export is not None:
+            info, sha, _, _ = observe_file(proposed_root, target, prefix_limit=0)
+            if (info.st_size, sha) != (
+                content_size(data),
+                content_sha(data),
+            ):
+                raise OSError(
+                    "Recovery stage differs from the canonical selected content"
+                )
+        if path in paths.before:
+            shutil.copymode(publication.root / path, target)
+        if path in paths.changed:
+            if path in paths.before:
+                retained_metadata(publication.root / path, copy_to=target)
+            result_metadata[path] = retained_metadata(target)
+            _flush_stage(target)
+
+
+def _stage_recovery(publication, paths, proposed_root):
+    if proposed_root.stat().st_dev != publication.root.stat().st_dev:
+        return _refuse_known_recovery(
+            publication.observed, "same_volume_stage_required", start=publication.start
+        )
+    stage_parent_security(publication.root, proposed_root, Path("."))
+    before_metadata = {}
+    result_metadata = {}
+    for path, row in paths.before.items():
+        if path in paths.removals:
+            continue
+        target = proposed_root / path
+        stage_parent_security(publication.root, proposed_root, Path(path).parent)
+        if not _same_file(publication.root, row):
+            return _refuse_known_recovery(
+                publication.observed, "current_bytes_changed", start=publication.start
+            )
+        if path in paths.changed:
+            before_metadata[path] = retained_metadata(publication.root / path)
+            copy_stage(publication.root / path, target)
+        else:
+            shutil.copy2(publication.root / path, target)
+    _write_recovery_stage(publication, paths, proposed_root, result_metadata)
+    for path in paths.removals:
+        before_metadata[path] = retained_metadata(publication.root / path)
+    prepared_parents = _prepare_parents(
+        publication.root,
+        proposed_root,
+        (path for path in paths.changed if path in paths.selected_files),
+    )
+    parent_metadata = {
+        path: retained_directory_metadata(stage)
+        for path, stage in prepared_parents.items()
+    }
+    return _RecoveryStage(
+        proposed_root,
+        before_metadata,
+        result_metadata,
+        prepared_parents,
+        parent_metadata,
+    )
+
+
+def _retain_recovery_preparation(
+    publication, lineage, stage, state, source, cancel_requested
+):
+    state.phase = "prepared"
+    prepared = capture_checkpoint(
+        publication.root,
+        source,
+        vault_id=lineage.association.vault_id,
+        import_id=lineage.association.import_id,
+        identity=lineage.source_manifest.identity,
+        admission=lineage.history.admission,
+        subjects=publication.subjects,
+        review=publication.saved.review,
+        boundary="prepared",
+        proposed=stage.proposed_root,
+        active_operation=publication.saved.operation_id,
+        recovery_direction=publication.saved.direction,
+        _observation=(publication.observed, publication.authority),
+        **(
+            {}
+            if publication.export is None
+            else {"_owned_export": publication.export, "_owners": publication.owners}
+        ),
+        progress=publication.progress,
+    )
+    reused_preparation = (
+        prepared.status == "unchanged"
+        and prepared.code == "already_retained"
+        and prepared.history_retained
+        and prepared.commit == publication.authority.unpublished_prepared
+    )
+    if prepared.status != "captured" and not reused_preparation:
+        return _stopped_before_recovery_intent(
+            publication.observed,
+            "refused" if prepared.status == "refused" else "failed",
+            "recovery_prepare_" + prepared.code,
+            start=publication.start,
+            direction=publication.saved.direction,
+            review_generation=publication.saved.review.proposal.generation,
+            prepared=prepared.commit if prepared.history_retained else None,
+        )
+    state.prepared_commit = prepared.commit
+    if cancel_requested():
+        return _stopped_before_recovery_intent(
+            publication.observed,
+            "cancelled",
+            "cancelled_before_recovery_intent",
+            start=publication.start,
+            direction=publication.saved.direction,
+            review_generation=publication.saved.review.proposal.generation,
+            prepared=state.prepared_commit,
+        )
+
+
+def _rediscover_recovery_preparation(publication):
+    tip = (
+        inspect_history(
+            publication.root,
+            subjects=publication.subjects,
+            active_operation=publication.saved.operation_id,
+        )
+        if publication.export is None
+        else _inspect_history(
+            publication.root,
+            subjects=publication.subjects,
+            active_operation=publication.saved.operation_id,
+            _metadata_only=True,
+            _owners=publication.owners,
+        )
+    )
+    if (
+        tip.status != "intact"
+        or tip.checkpoint is None
+        or tip.checkpoint.manifest is None
+        or tip.checkpoint.manifest.boundary != "prepared"
+    ):
+        raise OSError("Recovery preparation could not be rediscovered")
+    manifest = tip.checkpoint.manifest
+    return manifest
+
+
+def _record_recovery_intent(publication, lineage, paths, stage, state, git, manifest):
+    state.generation = manifest.generation
+    intent = VaultRecoveryIntent(
+        schema_id="brz2obsidian.vault-recovery-intent",
+        schema_version=1,
+        operation_id=publication.saved.operation_id,
+        kind=lineage.origin.kind,
+        generation=state.generation,
+        direction=publication.saved.direction,
+        association_id=manifest.association_id,
+        prepared_commit=state.prepared_commit,
+        before=manifest.preimage,
+        proposed=manifest.proposed,
+        affected_paths=tuple(sorted(paths.changed)),
+        protected_paths=tuple(sorted(set(paths.before) - paths.changed)),
+        before_metadata=tuple(
+            VaultPathMetadata(
+                path=path,
+                mode=value[0],
+                attributes=value[1],
+                security=value[2],
+            )
+            for path, value in sorted(stage.before_metadata.items())
+        ),
+        result_metadata=tuple(
+            VaultPathMetadata(
+                path=path,
+                mode=value[0],
+                attributes=value[1],
+                security=value[2],
+            )
+            for path, value in sorted(stage.result_metadata.items())
+        ),
+        created_directories=tuple(
+            VaultPathMetadata(
+                path=path.as_posix(),
+                mode=value[0],
+                attributes=value[1],
+                security=value[2],
+            )
+            for path, value in sorted(
+                stage.parent_metadata.items(), key=lambda item: item[0].as_posix()
+            )
+        ),
+        origin_intent_commit=lineage.origin_commit,
+        previous_operation_commit=publication.authority.graph.commit,
+        review_generation=publication.saved.review.proposal.generation,
+    )
+    op_ref = (
+        "refs/brz2obsidian/imports/"
+        + manifest.association_id
+        + "/operations/"
+        + publication.saved.operation_id
+    )
+    state.phase = "intent"
+    state.recovery_commit = _journal(
+        git,
+        "recovery.json",
+        intent,
+        parents=(publication.authority.graph.commit, state.prepared_commit),
+        previous=publication.authority.graph.commit,
+        ref=op_ref,
+    )
+    return _RecoveryJournal(git, manifest, intent, op_ref)
+
+
+def _publish_recovery_path(path, root, stage, executor, old, new, expected_metadata):
+    target = root / path
+    if old is None:
+        if os.path.lexists(target):
+            raise OSError("Recovery creation path became occupied")
+    elif not _same_file(root, old):
+        raise OSError("Recovery current bytes changed before transition")
+    if new is None:
+        destination = stage.proposed_root / (
+            "removed-" + hashlib.sha256(path.encode()).hexdigest()
+        )
+        executor.remove(target, destination)
+    else:
+        staged_file = stage.proposed_root / path
+        if not _same_file(stage.proposed_root, new):
+            raise OSError("Prepared recovery bytes changed")
+        _ensure_parents(
+            root, target, stage.prepared_parents, stage.parent_metadata, executor
+        )
+        executor.move(staged_file, target, replace=old is not None)
+        if not _same_file(root, new) or not _metadata_matches(
+            root, path, expected_metadata[path]
+        ):
+            raise OSError("Published recovery result changed")
+
+
+def _publish_recovery_paths(
+    publication, lineage, paths, stage, state, journal, executor, cancel_requested
+):
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    state.phase = "publication"
+    report_progress(
+        publication.progress,
+        "publication",
+        operation_id=publication.saved.operation_id,
+        operation_generation=state.generation,
+        intent_commit=state.recovery_commit,
+        completed_units=state.published,
+        total_units=state.planned,
+        unit="files",
+    )
+    proposed = {row.path: row for row in journal.manifest.proposed}
+    prior = {row.path: row for row in journal.manifest.preimage}
+    expected_metadata = {row.path: row for row in journal.intent.result_metadata}
+    for path in sorted(paths.changed):
+        if cancel_requested():
+            stopped = VaultOperationStop(
+                schema_id="brz2obsidian.vault-operation-stop",
+                schema_version=1,
+                operation_id=publication.saved.operation_id,
+                kind=lineage.origin.kind,
+                generation=state.generation,
+                direction=publication.saved.direction,
+                status="cancelled",
+                intent_commit=state.recovery_commit,
+                acknowledged_after_files=state.published,
+            )
+            stop_commit = _journal(
+                journal.git,
+                "stop.json",
+                stopped,
+                parents=(state.recovery_commit,),
+                previous=state.recovery_commit,
+                ref=journal.ref,
+            )
+            return _outcome(
+                "cancelled",
+                "cancelled_after_recovery_intent",
+                start=publication.start,
+                operation_id=publication.saved.operation_id,
+                kind=lineage.origin.kind,
+                direction=publication.saved.direction,
+                review_generation=publication.saved.review.proposal.generation,
+                generation=state.generation,
+                phase=state.phase,
+                publication="partial" if state.published else "not_published",
+                history="intent",
+                planned=state.planned,
+                published=state.published,
+                changed=bool(state.published),
+                checkpoint=state.prepared_commit,
+                intent=state.recovery_commit,
+                stop=stop_commit,
+                recovery=True,
+            )
+        _publish_recovery_path(
+            path,
+            publication.root,
+            stage,
+            executor,
+            prior.get(path),
+            proposed.get(path),
+            expected_metadata,
+        )
+        state.published += 1
+        report_progress(
+            publication.progress,
+            "publication",
+            operation_id=publication.saved.operation_id,
+            operation_generation=state.generation,
+            intent_commit=state.recovery_commit,
+            completed_units=state.published,
+            total_units=state.planned,
+            unit="files",
+        )
+    report_progress(
+        publication.progress,
+        "final_verification",
+        operation_id=publication.saved.operation_id,
+        operation_generation=state.generation,
+        intent_commit=state.recovery_commit,
+    )
+    if any(not _same_file(publication.root, row) for row in journal.manifest.proposed):
+        raise OSError("Complete recovery inventory changed")
+    if any(
+        os.path.lexists(publication.root / path) for path in set(prior) - set(proposed)
+    ):
+        raise OSError("Removed recovery path remains visible")
+
+
+def _retain_recovery_result(publication, lineage, paths, state, source, journal):
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    state.phase = "result"
+    report_progress(
+        publication.progress,
+        "final_reporting",
+        operation_id=publication.saved.operation_id,
+        operation_generation=state.generation,
+        intent_commit=state.recovery_commit,
+    )
+    result_observation = _read_recovery_operation(publication.root, publication.owners)
+    current = _inspect_retained_history(
+        publication.root,
+        result_observation[1],
+        subjects=publication.subjects,
+        active_operation=publication.saved.operation_id,
+    )
+    result_checkpoint = capture_checkpoint(
+        publication.root,
+        source,
+        vault_id=lineage.association.vault_id,
+        import_id=lineage.association.import_id,
+        identity=lineage.source_manifest.identity,
+        admission=current.admission,
+        subjects=publication.subjects,
+        boundary="result",
+        expected_prepared=state.prepared_commit,
+        active_operation=publication.saved.operation_id,
+        operation_intent_commit=state.recovery_commit,
+        _observation=result_observation,
+        **(
+            {}
+            if publication.export is None
+            else {
+                "review": publication.export.saved.plan,
+                "_owned_export": publication.export,
+                "_owners": publication.owners,
+            }
+        ),
+        progress=publication.progress,
+    )
+    if result_checkpoint.status != "captured":
+        state.failure_code = "result_" + result_checkpoint.code
+        raise OSError("Recovery result checkpoint was not retained")
+    state.result_commit = result_checkpoint.commit
+    terminal = _recovery_result_status(
+        lineage.origin.kind,
+        publication.saved.direction,
+        bool(lineage.origin.affected_paths),
+    )
+    receipt = VaultOperationReceipt(
+        schema_id="brz2obsidian.vault-operation-receipt",
+        schema_version=1,
+        operation_id=publication.saved.operation_id,
+        kind=lineage.origin.kind,
+        generation=state.generation,
+        status=terminal,
+        direction=publication.saved.direction,
+        intent_commit=state.recovery_commit,
+        prepared_commit=state.prepared_commit,
+        result_commit=state.result_commit,
+        published_paths=tuple(sorted(paths.changed)),
+    )
+    state.phase = "terminal"
+    state.receipt_commit = _journal(
+        journal.git,
+        "receipt.json",
+        receipt,
+        parents=(state.recovery_commit, state.result_commit),
+        previous=state.recovery_commit,
+        ref=journal.ref,
+    )
+    return terminal
+
+
+def _report_recovery_failure(publication, state):
+    failure = (
+        _read_recovery_operation(publication.root, publication.owners)[0]
+        if state.phase in ("intent", "publication", "result", "terminal")
+        else None
+    )
+    if (
+        failure is not None
+        and failure.operation_id == publication.saved.operation_id
+        and failure.intent_commit is not None
+    ):
+        return _outcome(
+            "content_complete"
+            if failure.status in ("applied", "undone", "restored", "no_content_change")
+            else failure.status,
+            state.failure_code + "_" + failure.code,
+            start=publication.start,
+            operation_id=publication.saved.operation_id,
+            kind=failure.kind,
+            direction=failure.direction,
+            review_generation=failure.review_generation,
+            generation=failure.generation,
+            phase=state.phase,
+            publication=failure.publication,
+            history=failure.history,
+            planned=state.planned,
+            published=failure.published_files,
+            changed=failure.authored_files_changed,
+            checkpoint=state.prepared_commit,
+            intent=failure.intent_commit,
+            result=failure.result_commit or state.result_commit,
+            receipt=failure.receipt_commit,
+            stop=failure.stop_commit,
+            recovery=True,
+        )
+    return _outcome(
+        "content_complete" if state.result_commit is not None else "unknown",
+        state.failure_code,
+        start=publication.start,
+        operation_id=publication.saved.operation_id,
+        kind=publication.saved.kind,
+        direction=publication.saved.direction,
+        review_generation=publication.saved.review.proposal.generation,
+        generation=state.generation,
+        phase=state.phase,
+        publication="complete" if state.result_commit is not None else "unknown",
+        history="result"
+        if state.result_commit is not None
+        else "unknown"
+        if state.phase == "intent"
+        else "intent"
+        if state.recovery_commit is not None
+        else "prepared"
+        if state.prepared_commit is not None
+        else "none",
+        planned=state.planned,
+        published=state.published,
+        changed=True if state.result_commit is not None and state.planned else None,
+        checkpoint=state.prepared_commit,
+        intent=state.recovery_commit,
+        result=state.result_commit,
+        receipt=state.receipt_commit,
+        recovery=True,
+    )
+
+
+def _release_recovery_lease(publication, state):
+    if state.acquired and state.recovery_commit is not None:
+        _park(publication.root, publication.saved.operation_id)
+    elif state.acquired:
+        pending_exception = sys.exc_info()[0]
+        try:
+            _release(publication.root, publication.saved.operation_id)
+        except OSError, ValueError, TypeError:
+            if pending_exception is None or issubclass(
+                pending_exception, (OSError, ValueError, TypeError)
+            ):
+                try:
+                    stopped = _read_recovery_operation(
+                        publication.root, publication.owners
+                    )[0]
+                except OSError, ValueError, TypeError, UnicodeError:
+                    stopped = None
+                if (
+                    stopped is None
+                    or stopped.operation_id != publication.saved.operation_id
+                ):
+                    raise _OwnedRecoveryCleanupFailure(
+                        _outcome(
+                            "unknown",
+                            "recovery_cleanup_failed",
+                            start=publication.start,
+                            operation_id=publication.saved.operation_id,
+                            kind=publication.saved.kind,
+                            direction=publication.saved.direction,
+                            review_generation=publication.saved.review.proposal.generation,
+                            generation=publication.observed.generation,
+                            phase="prepared" if state.prepared_commit else "admission",
+                            publication="unknown",
+                            history=(
+                                "prepared"
+                                if state.prepared_commit
+                                else publication.observed.history
+                            ),
+                            planned=max(
+                                state.planned, publication.observed.planned_files
+                            ),
+                            published=publication.observed.published_files,
+                            checkpoint=(
+                                state.prepared_commit
+                                or publication.observed.checkpoint_commit
+                            ),
+                            intent=publication.observed.intent_commit,
+                            stop=publication.observed.stop_commit,
+                            changed=None,
+                            recovery=True,
+                        )
+                    )
+                raise _OwnedRecoveryCleanupFailure(
+                    _refuse_known_recovery(
+                        stopped, "recovery_cleanup_failed", start=publication.start
+                    )
+                )
+
+
+def _completed_recovery(publication, lineage, paths, state, terminal):
+    _release(publication.root, publication.saved.operation_id)
+    state.acquired = False
+    return _outcome(
+        terminal,
+        terminal,
+        start=publication.start,
+        operation_id=publication.saved.operation_id,
+        kind=lineage.origin.kind,
+        direction=publication.saved.direction,
+        review_generation=publication.saved.review.proposal.generation,
+        generation=state.generation,
+        phase="terminal",
+        publication="complete",
+        history="terminal",
+        planned=state.planned,
+        published=state.published,
+        changed=bool(paths.changed),
+        checkpoint=state.prepared_commit,
+        intent=state.recovery_commit,
+        result=state.result_commit,
+        receipt=state.receipt_commit,
+        recovery=False,
+        message="Reviewed recovery result and terminal receipt retained.",
+    )
+
+
+def _publish_staged_recovery(
+    publication, lineage, paths, state, executor, cancel_requested
+):
+    root = publication.root
+    git = _Git(root)
+    with _retained_source(root, git, lineage.source_manifest.source) as source:  # noqa: SIM117
+        with _proposed_directory(root.parent) as proposed_root:
+            stage = _stage_recovery(publication, paths, proposed_root)
+            if isinstance(stage, VaultApplyResult):
+                return stage
+            stopped = _retain_recovery_preparation(
+                publication, lineage, stage, state, source, cancel_requested
+            )
+            if stopped is not None:
+                return stopped
+            manifest = _rediscover_recovery_preparation(publication)
+            journal = _record_recovery_intent(
+                publication, lineage, paths, stage, state, git, manifest
+            )
+            stopped = _publish_recovery_paths(
+                publication,
+                lineage,
+                paths,
+                stage,
+                state,
+                journal,
+                executor,
+                cancel_requested,
+            )
+            if stopped is not None:
+                return stopped
+            terminal = _retain_recovery_result(
+                publication, lineage, paths, state, source, journal
+            )
+    return _completed_recovery(publication, lineage, paths, state, terminal)
+
+
 def _execute_recovery(
     vault,
     preparation,
@@ -2212,759 +3486,37 @@ def _execute_recovery(
         return _cleanup_verified_terminal(root, saved, start=start, _owners=_owners)
     if saved.status != "offered" or saved.direction is None or saved.review is None:
         return _outcome("refused", "recovery_review_required", start=start)
-    known = (
-        None
-        if _owner is None or _owner.observed is None
-        else _owner.observed._recovery_status
+    publication = _select_recovery_publication(
+        vault,
+        root,
+        saved,
+        start=start,
+        progress=progress,
+        _owner=_owner,
+        _owners=_owners,
     )
-
-    def prelease_refusal(code):
-        outcome = (
-            _outcome(
-                "refused",
-                code,
-                start=start,
-                publication="unknown",
-                history="unknown",
-                recovery=True,
-            )
-            if known is None
-            else _refuse_known_recovery(known, code, start=start)
-        )
-        if _owner is not None and _owner._cancel.is_set():
-            return outcome.model_copy(
-                update={
-                    "status": "cancelled",
-                    "code": "cancelled_before_recovery_lease",
-                }
-            )
-        return outcome
-
-    try:
-        selected = (
-            select_review_effects(saved.review)
-            if _owner is None
-            else _owner._session.select_review_effects(saved.review)
-        )
-        if selected.status != "selected":
-            if _owner is not None and known is not None:
-                return prelease_refusal(selected.code)
-            return _outcome("refused", selected.code, start=start)
-        if not supported_durable_volume(root):
-            return _outcome("refused", "unsupported_durable_volume", start=start)
-
-        def read_operation():
-            return (
-                _inspect_update_observation(root)
-                if _owners is None
-                else _inspect_update_observation(root, _owners=_owners)
-            )
-
-        if _owner is None:
-            observed, authority = read_operation()
-            known = observed
-        else:
-            _owner._observe(vault, _recovery=True)
-            observed, authority = (
-                _owner.observed._recovery_status,
-                _owner.observed._terminal,
-            )
-        known = observed
-        fresh = _prepare_recovery_observed(
-            root, observed, authority, direction=saved.direction, _owner=_owner
-        )
-        if (
-            fresh.status != "offered"
-            or not _same_recovery_review(fresh, saved)
-            or (_owner is not None and fresh.generation != saved.generation)
-        ):
-            if authority is not None and observed.operation_id == saved.operation_id:
-                return _refuse_known_recovery(
-                    observed, "recovery_review_stale", start=start
-                )
-            return _outcome("refused", "recovery_review_stale", start=start)
-        try:
-            subjects = _review_subjects(saved.review, selected)
-        except OSError, ValueError, TypeError:
-            return _refuse_known_recovery(
-                observed, "invalid_recovery_scope", start=start
-            )
-        export = None if _owner is None else _owner._publication_export(saved.review)
-        if export is not None:
-            selected = export.effects
-            observed, authority = read_operation()
-            known = observed
-            if (
-                authority is None
-                or not observed.recovery_required
-                or (
-                    observed.operation_id,
-                    observed.kind,
-                    observed.generation,
-                    observed.intent_commit,
-                )
-                != (
-                    saved.operation_id,
-                    saved.kind,
-                    saved.generation,
-                    saved.intent_commit,
-                )
-                or observed.review_generation is not None
-                and observed.direction != saved.direction
-            ):
-                return _refuse_known_recovery(
-                    observed, "recovery_review_stale", start=start
-                )
-    except OSError, ValueError, TypeError, UnicodeError:
-        if _owner is None:
-            raise
-        return prelease_refusal("recovery_review_unavailable")
-    operation_id = saved.operation_id
-    acquired = False
-    phase = "admission"
-    prepared_commit = recovery_commit = result_commit = receipt_commit = None
-    published = planned = 0
-    failure_code = "recovery_unavailable"
-    generation = None
+    if isinstance(publication, VaultApplyResult):
+        return publication
+    state = _RecoveryProgress()
     cancel_requested = cancel if cancel is not None else lambda: False
     executor = executor if executor is not None else _NativeExecutor()
-    current_status = observed
     try:
-        before_lease = _inspect_vault_for_recovery(root, authority, subjects=subjects)
-        origin = authority.graph.authorities[-1][1]
-        original_prepared, original_saved = authority.owned[origin.prepared_commit]
-        if (
-            before_lease.status != "supported"
-            or not _current_review_matches(saved.review, before_lease)
-            or _review_preflight(
-                before_lease, original_prepared, original_saved.saved.plan, authority
-            )
-            != saved.review.preflight
-        ):
-            return _refuse_known_recovery(
-                observed, "recovery_review_stale", start=start
-            )
-        _adopt(root, operation_id)
-        acquired = True
-        if not owns_operation(root, operation_id):
-            raise OSError("Recovery operation lease is unavailable")
-        current_status, current_authority = observed, authority
-        history = _inspect_retained_history(
-            root, current_authority, subjects=subjects, active_operation=operation_id
-        )
-        if (
-            history.status != "intact"
-            or history.admission.status != "supported"
-            or history.admission.inventory != before_lease.inventory
-            or history.admission.policy_fingerprint != before_lease.policy_fingerprint
-        ):
-            return _refuse_known_recovery(
-                current_status, "recovery_admission_required", start=start
-            )
-        association = history.checkpoint.locator.association
-        origin_commit, origin = current_authority.graph.authorities[-1]
-        original_prepared = current_authority.owned[origin.prepared_commit][0]
-        source_manifest = (
-            original_prepared
-            if saved.direction == "finish"
-            else current_authority.owned[original_prepared.previous][0]
-        )
-        if (
-            current_status.operation_id != operation_id
-            or current_status.intent_commit != saved.intent_commit
-            or (
-                isinstance(current_authority.graph.intent, VaultRecoveryIntent)
-                and current_status.direction != saved.direction
-            )
-            or association.association_id != origin.association_id
-            or saved.review.facts.incoming_identity != source_manifest.identity
-            or _operation_history_fingerprint(origin_commit, origin)
-            != _operation_history_fingerprint(
-                current_authority.graph.origin_intent_commit, origin
-            )
-        ):
-            return _refuse_known_recovery(
-                current_status, "recovery_source_lineage_changed", start=start
-            )
-        accepted_tracking = {
-            subject_id
-            for requirement in history.admission.preflight.consents
-            if requirement.kind == "tracking"
-            and any(
-                decision.consent_id == requirement.consent_id
-                and decision.kind == requirement.kind
-                and decision.choice == "accept"
-                for decision in saved.review.consents
-            )
-            for subject_id in requirement.subjects
-        }
-        included_paths = {
-            subject.path
-            for subject in subjects
-            if subject.subject_id in accepted_tracking
-        }
-        before = {
-            row.path: row
-            for row in history.admission.inventory
-            if not row.excluded or row.path in included_paths
-        }
-        selected_rows = {row.path: row for row in selected.files}
-        selected_files = {path: row.content for path, row in selected_rows.items()}
-        removals = set(selected.remove_paths)
-        from .attachment_ownership import (
-            review_ownership_claims,
-            validate_removal_continuations,
-        )
-
-        satisfied = validate_removal_continuations(
-            review_ownership_claims(saved.review, selected)[0],
-            origin=origin,
-            original=current_authority.owned[origin.prepared_commit][1].saved.plan,
-            origin_commit=origin_commit,
-            before=tuple(before.values()),
-            direction=saved.direction,
-            effects=current_authority.owned[origin.prepared_commit][
-                1
-            ].historical_effects,
-        )
-        removals -= satisfied
-        if any(not _safe_relative(path) for path in (*selected_files, *removals)):
-            return _refuse_known_recovery(
-                current_status, "unsafe_recovery_path", start=start
-            )
-        if any(path not in before for path in removals):
-            return _refuse_known_recovery(
-                current_status, "recovery_removal_missing", start=start
-            )
-        changed = {
-            path
-            for path, data in selected_files.items()
-            if path not in before
-            or before[path].size != content_size(data)
-            or before[path].sha256 != content_sha(data)
-        } | removals
-        if not changed.issubset(origin.affected_paths):
-            return _refuse_known_recovery(
-                current_status, "recovery_scope_changed", start=start
-            )
-        planned = len(changed)
-        stage_need = (
-            sum(row.size for path, row in before.items() if path not in removals)
-            + sum(content_size(data) for data in selected_files.values())
-            + sum(row.size for row in source_manifest.source)
-            + 128 * 1024 * 1024
-            + 4096 * (len(before) + len(selected_files) + len(source_manifest.source))
-        )
-        if shutil.disk_usage(root.parent).free < stage_need:
-            return _refuse_known_recovery(
-                current_status, "insufficient_recovery_stage_resources", start=start
-            )
-        git = _Git(root)
-        with _retained_source(root, git, source_manifest.source) as source:  # noqa: SIM117
-            with _proposed_directory(root.parent) as proposed_root:
-                if proposed_root.stat().st_dev != root.stat().st_dev:
-                    return _refuse_known_recovery(
-                        current_status, "same_volume_stage_required", start=start
-                    )
-                stage_parent_security(root, proposed_root, Path("."))
-                before_metadata = {}
-                result_metadata = {}
-                for path, row in before.items():
-                    if path in removals:
-                        continue
-                    target = proposed_root / path
-                    stage_parent_security(root, proposed_root, Path(path).parent)
-                    if not _same_file(root, row):
-                        return _refuse_known_recovery(
-                            current_status, "current_bytes_changed", start=start
-                        )
-                    if path in changed:
-                        before_metadata[path] = retained_metadata(root / path)
-                        copy_stage(root / path, target)
-                    else:
-                        shutil.copy2(root / path, target)
-                for path, data in selected_files.items():
-                    target = proposed_root / path
-                    stage_parent_security(root, proposed_root, Path(path).parent)
-                    with target.open("wb") as stream:
-                        if export is None:
-                            stream.write(data.data)
-                        else:
-                            export.stage(selected_rows[path], stream)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    if export is not None:
-                        info, sha, _, _ = observe_file(
-                            proposed_root, target, prefix_limit=0
-                        )
-                        if (info.st_size, sha) != (
-                            content_size(data),
-                            content_sha(data),
-                        ):
-                            raise OSError(
-                                "Recovery stage differs from the canonical selected content"
-                            )
-                    if path in before:
-                        shutil.copymode(root / path, target)
-                    if path in changed:
-                        if path in before:
-                            retained_metadata(root / path, copy_to=target)
-                        result_metadata[path] = retained_metadata(target)
-                        _flush_stage(target)
-                for path in removals:
-                    before_metadata[path] = retained_metadata(root / path)
-                prepared_parents = _prepare_parents(
-                    root,
-                    proposed_root,
-                    (path for path in changed if path in selected_files),
-                )
-                parent_metadata = {
-                    path: retained_directory_metadata(stage)
-                    for path, stage in prepared_parents.items()
-                }
-                phase = "prepared"
-                prepared = capture_checkpoint(
-                    root,
-                    source,
-                    vault_id=association.vault_id,
-                    import_id=association.import_id,
-                    identity=source_manifest.identity,
-                    admission=history.admission,
-                    subjects=subjects,
-                    review=saved.review,
-                    boundary="prepared",
-                    proposed=proposed_root,
-                    active_operation=operation_id,
-                    recovery_direction=saved.direction,
-                    _observation=(current_status, current_authority),
-                    **(
-                        {}
-                        if export is None
-                        else {"_owned_export": export, "_owners": _owners}
-                    ),
-                    progress=progress,
-                )
-                reused_preparation = (
-                    prepared.status == "unchanged"
-                    and prepared.code == "already_retained"
-                    and prepared.history_retained
-                    and prepared.commit == current_authority.unpublished_prepared
-                )
-                if prepared.status != "captured" and not reused_preparation:
-                    return _stopped_before_recovery_intent(
-                        current_status,
-                        "refused" if prepared.status == "refused" else "failed",
-                        "recovery_prepare_" + prepared.code,
-                        start=start,
-                        direction=saved.direction,
-                        review_generation=saved.review.proposal.generation,
-                        prepared=prepared.commit if prepared.history_retained else None,
-                    )
-                prepared_commit = prepared.commit
-                if cancel_requested():
-                    return _stopped_before_recovery_intent(
-                        current_status,
-                        "cancelled",
-                        "cancelled_before_recovery_intent",
-                        start=start,
-                        direction=saved.direction,
-                        review_generation=saved.review.proposal.generation,
-                        prepared=prepared_commit,
-                    )
-                tip = (
-                    inspect_history(
-                        root, subjects=subjects, active_operation=operation_id
-                    )
-                    if export is None
-                    else _inspect_history(
-                        root,
-                        subjects=subjects,
-                        active_operation=operation_id,
-                        _metadata_only=True,
-                        _owners=_owners,
-                    )
-                )
-                if (
-                    tip.status != "intact"
-                    or tip.checkpoint is None
-                    or tip.checkpoint.manifest is None
-                    or tip.checkpoint.manifest.boundary != "prepared"
-                ):
-                    raise OSError("Recovery preparation could not be rediscovered")
-                manifest = tip.checkpoint.manifest
-                generation = manifest.generation
-                intent = VaultRecoveryIntent(
-                    schema_id="brz2obsidian.vault-recovery-intent",
-                    schema_version=1,
-                    operation_id=operation_id,
-                    kind=origin.kind,
-                    generation=generation,
-                    direction=saved.direction,
-                    association_id=manifest.association_id,
-                    prepared_commit=prepared_commit,
-                    before=manifest.preimage,
-                    proposed=manifest.proposed,
-                    affected_paths=tuple(sorted(changed)),
-                    protected_paths=tuple(sorted(set(before) - changed)),
-                    before_metadata=tuple(
-                        VaultPathMetadata(
-                            path=path,
-                            mode=value[0],
-                            attributes=value[1],
-                            security=value[2],
-                        )
-                        for path, value in sorted(before_metadata.items())
-                    ),
-                    result_metadata=tuple(
-                        VaultPathMetadata(
-                            path=path,
-                            mode=value[0],
-                            attributes=value[1],
-                            security=value[2],
-                        )
-                        for path, value in sorted(result_metadata.items())
-                    ),
-                    created_directories=tuple(
-                        VaultPathMetadata(
-                            path=path.as_posix(),
-                            mode=value[0],
-                            attributes=value[1],
-                            security=value[2],
-                        )
-                        for path, value in sorted(
-                            parent_metadata.items(), key=lambda item: item[0].as_posix()
-                        )
-                    ),
-                    origin_intent_commit=origin_commit,
-                    previous_operation_commit=current_authority.graph.commit,
-                    review_generation=saved.review.proposal.generation,
-                )
-                op_ref = (
-                    "refs/brz2obsidian/imports/"
-                    + manifest.association_id
-                    + "/operations/"
-                    + operation_id
-                )
-                phase = "intent"
-                recovery_commit = _journal(
-                    git,
-                    "recovery.json",
-                    intent,
-                    parents=(current_authority.graph.commit, prepared_commit),
-                    previous=current_authority.graph.commit,
-                    ref=op_ref,
-                )
-                phase = "publication"
-                report_progress(
-                    progress,
-                    "publication",
-                    operation_id=operation_id,
-                    operation_generation=generation,
-                    intent_commit=recovery_commit,
-                    completed_units=published,
-                    total_units=planned,
-                    unit="files",
-                )
-                proposed = {row.path: row for row in manifest.proposed}
-                prior = {row.path: row for row in manifest.preimage}
-                expected_metadata = {row.path: row for row in intent.result_metadata}
-                for path in sorted(changed):
-                    if cancel_requested():
-                        stopped = VaultOperationStop(
-                            schema_id="brz2obsidian.vault-operation-stop",
-                            schema_version=1,
-                            operation_id=operation_id,
-                            kind=origin.kind,
-                            generation=generation,
-                            direction=saved.direction,
-                            status="cancelled",
-                            intent_commit=recovery_commit,
-                            acknowledged_after_files=published,
-                        )
-                        stop_commit = _journal(
-                            git,
-                            "stop.json",
-                            stopped,
-                            parents=(recovery_commit,),
-                            previous=recovery_commit,
-                            ref=op_ref,
-                        )
-                        return _outcome(
-                            "cancelled",
-                            "cancelled_after_recovery_intent",
-                            start=start,
-                            operation_id=operation_id,
-                            kind=origin.kind,
-                            direction=saved.direction,
-                            review_generation=saved.review.proposal.generation,
-                            generation=generation,
-                            phase=phase,
-                            publication="partial" if published else "not_published",
-                            history="intent",
-                            planned=planned,
-                            published=published,
-                            changed=bool(published),
-                            checkpoint=prepared_commit,
-                            intent=recovery_commit,
-                            stop=stop_commit,
-                            recovery=True,
-                        )
-                    target = root / path
-                    old, new = prior.get(path), proposed.get(path)
-                    if old is None:
-                        if os.path.lexists(target):
-                            raise OSError("Recovery creation path became occupied")
-                    elif not _same_file(root, old):
-                        raise OSError(
-                            "Recovery current bytes changed before transition"
-                        )
-                    if new is None:
-                        destination = proposed_root / (
-                            "removed-" + hashlib.sha256(path.encode()).hexdigest()
-                        )
-                        executor.remove(target, destination)
-                    else:
-                        stage = proposed_root / path
-                        if not _same_file(proposed_root, new):
-                            raise OSError("Prepared recovery bytes changed")
-                        _ensure_parents(
-                            root, target, prepared_parents, parent_metadata, executor
-                        )
-                        executor.move(stage, target, replace=old is not None)
-                        if not _same_file(root, new) or not _metadata_matches(
-                            root, path, expected_metadata[path]
-                        ):
-                            raise OSError("Published recovery result changed")
-                    published += 1
-                    report_progress(
-                        progress,
-                        "publication",
-                        operation_id=operation_id,
-                        operation_generation=generation,
-                        intent_commit=recovery_commit,
-                        completed_units=published,
-                        total_units=planned,
-                        unit="files",
-                    )
-                report_progress(
-                    progress,
-                    "final_verification",
-                    operation_id=operation_id,
-                    operation_generation=generation,
-                    intent_commit=recovery_commit,
-                )
-                if any(not _same_file(root, row) for row in manifest.proposed):
-                    raise OSError("Complete recovery inventory changed")
-                if any(
-                    os.path.lexists(root / path) for path in set(prior) - set(proposed)
-                ):
-                    raise OSError("Removed recovery path remains visible")
-                phase = "result"
-                report_progress(
-                    progress,
-                    "final_reporting",
-                    operation_id=operation_id,
-                    operation_generation=generation,
-                    intent_commit=recovery_commit,
-                )
-                result_observation = read_operation()
-                current = _inspect_retained_history(
-                    root,
-                    result_observation[1],
-                    subjects=subjects,
-                    active_operation=operation_id,
-                )
-                result_checkpoint = capture_checkpoint(
-                    root,
-                    source,
-                    vault_id=association.vault_id,
-                    import_id=association.import_id,
-                    identity=source_manifest.identity,
-                    admission=current.admission,
-                    subjects=subjects,
-                    boundary="result",
-                    expected_prepared=prepared_commit,
-                    active_operation=operation_id,
-                    operation_intent_commit=recovery_commit,
-                    _observation=result_observation,
-                    **(
-                        {}
-                        if export is None
-                        else {
-                            "review": export.saved.plan,
-                            "_owned_export": export,
-                            "_owners": _owners,
-                        }
-                    ),
-                    progress=progress,
-                )
-                if result_checkpoint.status != "captured":
-                    failure_code = "result_" + result_checkpoint.code
-                    raise OSError("Recovery result checkpoint was not retained")
-                result_commit = result_checkpoint.commit
-                terminal = _recovery_result_status(
-                    origin.kind, saved.direction, bool(origin.affected_paths)
-                )
-                receipt = VaultOperationReceipt(
-                    schema_id="brz2obsidian.vault-operation-receipt",
-                    schema_version=1,
-                    operation_id=operation_id,
-                    kind=origin.kind,
-                    generation=generation,
-                    status=terminal,
-                    direction=saved.direction,
-                    intent_commit=recovery_commit,
-                    prepared_commit=prepared_commit,
-                    result_commit=result_commit,
-                    published_paths=tuple(sorted(changed)),
-                )
-                phase = "terminal"
-                receipt_commit = _journal(
-                    git,
-                    "receipt.json",
-                    receipt,
-                    parents=(recovery_commit, result_commit),
-                    previous=recovery_commit,
-                    ref=op_ref,
-                )
-        _release(root, operation_id)
-        acquired = False
-        return _outcome(
-            terminal,
-            terminal,
-            start=start,
-            operation_id=operation_id,
-            kind=origin.kind,
-            direction=saved.direction,
-            review_generation=saved.review.proposal.generation,
-            generation=generation,
-            phase="terminal",
-            publication="complete",
-            history="terminal",
-            planned=planned,
-            published=published,
-            changed=bool(changed),
-            checkpoint=prepared_commit,
-            intent=recovery_commit,
-            result=result_commit,
-            receipt=receipt_commit,
-            recovery=False,
-            message="Reviewed recovery result and terminal receipt retained.",
+        before_lease = _adopt_recovery(publication, state)
+        if isinstance(before_lease, VaultApplyResult):
+            return before_lease
+        lineage = _observe_recovery_lineage(publication, before_lease)
+        if isinstance(lineage, VaultApplyResult):
+            return lineage
+        paths = _plan_recovery_paths(publication, lineage, state)
+        if isinstance(paths, VaultApplyResult):
+            return paths
+        return _publish_staged_recovery(
+            publication, lineage, paths, state, executor, cancel_requested
         )
     except OSError, ValueError, TypeError:
-        failure = (
-            read_operation()[0]
-            if phase in ("intent", "publication", "result", "terminal")
-            else None
-        )
-        if (
-            failure is not None
-            and failure.operation_id == operation_id
-            and failure.intent_commit is not None
-        ):
-            return _outcome(
-                "content_complete"
-                if failure.status
-                in ("applied", "undone", "restored", "no_content_change")
-                else failure.status,
-                failure_code + "_" + failure.code,
-                start=start,
-                operation_id=operation_id,
-                kind=failure.kind,
-                direction=failure.direction,
-                review_generation=failure.review_generation,
-                generation=failure.generation,
-                phase=phase,
-                publication=failure.publication,
-                history=failure.history,
-                planned=planned,
-                published=failure.published_files,
-                changed=failure.authored_files_changed,
-                checkpoint=prepared_commit,
-                intent=failure.intent_commit,
-                result=failure.result_commit or result_commit,
-                receipt=failure.receipt_commit,
-                stop=failure.stop_commit,
-                recovery=True,
-            )
-        return _outcome(
-            "content_complete" if result_commit is not None else "unknown",
-            failure_code,
-            start=start,
-            operation_id=operation_id,
-            kind=saved.kind,
-            direction=saved.direction,
-            review_generation=saved.review.proposal.generation,
-            generation=generation,
-            phase=phase,
-            publication="complete" if result_commit is not None else "unknown",
-            history="result"
-            if result_commit is not None
-            else "unknown"
-            if phase == "intent"
-            else "intent"
-            if recovery_commit is not None
-            else "prepared"
-            if prepared_commit is not None
-            else "none",
-            planned=planned,
-            published=published,
-            changed=True if result_commit is not None and planned else None,
-            checkpoint=prepared_commit,
-            intent=recovery_commit,
-            result=result_commit,
-            receipt=receipt_commit,
-            recovery=True,
-        )
+        return _report_recovery_failure(publication, state)
     finally:
-        if acquired and recovery_commit is not None:
-            _park(root, operation_id)
-        elif acquired:
-            pending_exception = sys.exc_info()[0]
-            try:
-                _release(root, operation_id)
-            except OSError, ValueError, TypeError:
-                if pending_exception is None or issubclass(
-                    pending_exception, (OSError, ValueError, TypeError)
-                ):
-                    try:
-                        stopped = read_operation()[0]
-                    except OSError, ValueError, TypeError, UnicodeError:
-                        stopped = None
-                    if stopped is None or stopped.operation_id != operation_id:
-                        raise _OwnedRecoveryCleanupFailure(
-                            _outcome(
-                                "unknown",
-                                "recovery_cleanup_failed",
-                                start=start,
-                                operation_id=operation_id,
-                                kind=saved.kind,
-                                direction=saved.direction,
-                                review_generation=saved.review.proposal.generation,
-                                generation=current_status.generation,
-                                phase="prepared" if prepared_commit else "admission",
-                                publication="unknown",
-                                history=(
-                                    "prepared"
-                                    if prepared_commit
-                                    else current_status.history
-                                ),
-                                planned=max(planned, current_status.planned_files),
-                                published=current_status.published_files,
-                                checkpoint=(
-                                    prepared_commit or current_status.checkpoint_commit
-                                ),
-                                intent=current_status.intent_commit,
-                                stop=current_status.stop_commit,
-                                changed=None,
-                                recovery=True,
-                            )
-                        )
-                    raise _OwnedRecoveryCleanupFailure(
-                        _refuse_known_recovery(
-                            stopped, "recovery_cleanup_failed", start=start
-                        )
-                    )
+        _release_recovery_lease(publication, state)
 
 
 def execute_recovery(

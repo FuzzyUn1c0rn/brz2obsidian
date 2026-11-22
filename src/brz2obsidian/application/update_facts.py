@@ -303,6 +303,128 @@ def _observed_identity(path, content, identity, established, *, native_metadata=
     return state, None, "content"
 
 
+def _bind_retained_asset_outputs(old, new, historical, identity, retained_ownership):
+    ownership = {}
+    paths = set()
+    for proof in retained_ownership:
+        key = proof.identity.item_id, proof.facet
+        if (
+            (proof.identity.collection_id, proof.identity.module_id)
+            != (identity.collection_id, identity.module_id)
+            or proof.facet != "asset"
+            or key in ownership
+            or proof.source_path in paths
+        ):
+            raise ValueError("Retained asset identity is ambiguous")
+        ownership[key] = proof
+        paths.add(proof.source_path)
+        historical[key] = proof.source_path, "guide", proof.source_path
+    old = {
+        key: value
+        for key, value in old.items()
+        if key[1] != "asset" or key in ownership
+    }
+    new = {
+        key: value
+        for key, value in new.items()
+        if key[1] != "asset" or key in ownership
+    }
+    if any(
+        key in old and old[key][0] != value[0] or key in new and new[key][0] != value[0]
+        for key, value in historical.items()
+        if key[1] == "asset"
+    ):
+        raise ValueError("Retained asset moved without current identity proof")
+    return old, new, ownership
+
+
+def _established_output_paths(old, historical):
+    established = {
+        path: (item, role, facet) for (item, facet), (path, role, _) in old.items()
+    }
+    for (item, facet), (path, role, _) in historical.items():
+        if facet != "asset":
+            continue
+        if path in established and established[path] != (item, role, facet):
+            raise ValueError("Retained asset path has a different association")
+        established[path] = item, role, facet
+    return established
+
+
+def _observed_identity_inventory(current, content, established, old_identity, identity):
+    inventory = []
+    for path, raw in sorted(current.items()):
+        current_content = content(
+            raw, semantic=established.get(path, (None, None, None))[2] != "asset"
+        )
+        state, claim, facet = _observed_identity(
+            path,
+            current_content,
+            old_identity,
+            established,
+            native_metadata=identity.output_format in QUALIFIED_OUTPUT_FORMATS,
+        )
+        inventory.append(
+            IdentityInventoryItem(
+                entry_id="file:" + path,
+                facet=facet,
+                identity_state=state,
+                identity=claim,
+                raw_identity=None,
+                title=PurePosixPath(path).stem,
+                current=CurrentContent(
+                    existence="present", path=path, content=current_content
+                ),
+                target=target(path),
+            )
+        )
+    return inventory
+
+
+def _interpret_subject_structure(facet, versions, membership_views, output_formats):
+    structure = None
+    interpretation = "opaque" if facet == "asset" else "supported"
+    if facet != "asset" and all(content is not None for content in versions):
+        documents = tuple(
+            interpret_structure(
+                content, output_format=version, membership_targets=targets
+            )
+            for content, targets, version in zip(
+                versions,
+                membership_views,
+                output_formats,
+                strict=True,
+            )
+        )
+        structure = align_structure(*documents)
+        if any(d.status != "supported" for d in documents):
+            interpretation = "unsupported"
+    return structure, interpretation
+
+
+def _note_reservations(old, baseline, records, retired_note_ids):
+    old_reserved, new_reserved = (
+        {
+            (row["original_identity"], "content"): row["relative_path"]
+            for row in value["item_targets"]
+            if not row["created"]
+        }
+        for value in records
+    )
+    retired = set()
+    historical = {}
+    retired.update(retired_note_ids)
+    retired.update(
+        key[0] for key in old.keys() & new_reserved.keys() if old[key][0] in baseline
+    )
+    historical.update(
+        (key, (path, "note", PurePosixPath(path).stem))
+        for key, path in new_reserved.items()
+        if key[0] in retired and key not in old
+    )
+    return old_reserved, new_reserved, retired, historical
+
+
 def assemble_facts(
     baseline,
     incoming,
@@ -333,106 +455,26 @@ def assemble_facts(
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
-    old_reserved, new_reserved = {}, {}
     qualified_scope = (
         identity.output_format == 9
         and originals_known
         and (old_identity.collection_id, old_identity.module_id)
         == (identity.collection_id, identity.module_id)
     )
+    old_reserved, new_reserved, retired, historical = {}, {}, set(), {}
     if qualified_scope:
-        old_reserved, new_reserved = (
-            {
-                (row["original_identity"], "content"): row["relative_path"]
-                for row in value["item_targets"]
-                if not row["created"]
-            }
-            for value in (old_record, new_record)
-        )
-    retired = set()
-    historical = {}
-    if qualified_scope:
-        retired.update(retired_note_ids)
-        retired.update(
-            key[0]
-            for key in old.keys() & new_reserved.keys()
-            if old[key][0] in baseline
-        )
-        historical.update(
-            (key, (path, "note", PurePosixPath(path).stem))
-            for key, path in new_reserved.items()
-            if key[0] in retired and key not in old
+        old_reserved, new_reserved, retired, historical = _note_reservations(
+            old, baseline, (old_record, new_record), retired_note_ids
         )
     ownership = {}
     if retained_ownership is not None:
-        paths = set()
-        for proof in retained_ownership:
-            key = proof.identity.item_id, proof.facet
-            if (
-                (proof.identity.collection_id, proof.identity.module_id)
-                != (identity.collection_id, identity.module_id)
-                or proof.facet != "asset"
-                or key in ownership
-                or proof.source_path in paths
-            ):
-                raise ValueError("Retained asset identity is ambiguous")
-            ownership[key] = proof
-            paths.add(proof.source_path)
-            historical[key] = proof.source_path, "guide", proof.source_path
-        old = {
-            key: value
-            for key, value in old.items()
-            if key[1] != "asset" or key in ownership
-        }
-        new = {
-            key: value
-            for key, value in new.items()
-            if key[1] != "asset" or key in ownership
-        }
-        if any(
-            key in old
-            and old[key][0] != value[0]
-            or key in new
-            and new[key][0] != value[0]
-            for key, value in historical.items()
-            if key[1] == "asset"
-        ):
-            raise ValueError("Retained asset moved without current identity proof")
-    established = {
-        path: (item, role, facet) for (item, facet), (path, role, _) in old.items()
-    }
-    for (item, facet), (path, role, _) in historical.items():
-        if facet != "asset":
-            continue
-        if path in established and established[path] != (item, role, facet):
-            raise ValueError("Retained asset path has a different association")
-        established[path] = item, role, facet
-    inventory = []
-    for path, raw in sorted(current.items()):
-        current_content = content(
-            raw, semantic=established.get(path, (None, None, None))[2] != "asset"
+        old, new, ownership = _bind_retained_asset_outputs(
+            old, new, historical, identity, retained_ownership
         )
-        state, claim, facet = _observed_identity(
-            path,
-            current_content,
-            old_identity,
-            established,
-            native_metadata=identity.output_format in QUALIFIED_OUTPUT_FORMATS,
-        )
-        inventory.append(
-            IdentityInventoryItem(
-                entry_id="file:" + path,
-                facet=facet,
-                identity_state=state,
-                identity=claim,
-                raw_identity=None,
-                title=PurePosixPath(path).stem,
-                current=CurrentContent(
-                    existence="present", path=path, content=current_content
-                ),
-                target=target(path),
-            )
-        )
+    established = _established_output_paths(old, historical)
+    inventory = _observed_identity_inventory(
+        current, content, established, old_identity, identity
+    )
     membership_views = (
         _membership_targets((old_record,)),
         _membership_targets((old_record, new_record), inventory),
@@ -489,29 +531,16 @@ def assemble_facts(
                     target=target(old_path),
                 )
             )
-        structure = None
-        interpretation = "opaque" if facet == "asset" else "supported"
-        if facet != "asset" and all(
-            content is not None for content in (original, selected.content, received)
-        ):
-            documents = tuple(
-                interpret_structure(
-                    content, output_format=version, membership_targets=targets
-                )
-                for content, targets, version in zip(
-                    (original, selected.content, received),
-                    membership_views,
-                    (
-                        old_identity.output_format,
-                        old_identity.output_format,
-                        identity.output_format,
-                    ),
-                    strict=True,
-                )
-            )
-            structure = align_structure(*documents)
-            if any(d.status != "supported" for d in documents):
-                interpretation = "unsupported"
+        structure, interpretation = _interpret_subject_structure(
+            facet,
+            (original, selected.content, received),
+            membership_views,
+            (
+                old_identity.output_format,
+                old_identity.output_format,
+                identity.output_format,
+            ),
+        )
         attachment = None
         if facet == "asset":
             slots = ()
@@ -696,8 +725,7 @@ def _retained_navigation_tokens(facts, subject, links, prior):
     return links
 
 
-def _bind_moved_navigation(facts, old_record, source_record):
-    """Bind generated relationship entries independently of vault lookup."""
+def _moved_navigation_subjects(facts):
     observed = defaultdict(list)
     for entry in facts.identity_inventory:
         if entry.identity_state == "valid" and entry.facet == "content":
@@ -714,6 +742,37 @@ def _bind_moved_navigation(facts, old_record, source_record):
             and matches[0].path != subject.path
         ):
             moved[subject.item_id] = subject, identity
+    return moved
+
+
+def _generated_navigation_references(subject, document, destinations):
+    links = {}
+    if document is not None and (
+        subject.current.existence == "present" or subject.baseline.status != "known"
+    ):
+        for occurrence in document.occurrences:
+            query = occurrence.query
+            if query is None or occurrence.embedded:
+                continue
+            match = destinations[subject.item_id].get(
+                (occurrence.relationship_heading, query.value)
+            )
+            if match is not None:
+                peer, identity = match
+                key = (occurrence.relationship_heading, identity.item_id)
+                links[key] = MovedNavigationReference(
+                    heading=occurrence.relationship_heading,
+                    label=occurrence.meaning.display_text,
+                    identity=identity,
+                    source_path=peer.path,
+                    observed_path=peer.current.path,
+                )
+    return links
+
+
+def _bind_moved_navigation(facts, old_record, source_record):
+    """Bind generated relationship entries independently of vault lookup."""
+    moved = _moved_navigation_subjects(facts)
     if not moved:
         return facts
 
@@ -736,27 +795,7 @@ def _bind_moved_navigation(facts, old_record, source_record):
     for subject in facts.subjects:
         document_id = f"subject:{subject.item_id}:{subject.facet}"
         document = documents.get((document_id, subject.path))
-        links = {}
-        if document is not None and (
-            subject.current.existence == "present" or subject.baseline.status != "known"
-        ):
-            for occurrence in document.occurrences:
-                query = occurrence.query
-                if query is None or occurrence.embedded:
-                    continue
-                match = destinations[subject.item_id].get(
-                    (occurrence.relationship_heading, query.value)
-                )
-                if match is not None:
-                    peer, identity = match
-                    key = (occurrence.relationship_heading, identity.item_id)
-                    links[key] = MovedNavigationReference(
-                        heading=occurrence.relationship_heading,
-                        label=occurrence.meaning.display_text,
-                        identity=identity,
-                        source_path=peer.path,
-                        observed_path=peer.current.path,
-                    )
+        links = _generated_navigation_references(subject, document, destinations)
         if links:
             links = _retained_navigation_tokens(facts, subject, links, prior)
         current = current_documents.get((document_id, subject.current.path))
@@ -935,6 +974,100 @@ def _physical_target(path, current_path, inventory):
     return value.model_copy(update={"status": "unsafe"}) if collisions else value
 
 
+def _add_unrepresented_link_targets(
+    facts, incoming_record, physical_inventory, current_lookup, incoming_lookup
+):
+    current_targets, current_states = current_lookup
+    incoming_targets, incoming_states = incoming_lookup
+    for row in incoming_record["item_targets"]:
+        path = row["relative_path"]
+        if row["created"] or any(t.canonical_path == path for t in current_targets):
+            continue
+        reference = ReferenceTarget(
+            schema_id="brz2obsidian.reference-target",
+            schema_version=1,
+            target_id="intentional:" + row["original_identity"],
+            kind="note",
+            canonical_path=path,
+            identity=_identity(facts.incoming_identity, row["original_identity"]),
+            target=target(path),
+            representations=(path,),
+            validation_fingerprint=digest(("intentionally_uncreated", path)),
+            status="safe",
+        )
+        current_targets.append(reference)
+        incoming_targets.append(reference)
+        state = interpret_link_target(
+            None,
+            target_id=reference.target_id,
+            existence="intentionally_uncreated",
+            memberships=(),
+        )
+        current_states.append(state)
+        incoming_states.append(state)
+    for row in physical_inventory:
+        if any(t.canonical_path == row.path for t in current_targets):
+            continue
+        reference = ReferenceTarget(
+            schema_id="brz2obsidian.reference-target",
+            schema_version=1,
+            target_id="physical:" + row.path,
+            kind="note" if row.path.lower().endswith(".md") else "resource",
+            canonical_path=row.path,
+            identity=None,
+            target=target(row.path),
+            representations=(row.path,),
+            validation_fingerprint=digest(row.model_dump(mode="json")),
+            status="safe",
+        )
+        current_targets.append(reference)
+        incoming_targets.append(reference)
+
+
+def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
+    current_targets, current_states = current_lookup
+    incoming_targets, incoming_states = incoming_lookup
+    current_documents, incoming_documents = [], []
+    for row, subject, actual, received in paths:
+        if actual.kind != "resource" and row.current.content is not None:
+            current_documents.append(
+                interpret_links(
+                    row.current.content,
+                    document_id=actual.target_id,
+                    source_path=row.current.path,
+                    path_mode="vault",
+                    targets=tuple(current_targets),
+                    target_facts=tuple(current_states),
+                    inventory="complete",
+                    output_format=facts.incoming_identity.output_format
+                    if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS
+                    else (
+                        7
+                        if facts.baseline_identity.output_format == 6
+                        else facts.baseline_identity.output_format
+                    ),
+                    record_format=facts.baseline_identity.output_format,
+                )
+            )
+        if received is not None and actual.kind != "resource":
+            for path in dict.fromkeys(
+                (row.current.path, subject.path if subject else row.current.path)
+            ):
+                incoming_documents.append(
+                    interpret_links(
+                        received,
+                        document_id=actual.target_id,
+                        source_path=path,
+                        path_mode="vault",
+                        targets=tuple(incoming_targets),
+                        target_facts=tuple(incoming_states),
+                        inventory="complete",
+                        output_format=facts.incoming_identity.output_format,
+                    )
+                )
+    return current_documents, incoming_documents
+
+
 def _link_context(
     facts, baseline_record, incoming_record, physical_inventory, *, _owner=None
 ):
@@ -1089,87 +1222,19 @@ def _link_context(
         paths.append((row, subject, actual, received))
     current_targets.extend(t for t in current_memberships if t.kind == "tag")
     incoming_targets.extend(t for t in incoming_memberships if t.kind == "tag")
-    for row in incoming_record["item_targets"]:
-        path = row["relative_path"]
-        if row["created"] or any(t.canonical_path == path for t in current_targets):
-            continue
-        reference = ReferenceTarget(
-            schema_id="brz2obsidian.reference-target",
-            schema_version=1,
-            target_id="intentional:" + row["original_identity"],
-            kind="note",
-            canonical_path=path,
-            identity=_identity(facts.incoming_identity, row["original_identity"]),
-            target=target(path),
-            representations=(path,),
-            validation_fingerprint=digest(("intentionally_uncreated", path)),
-            status="safe",
-        )
-        current_targets.append(reference)
-        incoming_targets.append(reference)
-        state = interpret_link_target(
-            None,
-            target_id=reference.target_id,
-            existence="intentionally_uncreated",
-            memberships=(),
-        )
-        current_states.append(state)
-        incoming_states.append(state)
-    for row in physical_inventory:
-        if any(t.canonical_path == row.path for t in current_targets):
-            continue
-        reference = ReferenceTarget(
-            schema_id="brz2obsidian.reference-target",
-            schema_version=1,
-            target_id="physical:" + row.path,
-            kind="note" if row.path.lower().endswith(".md") else "resource",
-            canonical_path=row.path,
-            identity=None,
-            target=target(row.path),
-            representations=(row.path,),
-            validation_fingerprint=digest(row.model_dump(mode="json")),
-            status="safe",
-        )
-        current_targets.append(reference)
-        incoming_targets.append(reference)
-    current_documents, incoming_documents = [], []
-    for row, subject, actual, received in paths:
-        if actual.kind != "resource" and row.current.content is not None:
-            current_documents.append(
-                interpret_links(
-                    row.current.content,
-                    document_id=actual.target_id,
-                    source_path=row.current.path,
-                    path_mode="vault",
-                    targets=tuple(current_targets),
-                    target_facts=tuple(current_states),
-                    inventory="complete",
-                    output_format=facts.incoming_identity.output_format
-                    if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS
-                    else (
-                        7
-                        if facts.baseline_identity.output_format == 6
-                        else facts.baseline_identity.output_format
-                    ),
-                    record_format=facts.baseline_identity.output_format,
-                )
-            )
-        if received is not None and actual.kind != "resource":
-            for path in dict.fromkeys(
-                (row.current.path, subject.path if subject else row.current.path)
-            ):
-                incoming_documents.append(
-                    interpret_links(
-                        received,
-                        document_id=actual.target_id,
-                        source_path=path,
-                        path_mode="vault",
-                        targets=tuple(incoming_targets),
-                        target_facts=tuple(incoming_states),
-                        inventory="complete",
-                        output_format=facts.incoming_identity.output_format,
-                    )
-                )
+    _add_unrepresented_link_targets(
+        facts,
+        incoming_record,
+        physical_inventory,
+        (current_targets, current_states),
+        (incoming_targets, incoming_states),
+    )
+    current_documents, incoming_documents = _interpret_link_documents(
+        facts,
+        paths,
+        (current_targets, current_states),
+        (incoming_targets, incoming_states),
+    )
     return LinkContext(
         schema_id="brz2obsidian.link-context",
         schema_version=1,
