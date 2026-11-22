@@ -18,6 +18,7 @@ from brz2obsidian.publication.collection_placement import (
     observe_classification_inventory,
     recorded_classification_choices,
     remembered_tag_mappings,
+    retained_nonmember_paths,
 )
 from brz2obsidian.publication.vault_history import collection_baselines
 
@@ -45,10 +46,14 @@ def _retained_source(operations, history, record_path):
 
 def _select_category_updates(review, original, offered, remap):
     retained, _ = recorded_classification_choices(original)
-    retained = reobserve_category_choices(retained, review.vault_categories)
     allowed = {key for key, _ in review.source_categories}
+    replacements = {row.source_identity for row in offered} if remap else set()
+    remembered = tuple(
+        row for row in retained if row.source_identity in allowed - replacements
+    )
     selected = {
-        row.source_identity: row for row in retained if row.source_identity in allowed
+        row.source_identity: row
+        for row in reobserve_category_choices(remembered, review.vault_categories)
     }
     for row in offered:
         previous = selected.get(row.source_identity)
@@ -135,7 +140,7 @@ def prepare_scoped_classification_update(
             observed_review = classification_review(
                 snapshot, vault_categories, vault_tags
             )
-            return _update_placement(
+            arguments = _update_placement(
                 snapshot,
                 original,
                 observed_review,
@@ -144,6 +149,11 @@ def prepare_scoped_classification_update(
                 remap,
                 separate_tags=separate_tags,
             )
+            if any(row.compatible_view for row in arguments["category_choices"]):
+                arguments["known_nonmember_paths"] = retained_nonmember_paths(
+                    history.admission, history.checkpoint
+                )
+            return arguments
 
         result = workflow.convert_collection(source, staging, placement=placement)
         if result.receipt is None:

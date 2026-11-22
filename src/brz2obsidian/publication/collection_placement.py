@@ -6,9 +6,9 @@ import unicodedata
 from hashlib import sha256
 from pathlib import Path
 
-from brz2obsidian.application.update_facts import classification_view_paths
+from brz2obsidian.application.update_facts import classification_view_paths, record
 from brz2obsidian.application.update_lifecycle import _read_physical
-from brz2obsidian.content_values import content_sha
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ContentIdentity,
     ImportCategoryChoice,
@@ -148,6 +148,34 @@ def uncreated_destinations(admission, checkpoint, *, git=None):
     return tuple(sorted(reserved)), tuple(sorted(gaps))
 
 
+def retained_nonmember_paths(admission, checkpoint):
+    if checkpoint is None or checkpoint.status != "valid":
+        return ()
+    git = _Git(admission.vault)
+    inventory = {row.path: row.sha256 for row in admission.inventory}
+    paths = set()
+    for selected in collection_baselines(checkpoint).values():
+        if selected is None:
+            continue
+        _, manifest = selected
+        record = _retained_record(git, manifest)
+        support = (
+            row["relative_path"]
+            for row in record.get("support_artifacts", ())
+            if row["purpose"] in ("template", "starter")
+        )
+        assets = (row["relative_path"] for row in record.get("asset_targets", ()))
+        candidates = {
+            path for path in (*support, *assets) if path and path.endswith(".md")
+        }
+        paths.update(
+            row.path
+            for row in manifest.source
+            if row.path in candidates and inventory.get(row.path) == row.sha256
+        )
+    return tuple(sorted(paths))
+
+
 def collection_connection_choices(record):
     return tuple(
         ImportLinkConnection.model_validate(row)
@@ -157,7 +185,7 @@ def collection_connection_choices(record):
 
 def recorded_classification_choices(record):
     categories = tuple(
-        ImportCategoryChoice.model_validate(row["destination"])
+        ImportCategoryChoice.model_validate_json(json.dumps(row["destination"]))
         for row in record.get("category_mappings", ())
         if row.get("destination") is not None
     )
@@ -242,7 +270,15 @@ def classification_policy_changed(original, incoming):
 
 
 def classification_transition_refusal(
-    admission, checkpoint, original, incoming, approval, *, remap
+    admission,
+    checkpoint,
+    original,
+    incoming,
+    approval,
+    *,
+    remap,
+    sources=None,
+    existing=None,
 ):
     changed = classification_policy_changed(original, incoming)
     if changed and not remap:
@@ -258,9 +294,16 @@ def classification_transition_refusal(
     if approval != classification_approval(incoming):
         return "import_classification_approval_missing"
     choices, reused = recorded_classification_choices(incoming)
+    if sources is not None:
+        choices = tuple(
+            row for row in choices if ("category", row.source_identity) in sources
+        )
+        reused = tuple(row for row in reused if ("tag", row[0]) in sources)
     if not choices and not reused:
         return None
-    refusal, tags = classification_target_status(admission, checkpoint, choices)
+    refusal, tags = classification_target_status(
+        admission, checkpoint, choices, existing=existing
+    )
     known = set(recorded_classification_choices(original)[1])
     if refusal is None and any(
         row not in known and row[1] not in tags for row in reused
@@ -508,6 +551,117 @@ def _qualify_recovery_classifications(
         raise ImportRecoveryLinkChange("recovery_import_classifications_changed")
 
 
+def _record_matches(content, row):
+    return (
+        isinstance(content, InlineExactContent)
+        and row is not None
+        and (content_size(content), content_sha(content)) == (row.size, row.sha256)
+    )
+
+
+def _classifications_for_record(before, incoming):
+    for kind, field in (
+        ("category", "category_mappings"),
+        ("tag", "vault_tag_mappings"),
+    ):
+        old = {row["source_identity"]: row for row in before.get(field, ())}
+        for row in incoming.get(field, ()):
+            source = row["source_identity"]
+            if old.get(source) != row:
+                yield kind, source
+
+
+def _classifications_for_paths(facts, before, incoming, paths):
+    selected = set()
+    for subject in facts.subjects:
+        if subject.structure is None or paths.isdisjoint(
+            (subject.path, subject.current.path)
+        ):
+            continue
+        structure = subject.structure
+        for reason in (*structure.prior_mappings, *structure.incoming_mappings):
+            _, _, source = reason.classification_id.partition(":")
+            selected.add((reason.kind, source))
+    for value in (before, incoming):
+        overview = {
+            row["relative_path"]
+            for row in value.get("support_artifacts", ())
+            if row["purpose"] == "overview"
+        }
+        used = {
+            row["definition_key"] for row in value.get("classification_assignments", ())
+        }
+        category_items = {
+            row["original_identity"]
+            for row in value["item_targets"]
+            if row.get("item_key") in used
+        }
+        for row in value.get("category_mappings", ()):
+            if not paths.isdisjoint(
+                (row.get("source_reference"), *row.get("view_paths", ()))
+            ) or (
+                not paths.isdisjoint(overview)
+                and row["source_identity"] in category_items
+            ):
+                selected.add(("category", row["source_identity"]))
+    return selected
+
+
+def _require_classified_update_finish(
+    admission, checkpoint, record_path, original, origin, produced, pending, digests
+):
+    facts = original.producer_facts
+    context = facts.link_context
+    if context is None or context.import_classification_approval is None:
+        return
+    if record_path is None or not _safe_relative(record_path):
+        raise ImportRecoveryLinkChange("recovery_import_classifications_unavailable")
+    paths = pending.intersection(origin.affected_paths)
+    if not paths:
+        return
+    before_rows = {row.path: row for row in origin.before}
+    proposed_rows = {row.path: row for row in origin.proposed}
+    predecessor = next(
+        (row.baseline.content for row in facts.subjects if row.path == record_path),
+        None,
+    )
+    successor = produced.get(record_path)
+    if not (
+        _record_matches(predecessor, before_rows.get(record_path))
+        and _record_matches(successor, proposed_rows.get(record_path))
+    ):
+        raise ImportRecoveryLinkChange("recovery_import_classifications_unavailable")
+    before, incoming = (
+        record({record_path: data}, record_path) for data in (predecessor, successor)
+    )
+    sources = _classifications_for_paths(facts, before, incoming, paths)
+    if record_path in paths:
+        sources.update(_classifications_for_record(before, incoming))
+    if not sources:
+        return
+    published = {
+        path
+        for path in origin.affected_paths
+        if path in proposed_rows and digests.get(path) == proposed_rows[path].sha256
+    }
+    refusal = classification_transition_refusal(
+        admission,
+        checkpoint,
+        before,
+        incoming,
+        context.import_classification_approval,
+        remap=context.import_classification_remap,
+        sources=sources,
+        existing={
+            path: value
+            for path, value in existing_files(admission).items()
+            if path not in published
+        },
+    )
+    if refusal is not None:
+        raise ImportRecoveryLinkChange("recovery_import_classifications_changed")
+
+
 def require_collection_finish_links(
     admission,
     checkpoint,
@@ -517,8 +671,10 @@ def require_collection_finish_links(
     removals=(),
     *,
     produced=None,
+    origin,
 ):
-    if original.facts.format_operation.kind != "collection_import":
+    kind = original.facts.format_operation.kind
+    if origin.kind != "apply" or kind not in ("collection_import", "source_update"):
         return
     digests = {row.path: row.sha256 for row in admission.inventory}
     remaining = {
@@ -527,6 +683,18 @@ def require_collection_finish_links(
         if digests.get(path) != content_sha(content)
     }
     if not remaining and not removals:
+        return
+    if kind == "source_update":
+        _require_classified_update_finish(
+            admission,
+            checkpoint,
+            record_path,
+            original,
+            origin,
+            selected if produced is None else produced,
+            set(remaining) | set(removals).intersection(digests),
+            digests,
+        )
         return
     if record_path is None or removals:
         raise ImportRecoveryLinkChange("recovery_import_scope_changed")

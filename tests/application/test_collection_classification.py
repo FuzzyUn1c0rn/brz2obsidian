@@ -2,17 +2,62 @@ from brz2obsidian.application.operations import Operations
 from tests.application.test_collection_import_transaction import _vault
 from tests.support.type_tag_sources import IDS, brz_source
 
+CATEGORY_PROSE = (
+    b"Exact source category instructions.\r\n\r\nIndependent second paragraph.\r\n"
+)
+
+
+def _classification_archive(tmp_path):
+    from pathlib import Path
+    from zipfile import ZipFile
+
+    from tests.application.test_graph_workflow import identity
+    from tests.application.test_verified_coverage import (
+        add_attachment,
+        change_record,
+        write_source,
+    )
+
+    baseline = brz_source(tmp_path / "category-graph.brz")
+    with ZipFile(baseline) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    pdf = (
+        Path(__file__).parents[1] / "fixtures/local_api_scope_v3/blank.pdf"
+    ).read_bytes()
+    note = identity(701)
+    add_attachment(parts, note, 1, "Notes.md", CATEGORY_PROSE, owner=IDS["A"])
+    change_record(parts, note, NoteType=4)
+    add_attachment(parts, identity(702), 1, "Category guide.pdf", pdf, owner=IDS["A"])
+    return write_source(tmp_path, parts), pdf
+
+
+def _assert_original_category_material(scope, note, expected_pdf):
+    raw = note.read_bytes()
+    assert CATEGORY_PROSE in raw
+    assets = scope / "Attachments"
+    pdf = next(assets.rglob("Category guide.pdf"))
+    assert pdf.read_bytes() == expected_pdf
+    assert next(assets.rglob("Notes.md.original")).read_bytes() == CATEGORY_PROSE
+    destination = pdf.relative_to(scope.parent.parent).as_posix()
+    assert f"[[{destination}|Category guide.pdf]]".encode() in raw
+
 
 def test_source_import_offers_separate_choices_and_observed_reuse(tmp_path):
-    vault = _vault(established=False)
+    vault = _vault(established=True)
+    (vault / ".gitattributes").write_bytes(b"*.pdf -diff\n")
     shared = vault / "Categories/A.md"
     shared.parent.mkdir()
-    authored = b'---\r\ntags: ["categories"]\r\n---\r\n# A\r\n\r\nExisting dashboard prose.\r\n'
+    opening = vault / "Opening.md"
+    opening.rename(shared)
+    authored = (
+        shared.read_bytes().replace(b"\n---\n", b'\ntags:\n  - "categories"\n---\n', 1)
+        + b"\r\nExisting dashboard prose.\r\n"
+    )
     shared.write_bytes(authored)
     (vault / "Manual.md").write_bytes(b'---\ntags: ["focus/now"]\n---\n# Manual\n')
-    source = tmp_path / "categories.brz"
-    brz_source(source)
+    source, pdf = _classification_archive(tmp_path)
     operations = Operations()
+    before = operations.inspect_history(vault).checkpoint.locator
     offered = operations.prepare_collection_import_from_source(
         vault,
         source,
@@ -27,6 +72,11 @@ def test_source_import_offers_separate_choices_and_observed_reuse(tmp_path):
         row
         for row in review.vault_categories
         if row.destination_path == "Categories/A.md"
+    )
+    assert shared_candidate.destination_identity == (
+        "thebrain-brz",
+        "brain-a",
+        "opening",
     )
     assert (IDS["A"], "Categories/A.md") in review.category_suggestions
     choices = tuple(
@@ -54,9 +104,10 @@ def test_source_import_offers_separate_choices_and_observed_reuse(tmp_path):
     )
     assert preview.ready, (preview.code, preview.findings, preview.preparation)
     assert shared.read_bytes() == authored
-    assert (
-        tmp_path / "proposal/Imports/Atlas/References/A — source reference.md"
-    ).is_file()
+    staged = tmp_path / "proposal/Imports/Atlas"
+    _assert_original_category_material(
+        staged, staged / "References/A — source reference.md", pdf
+    )
     assert not (tmp_path / "proposal/Imports/Atlas/Views").exists()
     assert not (vault / "Imports").exists()
 
@@ -69,7 +120,7 @@ def test_source_import_offers_separate_choices_and_observed_reuse(tmp_path):
     shared.write_bytes(authored + b"More authored prose.\r\n")
     stale = operations.save_update(preview.preparation)
     assert stale.code == "import_category_target_changed"
-    assert operations.inspect_history(vault).status == "absent"
+    assert operations.inspect_history(vault).checkpoint.locator == before
     assert shared.read_bytes() == authored + b"More authored prose.\r\n"
 
     shared.write_bytes(authored)
@@ -116,6 +167,7 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
     from tests.support.type_tag_sources import PNG
 
     vault = _vault(established=True)
+    (vault / ".gitattributes").write_bytes(b"*.pdf -diff\n")
     categories = vault / "Categories"
     categories.mkdir()
     initial_category = "Categories/Existing.md"
@@ -128,13 +180,13 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
     (vault / alternative).write_bytes(alternative_bytes)
     root_overview = b"# Independent existing overview\r\n"
     (vault / "Categories.md").write_bytes(root_overview)
-    author = vault / "Existing.md"
+    author = vault / "Projects/Attachments/Member.md"
+    author.parent.mkdir(parents=True)
     author.write_bytes(
         f'---\ncategories:\n  - "[[{initial_category}]]"\ntags: ["focus/now"]\n---\n# Already a member\n'.encode()
     )
     staged_git = _user_git(vault)
-    source = tmp_path / "baseline.brz"
-    brz_source(source)
+    source, pdf = _classification_archive(tmp_path)
     operations = Operations()
     location = "Imports/Atlas"
     record_path = location + "/migration-record.json"
@@ -164,6 +216,7 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
     overview = next((vault / location).glob("Categories*.md"))
     imported_b = next((vault / location / "Categories").glob("B*.md"))
     assert initial_category.encode() in reference_file.read_bytes()
+    _assert_original_category_material(vault / location, reference_file, pdf)
     assert initial_category.encode() in view_file.read_bytes()
     assert (vault / "Categories.md").read_bytes() == root_overview
     assert PNG in {
@@ -237,6 +290,7 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
     assert alternative.encode() in view_file.read_bytes()
     assert alternative.encode() in overview.read_bytes()
     assert alternative.encode() in reference_file.read_bytes()
+    _assert_original_category_material(vault / location, reference_file, pdf)
     assert moved_path.read_bytes() == original
     assert (vault / alternative).read_bytes() == alternative_bytes
     assert (vault / "Categories.md").read_bytes() == root_overview
@@ -247,7 +301,11 @@ def test_remembered_category_follows_a_unique_stable_id():
     import pytest
 
     from brz2obsidian.application.collection_classification import _update_placement
-    from brz2obsidian.contracts import ImportCategoryCandidate, MigrationRefused
+    from brz2obsidian.contracts import (
+        ImportCategoryCandidate,
+        ImportCategoryChoice,
+        MigrationRefused,
+    )
     from brz2obsidian.obsidian.import_classification import classification_review
     from tests.application.test_graph_modules import item, snapshot
 
@@ -297,3 +355,208 @@ def test_remembered_category_follows_a_unique_stable_id():
     with pytest.raises(MigrationRefused) as error:
         _update_placement(source, original, ambiguous, (), (), False)
     assert error.value.issues[0].code == "import_category_target_ambiguous"
+
+    alternate = ImportCategoryCandidate(
+        destination_path="Categories/Alternative.md",
+        destination_sha256="c" * 64,
+        link_members_view="compatible_view_available",
+    )
+    replacement = ImportCategoryChoice(
+        source_identity="category",
+        destination_path=alternate.destination_path,
+        destination_sha256=alternate.destination_sha256,
+    )
+    preview = classification_review(source, (alternate,), ())
+    with pytest.raises(MigrationRefused) as error:
+        _update_placement(source, original, preview, (), (), False)
+    assert error.value.issues[0].code == "import_category_target_ambiguous"
+    for explicit in (replacement, ImportCategoryChoice(source_identity="category")):
+        remap = _update_placement(source, original, preview, (explicit,), (), True)
+        assert remap["category_choices"] == (explicit,)
+
+
+def test_held_undo_keeps_reversal_authority_instead_of_forward_mapping(monkeypatch):
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import vault_apply
+
+    admission = SimpleNamespace(
+        status="supported", inventory=(), policy_fingerprint="same policy"
+    )
+    checkpoint = SimpleNamespace(locator=SimpleNamespace(commit="retained checkpoint"))
+    observed = SimpleNamespace(
+        status="intact", admission=admission, checkpoint=checkpoint
+    )
+    monkeypatch.setattr(
+        vault_apply,
+        "_qualify_collection_apply",
+        lambda *_: "import_classification_approval_missing",
+    )
+    args = (observed, observed, None, None, None)
+    assert (
+        vault_apply._held_apply_refusal(*args, undo_target=None)
+        == "import_classification_approval_missing"
+    )
+    target = SimpleNamespace(observation=SimpleNamespace(checkpoint=checkpoint))
+    assert vault_apply._held_apply_refusal(*args, undo_target=target) is None
+    stale = SimpleNamespace(
+        status="intact",
+        admission=admission,
+        checkpoint=SimpleNamespace(locator=SimpleNamespace(commit="new checkpoint")),
+    )
+    assert (
+        vault_apply._held_apply_refusal(
+            observed, stale, None, None, None, undo_target=target
+        )
+        == "current_admission_required"
+    )
+
+
+def test_paused_classified_update_finish_reobserves_selected_shared_target(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    import pytest
+
+    from brz2obsidian.application.checkpoint_contracts import CheckpointFile
+    from brz2obsidian.application.vault_update_contracts import (
+        VaultOperationIntent,
+        VaultPathMetadata,
+    )
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.publication import collection_placement as placement
+
+    record_path = "Imports/Atlas/migration-record.json"
+    member_path = "Imports/Atlas/Notes/Member.md"
+    category = "Categories/Shared.md"
+    authored = b'---\ntags: ["categories"]\n---\n# Shared\n'
+    target = tmp_path / category
+    target.parent.mkdir()
+    target.write_bytes(authored)
+    choice = {
+        "source_identity": "projects",
+        "destination_path": category,
+        "destination_sha256": hashlib.sha256(authored).hexdigest(),
+    }
+    incoming = {
+        "schema": "brz2obsidian.migration",
+        "source_identity": {"snapshot_digest": "same-snapshot"},
+        "item_targets": [{"original_identity": "projects"}],
+        "category_mappings": [{"source_identity": "projects", "destination": choice}],
+        "vault_tag_mappings": [],
+    }
+    before = incoming | {
+        "category_mappings": [
+            {
+                "source_identity": "projects",
+                "destination": {"source_identity": "projects"},
+            }
+        ]
+    }
+    old_record = ExactContent(data=json.dumps(before).encode())
+    new_record = ExactContent(data=json.dumps(incoming).encode())
+    old_member = ExactContent(data=b"# Member\n")
+    new_member = ExactContent(
+        data=b'---\ncategories: ["[[Categories/Shared.md]]"]\n---\n# Member\n'
+    )
+    selected = {record_path: new_record, member_path: new_member}
+    kind = SimpleNamespace(kind="source_update")
+    approval = placement.classification_approval(incoming)
+    review = SimpleNamespace(
+        facts=SimpleNamespace(format_operation=kind),
+        producer_facts=SimpleNamespace(
+            link_context=SimpleNamespace(
+                import_classification_approval=approval,
+                import_classification_remap=True,
+            ),
+            subjects=(
+                SimpleNamespace(
+                    path=record_path,
+                    baseline=SimpleNamespace(content=old_record),
+                    structure=None,
+                ),
+                SimpleNamespace(
+                    path=member_path,
+                    current=SimpleNamespace(path=member_path),
+                    structure=SimpleNamespace(
+                        prior_mappings=(),
+                        incoming_mappings=(
+                            SimpleNamespace(
+                                kind="category", classification_id="category:projects"
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    def row(path, content):
+        return CheckpointFile(
+            path=path,
+            size=content.identity.size,
+            sha256=content.identity.sha256,
+            object_id="a" * 40,
+            mode="100644",
+        )
+
+    paths = tuple(sorted(selected))
+    before_rows = (row(member_path, old_member), row(record_path, old_record))
+    after_rows = tuple(row(path, selected[path]) for path in paths)
+    metadata = tuple(
+        VaultPathMetadata(path=path, mode=0, attributes=0, security="retained")
+        for path in paths
+    )
+    origin = VaultOperationIntent(
+        schema_id="brz2obsidian.vault-operation-intent",
+        schema_version=1,
+        operation_id="b" * 32,
+        kind="apply",
+        direction="finish",
+        generation=1,
+        association_id="a" * 64,
+        prepared_commit="b" * 40,
+        before=before_rows,
+        proposed=after_rows,
+        affected_paths=paths,
+        protected_paths=(),
+        before_metadata=metadata,
+        result_metadata=metadata,
+        created_directories=(),
+    )
+    observed = SimpleNamespace(
+        vault=str(tmp_path), inventory=(after_rows[1], before_rows[0])
+    )
+    monkeypatch.setattr(
+        placement, "existing_files", lambda _: {category: target.read_bytes()}
+    )
+    monkeypatch.setattr(
+        placement,
+        "observe_classification_inventory",
+        lambda _, _checkpoint, *, existing=None: placement.vault_classifications(
+            existing or {}
+        ),
+    )
+
+    placement.require_collection_finish_links(
+        observed, None, record_path, review, selected, origin=origin
+    )
+    target.write_bytes(authored + b"Later authored edit.\n")
+    with pytest.raises(
+        placement.ImportRecoveryLinkChange,
+        match="recovery_import_classifications_changed",
+    ):
+        placement.require_collection_finish_links(
+            observed, None, record_path, review, selected, origin=origin
+        )
+    inverse = origin.model_copy(update={"kind": "undo"})
+    placement.require_collection_finish_links(
+        observed, None, record_path, review, selected, origin=inverse
+    )
+    terminal = SimpleNamespace(vault=str(tmp_path), inventory=after_rows)
+    placement.require_collection_finish_links(
+        terminal, None, record_path, review, selected, origin=origin
+    )

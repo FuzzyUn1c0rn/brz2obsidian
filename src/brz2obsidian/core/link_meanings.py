@@ -220,7 +220,13 @@ def _semantic(value):
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
-            if name not in ("file_roles", "resource_origin", "relationship_heading")
+            if name
+            not in (
+                "file_roles",
+                "resource_origin",
+                "relationship_heading",
+                "category_anchor",
+            )
             or getattr(value, name) is not None
         }
         if isinstance(value, ReferenceTarget):

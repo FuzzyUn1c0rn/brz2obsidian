@@ -1108,10 +1108,7 @@ def _review_observation(
     admission, query_plan, query_subjects = _admit_recovery_review(
         root, original, selected, retained, _owner=_owner
     )
-    if (
-        direction == "finish"
-        and original.facts.format_operation.kind == "collection_import"
-    ):
+    if direction == "finish":
         from .collection_placement import require_collection_finish_links
 
         prepared = retained.owned[intent.prepared_commit][0]
@@ -1121,6 +1118,8 @@ def _review_observation(
             prepared.collection_record_path,
             original,
             selected_files,
+            selected.remove_paths,
+            origin=intent,
         )
     inventory = {row.path: row for row in admission.inventory}
     paths = (
@@ -3332,6 +3331,7 @@ def _held_collection_finish_refusal(publication, lineage, selected_files, remova
             selected_files,
             removals,
             produced={row.path: row.content for row in loaded.historical_effects.files},
+            origin=lineage.origin,
         )
     except ImportRecoveryLinkChange as error:
         return _refuse_known_recovery(

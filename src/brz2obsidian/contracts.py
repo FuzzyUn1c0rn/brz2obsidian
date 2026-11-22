@@ -471,6 +471,7 @@ class MigrationPlan(Contract):
     tag_reuse: tuple[tuple[str, str], ...] = ()
     remembered_tags: tuple[tuple[str, str, Literal["new", "reuse"]], ...] = ()
     remembered_item_paths: tuple[tuple[str, str], ...] = ()
+    known_nonmember_paths: tuple[str, ...] = ()
     category_choices: tuple[ImportCategoryChoice, ...] = ()
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()

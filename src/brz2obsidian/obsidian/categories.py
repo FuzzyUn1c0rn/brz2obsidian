@@ -73,6 +73,19 @@ def reference_navigation(plan, target, destination):
     return "".join("- " + link + "\n" for link in links) + "\n"
 
 
+def _nonmember_paths(plan):
+    paths = set(plan.known_nonmember_paths)
+    paths.update(
+        row.relative_path
+        for row in plan.support_artifacts
+        if row.purpose in ("template", "starter")
+    )
+    paths.update(
+        row.relative_path for row in plan.asset_targets if row.relative_path is not None
+    )
+    return sorted(path for path in paths if path.casefold().endswith(".md"))
+
+
 def scoped_category_outputs(plan):
     snapshot = plan.analysis.snapshot
     shared = shared_destinations(plan)
@@ -97,6 +110,7 @@ def scoped_category_outputs(plan):
             + _link(item.relative_path, f"Original {title} content and attachments")
         )
     outputs = {"Categories.md": "\n".join(lines) + "\n"}
+    nonmembers = _nonmember_paths(plan)
     for item in approved_views(snapshot, plan.item_targets, plan.category_choices):
         destination = shared[item.original_identity]
         note, base = view_paths(item)
@@ -114,8 +128,10 @@ def scoped_category_outputs(plan):
                 "    - " + json.dumps(value, ensure_ascii=False) + "\n"
                 for value in (
                     'file.ext == "md"',
-                    '!file.folder.split("/").contains("Templates")',
-                    '!file.folder.split("/").contains("Attachments")',
+                    *(
+                        f"file.path != {json.dumps(path, ensure_ascii=False)}"
+                        for path in nonmembers
+                    ),
                     expression,
                 )
             )

@@ -476,6 +476,7 @@ def test_analysis_refuses_conflicting_identity_and_content_ownership(defect):
 
 def test_scoped_category_render_preserves_original_and_separately_approved_view():
     from brz2obsidian.contracts import ClassificationAssignment, OriginalEvidence
+    from brz2obsidian.obsidian_dialect import mapping
 
     body = "Keep the source category guidance.\r\n"
     asset_data = {"projects-body": body.encode(), "projects-guide": b"%PDF sample"}
@@ -560,6 +561,7 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
                 output_format=9,
                 import_location=location,
                 category_choices=(choice | {"compatible_view": approved},),
+                known_nonmember_paths=("Templates/Existing category.md",),
             ),
             meta,
         )
@@ -584,9 +586,14 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     for navigation in (overview_text, reference_text):
         assert f"[[{separate_view}|Linked members — compatible view]]" in navigation
     view = generated(approved, location + "/Views/Projects — linked members.base")
-    assert f'link("{shared}")' in view.replace(chr(92) + '"', '"')
+    filters = mapping(view)["filters"]["and"]
+    assert filters[0] == 'file.ext == "md"'
+    assert filters[-1] == f'list(categories).contains(link("{shared}"))'
+    assert 'file.path != "Templates/Existing category.md"' in filters
+    assert f'file.path != "{location}/Templates/New note.md"' in filters
+    assert all(row.startswith('file.path != "') for row in filters[1:-1])
+    assert all("Projects/Attachments/Member.md" not in row for row in filters)
     assert "note.categories" in view
-    assert "Templates" in view and "Attachments" in view
 
     original = {row.relative_path: row.content for row in approved.generated_files}
     incoming = {row.relative_path: row.content for row in declined.generated_files}

@@ -108,6 +108,7 @@ def _check_plan(plan, run_metadata):
         tag_reuse=plan.tag_reuse,
         remembered_tags=plan.remembered_tags,
         remembered_item_paths=plan.remembered_item_paths,
+        known_nonmember_paths=plan.known_nonmember_paths,
         category_choices=plan.category_choices,
     )
     if plan.import_location is not None and (

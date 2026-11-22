@@ -16,6 +16,7 @@ from brz2obsidian.publication.collection_placement import (
     observe_classification_inventory,
     observe_collection_placement,
     read_rendered_collection,
+    retained_nonmember_paths,
     uncreated_destinations,
 )
 
@@ -117,6 +118,11 @@ def prepare_collection_import_from_source(
                 "category_choices": selected,
                 "tag_reuse": tuple(tuple(row) for row in tag_reuse),
                 "existing_vault_tags": vault_tags,
+                "known_nonmember_paths": retained_nonmember_paths(
+                    history.admission, history.checkpoint
+                )
+                if any(row.compatible_view for row in selected)
+                else (),
             }
 
         result = workflow.convert_collection(source, staging, placement=placement)

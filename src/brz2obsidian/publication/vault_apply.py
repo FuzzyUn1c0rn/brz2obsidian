@@ -3680,7 +3680,7 @@ def _qualify_collection_apply(source, review, selected, observed):
     )
 
 
-def _held_apply_refusal(first, observed, source, review, selected):
+def _held_apply_refusal(first, observed, source, review, selected, *, undo_target):
     if (
         observed.status != "intact"
         or observed.admission.status != "supported"
@@ -3689,6 +3689,13 @@ def _held_apply_refusal(first, observed, source, review, selected):
         or observed.checkpoint.locator.commit != first.checkpoint.locator.commit
     ):
         return "current_admission_required"
+    if undo_target is not None:
+        if (
+            observed.checkpoint.locator.commit
+            != undo_target.observation.checkpoint.locator.commit
+        ):
+            return "undo_review_stale"
+        return None
     return _qualify_collection_apply(source, review, selected, observed)
 
 
@@ -3782,7 +3789,9 @@ def _apply_reviewed_update(
             _owned_export,
             _owners,
         )
-        refusal = _held_apply_refusal(first, observed, source, review, selected)
+        refusal = _held_apply_refusal(
+            first, observed, source, review, selected, undo_target=undo_target
+        )
         if refusal is not None:
             return outcome("refused", refusal, start=start)
         state.operation_generation = observed.checkpoint.manifest.generation + 1

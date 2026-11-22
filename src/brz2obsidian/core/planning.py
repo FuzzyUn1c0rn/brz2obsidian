@@ -34,6 +34,7 @@ def plan(
     tag_reuse: tuple[tuple[str, str], ...] = (),
     remembered_tags=(),
     remembered_item_paths=(),
+    known_nonmember_paths=(),
     category_choices=(),
 ) -> MigrationPlan:
     if import_location is not None:
@@ -141,6 +142,7 @@ def plan(
         tag_reuse=tag_reuse,
         remembered_tags=remembered_tags,
         remembered_item_paths=remembered_item_paths,
+        known_nonmember_paths=tuple(sorted(set(known_nonmember_paths))),
         category_choices=category_choices,
         tag_targets=tag_targets,
         tag_memberships=tag_memberships,
