@@ -15,7 +15,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from brz2obsidian.application.update_facts import link_state
+from brz2obsidian.application.update_facts import link_state, output_identity, record
 from brz2obsidian.application.update_subjects import review_subjects
 from brz2obsidian.application.vault_contracts import VaultFile, VaultSubject
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
@@ -1788,6 +1788,30 @@ def _reverse_owned_subjects(
     return subjects, baseline_outputs, output_references
 
 
+def _generated_document_paths(git, lineage, source_files):
+    record_path = lineage.collection_record_path
+    if record_path is None:
+        return None
+    content = _owned_content(git, source_files.get(record_path))
+    if content is None:
+        raise OSError("Associated recovery document source mapping is unavailable")
+    paths = {}
+    try:
+        mapping = record({record_path: content}, record_path)
+        if output_identity(mapping) != lineage.identity:
+            raise ValueError("Wrong collection")
+        for item in mapping["item_targets"]:
+            if not item["created"]:
+                continue
+            identity, path = item["original_identity"], item["relative_path"]
+            if identity in paths or path == record_path or path not in source_files:
+                raise ValueError("Ambiguous or unavailable generated document")
+            paths[identity] = path
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise OSError("Associated recovery document source mapping is invalid") from exc
+    return paths
+
+
 def _restore_associated_documents(
     evidence,
     owned_outputs,
@@ -1817,7 +1841,13 @@ def _restore_associated_documents(
             for document in evidence.original.facts.link_context.current_documents
         }
     )
-    for path in sorted(set(evidence.intent.affected_paths) - covered):
+    associated = sorted(set(evidence.intent.affected_paths) - covered)
+    if not associated:
+        return
+    generated_paths = _generated_document_paths(
+        evidence.git, source_lineage, generated_files
+    )
+    for path in associated:
         owners = tuple(
             item
             for item in facts.identity_inventory
@@ -1849,8 +1879,13 @@ def _restore_associated_documents(
         ):
             raise OSError("Associated recovery document lacks retained authority")
         owner = owners[0]
+        generated_path = (
+            path
+            if generated_paths is None
+            else generated_paths.get(owner.identity.item_id)
+        )
         generated = _owned_content(
-            evidence.git, generated_files.get(path), _owner=_owner
+            evidence.git, generated_files.get(generated_path), _owner=_owner
         )
         target = _owned_content(evidence.git, evidence.before[path], _owner=_owner)
         if generated is None or target is None:
@@ -2278,7 +2313,19 @@ def prepare_recovery(vault, *, direction=None, _owner=None):
         except OSError, ValueError, TypeError, UnicodeError:
             return _recovery_preparation("unavailable", "recovery_review_unavailable")
     observed, authority = _inspect_update_observation(root)
-    if observed.code == "unpublished_collection_prepared" and direction in (
+    from .collection_result_locator import RESULT_LOCATOR_PENDING
+    from .unpublished_collection import UNPUBLISHED_RECOVERY_CODES
+
+    if observed.code == RESULT_LOCATOR_PENDING and direction in (
+        None,
+        "finish",
+        "restore",
+    ):
+        offered = _recovery_preparation("cleanup", observed.code, observed=observed)
+        return VaultRecoveryPreparation.model_validate(
+            offered.model_dump() | {"result_locator_checkpoint": observed.result_commit}
+        )
+    if observed.code in UNPUBLISHED_RECOVERY_CODES and direction in (
         None,
         "restore",
     ):
@@ -3490,6 +3537,18 @@ def _publish_staged_recovery(
     return _completed_recovery(publication, lineage, paths, state, terminal)
 
 
+def _execute_recovery_cleanup(root, saved, *, cancel, start, owners):
+    if saved.unpublished_checkpoint is not None:
+        from .unpublished_collection import restore_unpublished_collection
+
+        return restore_unpublished_collection(root, saved, cancel=cancel)
+    if saved.result_locator_checkpoint is not None:
+        from .collection_result_locator import reseal_scoped_result
+
+        return reseal_scoped_result(root, saved, cancel=cancel)
+    return _cleanup_verified_terminal(root, saved, start=start, _owners=owners)
+
+
 def _execute_recovery(
     vault,
     preparation,
@@ -3510,12 +3569,10 @@ def _execute_recovery(
     except OSError, ValueError, TypeError, UnicodeError:
         return _outcome("refused", "invalid_recovery_preparation", start=start)
     root = Path(vault).absolute()
-    if saved.unpublished_checkpoint is not None:
-        from .unpublished_collection import restore_unpublished_collection
-
-        return restore_unpublished_collection(root, saved, cancel=cancel)
     if saved.status == "cleanup":
-        return _cleanup_verified_terminal(root, saved, start=start, _owners=_owners)
+        return _execute_recovery_cleanup(
+            root, saved, cancel=cancel, start=start, owners=_owners
+        )
     if saved.status != "offered" or saved.direction is None or saved.review is None:
         return _outcome("refused", "recovery_review_required", start=start)
     publication = _select_recovery_publication(

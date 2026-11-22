@@ -19,6 +19,9 @@ class VaultRecoveryPreparation(ReconciliationContract):
     unpublished_checkpoint: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
     )
+    result_locator_checkpoint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
     available_directions: tuple[Literal["finish", "restore"], ...]
     direction: Literal["finish", "restore"] | None = None
     review: ReviewPlan | None
@@ -42,6 +45,10 @@ class VaultRecoveryPreparation(ReconciliationContract):
             self.status != "cleanup" or self.intent_commit is not None
         ):
             raise ValueError("An unpublished preparation allows only metadata cleanup")
+        if self.result_locator_checkpoint is not None and (
+            self.status != "cleanup" or self.intent_commit is None
+        ):
+            raise ValueError("A pending Result locator requires its native intent")
         if (self.status == "offered") != bool(
             self.available_directions
         ) or self.available_directions not in (

@@ -165,8 +165,89 @@ def test_scoped_update_binds_incoming_bytes_to_the_moved_note():
     }
 
 
-def test_prepared_collection_without_intent_exposes_exact_recovery_authority():
-    from brz2obsidian.publication.vault_apply import _acquire, _release
+def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.publication import vault_recovery
+
+    path, record_path, original = _incoming_brain()
+    moved = "Moved/Opening.md"
+    authored = original[path].replace(b"New B text.", b"Authored preimage.")
+    produced = original[path].replace(b"New B text.", b"Applied update.")
+    facts = assemble_facts(
+        original,
+        original,
+        {moved: produced, record_path: original[record_path]},
+        record_path=record_path,
+        proposal_id="reverse-b",
+        generation=1,
+    )
+    owner = next(row for row in facts.identity_inventory if row.current.path == moved)
+    generated = SimpleNamespace(path=path, content=ExactContent(data=original[path]))
+    mapping = SimpleNamespace(
+        path=record_path, content=ExactContent(data=original[record_path])
+    )
+    physical_preimage = SimpleNamespace(path=moved, content=ExactContent(data=authored))
+    selected = SimpleNamespace(path=moved, content=ExactContent(data=produced))
+    predecessor = SimpleNamespace(
+        identity=facts.incoming_identity,
+        collection_record_path=record_path,
+        source=(mapping, generated),
+    )
+    evidence = SimpleNamespace(
+        git=None,
+        intent=SimpleNamespace(affected_paths=(moved,)),
+        source_prepared=SimpleNamespace(previous="retained"),
+        retained=SimpleNamespace(owned={"retained": (predecessor, None)}),
+        original=SimpleNamespace(facts=facts),
+        before={moved: physical_preimage},
+        produced={moved: selected},
+    )
+    monkeypatch.setattr(
+        vault_recovery,
+        "_owned_content",
+        lambda git, row, **kwargs: None if row is None else row.content,
+    )
+
+    def reversed_note():
+        subjects, baselines = [], []
+        vault_recovery._restore_associated_documents(
+            evidence,
+            SimpleNamespace(effects=SimpleNamespace(files=(selected,))),
+            facts,
+            {},
+            {moved: owner.current},
+            subjects,
+            baselines,
+            _owner=None,
+        )
+        return subjects[0], baselines[0]
+
+    subject, baseline = reversed_note()
+    assert (subject.path, subject.baseline.content.data, subject.incoming.data) == (
+        moved,
+        original[path],
+        authored,
+    )
+    assert (baseline.item_id, baseline.content.data) == ("opening", original[path])
+
+    duplicate = json.loads(original[record_path])
+    duplicate["item_targets"].append(duplicate["item_targets"][0])
+    mapping.content = ExactContent(data=json.dumps(duplicate).encode())
+    with pytest.raises(OSError, match="Associated recovery document source"):
+        reversed_note()
+
+
+@pytest.mark.parametrize(
+    "boundary", ["prepared_locator", "saved_locator", "lease_release"]
+)
+def test_unpublished_collection_recovery_can_itself_be_interrupted(
+    monkeypatch, boundary
+):
+    from brz2obsidian.publication import unpublished_collection, vault_apply
 
     vault, source = fixture_case()
     git(vault, "init", "-q")
@@ -181,10 +262,12 @@ def test_prepared_collection_without_intent_exposes_exact_recovery_authority():
     )
     saved = operations.save_update(prepared.preparation)
     assert saved.code == "saved", saved
+    locator_file = vault / ".brz2obsidian/locator.json"
+    saved_locator = locator_file.read_bytes()
     association = saved.checkpoint.association
     plan = saved.preparation.review
     operation_id = "b" * 32
-    _acquire(vault, operation_id)
+    vault_apply._acquire(vault, operation_id)
     try:
         snapshot = operations.capture_checkpoint(
             vault,
@@ -204,7 +287,12 @@ def test_prepared_collection_without_intent_exposes_exact_recovery_authority():
         )
         assert snapshot.status == "captured", snapshot.code
     finally:
-        _release(vault, operation_id)
+        if boundary == "saved_locator":
+            vault_apply._park(vault, operation_id)
+        else:
+            vault_apply._release(vault, operation_id)
+    if boundary == "saved_locator":
+        locator_file.write_bytes(saved_locator)
     offered = Operations().prepare_recovery(vault, direction="restore")
     assert (offered.status, offered.code) == (
         "cleanup",
@@ -215,13 +303,72 @@ def test_prepared_collection_without_intent_exposes_exact_recovery_authority():
     assert offered.intent_commit is None
     assert Operations().inspect_history(vault).admission.status == "recovery_first"
     assert not (vault / path).exists()
-    restored = Operations().execute_recovery(vault, offered)
+    with monkeypatch.context() as injection:
+        if boundary == "lease_release":
+
+            def stop_before_release(root, operation):
+                raise OSError("Injected interruption after locator replacement")
+
+            injection.setattr(vault_apply, "_release", stop_before_release)
+        else:
+
+            def stop_after_ref(root, native_git, association, manifest, writes):
+                native_git.call(
+                    "update-ref", writes.ref, writes.commit, manifest.previous
+                )
+                raise OSError("Injected interruption before locator replacement")
+
+            injection.setattr(
+                unpublished_collection, "_publish_locator", stop_after_ref
+            )
+        stopped = Operations().execute_recovery(vault, offered)
+    assert stopped.recovery_required and not stopped.authored_files_changed
+    retained = git(vault, "rev-parse", association.ref).decode().strip()
+    assert retained != snapshot.commit
+    owner_file = vault / ".git/brz2obsidian/owner.json"
+    original_owner = owner_file.read_bytes()
+    wrong_owner = json.loads(original_owner)
+    wrong_owner["operation_id"] = "c" * 32
+    owner_file.write_bytes(json.dumps(wrong_owner).encode())
+    try:
+        bad = Operations().prepare_recovery(vault, direction="restore")
+        assert bad.status != "cleanup"
+    finally:
+        owner_file.write_bytes(original_owner)
+    old_locator = locator_file.read_bytes()
+    invalid_locator = json.loads(old_locator)
+    invalid_locator["generation"] += 7
+    locator_file.write_bytes(json.dumps(invalid_locator).encode())
+    try:
+        assert (
+            Operations().prepare_recovery(vault, direction="restore").status
+            != "cleanup"
+        )
+        assert git(vault, "rev-parse", association.ref).decode().strip() == retained
+    finally:
+        locator_file.write_bytes(old_locator)
+    restarted = Operations().prepare_recovery(vault, direction="restore")
+    assert restarted.status == "cleanup", restarted
+    assert restarted.operation_id == operation_id
+    assert restarted.unpublished_checkpoint == retained
+    restored = Operations().execute_recovery(vault, restarted)
     assert restored.code == "saved_collection_review_restored", restored
     assert not restored.authored_files_changed
+    assert restored.checkpoint_commit == retained
+    assert not owner_file.exists()
     resumed = Operations().resume_update(vault)
     assert resumed.code == "resumed", resumed
     assert resumed.operation_id == plan.proposal.proposal_id
     assert not (vault / record_path).exists()
+    discarded = Operations().discard_saved_review(vault, expected_commit=retained)
+    assert discarded.code == "saved_review_discarded", discarded
+    assert Operations().read_checkpoint(vault).locator.commit == discarded.commit
+    assert Operations().load_update(vault).code == "saved_update_unavailable"
+    assert (
+        Operations()
+        .prepare_collection_import(vault, source, record_path=record_path)
+        .ready
+    )
 
 
 def test_saved_unrelated_review_keeps_the_established_source_available():

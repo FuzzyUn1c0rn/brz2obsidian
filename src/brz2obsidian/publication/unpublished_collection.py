@@ -1,10 +1,13 @@
 """Resolve a scoped Apply stopped before it retained a native intent."""
 
+import os
 import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
+from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 from brz2obsidian.application.vault_update_contracts import VaultOperationLock
 
 from .vault_history import (
@@ -13,6 +16,7 @@ from .vault_history import (
     _checkpoint_graph,
     _commit_checkpoint_tree,
     _Git,
+    _persist_checkpoint_locator,
     _publish_locator,
     _read,
     _review_meaning,
@@ -22,33 +26,89 @@ from .vault_history import (
 )
 from .vault_native import observe_file, verify_directory
 
-_CODE = "unpublished_collection_prepared"
+_PREPARED = "unpublished_collection_prepared"
+_RESEAL = "restored_collection_locator_pending"
+UNPUBLISHED_RECOVERY_CODES = (_PREPARED, _RESEAL)
+
+
+class _UnpublishedLineage(NamedTuple):
+    preparing: CheckpointManifest
+    prepared_commit: str
+    saved: CheckpointManifest
+    saved_commit: str
+
+
+def _owned_marker_matches(root, operation):
+    marker = root / ".git" / "brz2obsidian"
+    if not os.path.lexists(marker):
+        return False
+    verify_directory(marker)
+    if set(os.listdir(marker)) != {"owner.json", "held"}:
+        return False
+    _, _, raw, _ = observe_file(marker, marker / "owner.json", prefix_limit=4097)
+    if len(raw) > 4096:
+        return False
+    owner = VaultOperationLock.model_validate_json(raw)
+    return (
+        owner.operation_id == operation
+        and owner.vault_anchor == verify_directory(root)
+        and owner.git_anchor == verify_directory(root / ".git")
+    )
+
+
+def _unpublished_lineage(git, commit, manifest, association):
+    if manifest.collection_preparation_owner is not None:
+        prepared, prepared_commit = manifest, commit
+    elif manifest.abandoned_collection_preparation is not None:
+        prepared_commit = manifest.abandoned_collection_preparation
+        _, _, prepared, actual = _checkpoint_graph(git, prepared_commit, {}, None)
+        if (
+            actual != association
+            or prepared.collection_preparation_owner is None
+            or prepared.generation + 1 != manifest.generation
+        ):
+            return None
+    else:
+        return None
+    saved_commit = prepared.previous
+    _, _, saved, actual = _checkpoint_graph(git, saved_commit, {}, None)
+    if (
+        saved.boundary != "local"
+        or saved.generation + 1 != prepared.generation
+        or saved.reviewed_source is None
+        or saved.preimage != prepared.preimage
+        or actual != association
+        or not (saved.collection_record_path or saved.collection_baseline_commit)
+        or _binding_signature(saved.reviewed_source)
+        != _binding_signature(prepared.reviewed_source)
+        or manifest.abandoned_collection_preparation is not None
+        and not restored_roles_match(manifest, saved, saved_commit)
+    ):
+        return None
+    return _UnpublishedLineage(prepared, prepared_commit, saved, saved_commit)
 
 
 def locator_after_unpublished_preparation(root, git, saved_locator, tip, names):
-    if tip == saved_locator.commit or names not in (
-        {"locator.json"},
-        {"locator.json", "locator.pending"},
-    ):
+    if names not in ({"locator.json"}, {"locator.json", "locator.pending"}):
         return None
     _, _, manifest, association = _checkpoint_graph(git, tip, {}, None)
-    if (
-        manifest.collection_preparation_owner is None
-        or manifest.previous != saved_locator.commit
-        or manifest.generation != saved_locator.generation + 1
-        or association != saved_locator.association
-    ):
+    if association != saved_locator.association:
         return None
-    marker = root / ".git" / "brz2obsidian"
-    _, _, raw, _ = observe_file(marker, marker / "owner.json", prefix_limit=4097)
-    if len(raw) > 4096:
+    lineage = _unpublished_lineage(git, tip, manifest, association)
+    if lineage is None:
         return None
-    owner = VaultOperationLock.model_validate_json(raw)
-    if (
-        owner.operation_id != manifest.collection_preparation_owner
-        or owner.vault_anchor != verify_directory(root)
-        or owner.git_anchor != verify_directory(root / ".git")
-    ):
+    owner = lineage.preparing.collection_preparation_owner
+    if not _owned_marker_matches(root, owner):
+        return None
+    permitted = {(lineage.saved_commit, lineage.saved.generation)}
+    if manifest.abandoned_collection_preparation is not None:
+        permitted.update(
+            (
+                (lineage.prepared_commit, lineage.preparing.generation),
+                (tip, manifest.generation),
+            )
+        )
+    if (saved_locator.commit, saved_locator.generation) not in permitted:
         return None
     return saved_locator.model_copy(
         update={"commit": tip, "generation": manifest.generation}
@@ -82,31 +142,32 @@ def unpublished_outcome(git, checkpoint, start, *, previous=None):
     if checkpoint.status != "valid":
         return None
     manifest = checkpoint.manifest
-    owner = manifest.collection_preparation_owner
-    if owner is None:
+    locator = checkpoint.locator
+    reseal = manifest.abandoned_collection_preparation is not None
+    marker_present = os.path.lexists(git.root / ".git" / "brz2obsidian")
+    if reseal and not marker_present:
         return None
-    if previous is not None and (
-        previous.receipt is None or previous.intent.generation >= manifest.generation
-    ):
+    lineage = _unpublished_lineage(git, locator.commit, manifest, locator.association)
+    if lineage is None:
         return None
-    saved_commit = manifest.previous
-    _, _, saved, association = _checkpoint_graph(git, saved_commit, {}, None)
-    if (
-        saved.boundary != "local"
-        or saved.reviewed_source is None
-        or saved.preimage != manifest.preimage
-        or association != checkpoint.locator.association
-        or not (saved.collection_record_path or saved.collection_baseline_commit)
-        or _binding_signature(saved.reviewed_source)
-        != _binding_signature(manifest.reviewed_source)
-    ):
+    owner = lineage.preparing.collection_preparation_owner
+    if marker_present and not _owned_marker_matches(git.root, owner):
         return None
     if previous is not None:
+        if (
+            previous.receipt is None
+            or previous.intent.generation >= lineage.preparing.generation
+            or previous.intent.operation_id == owner
+        ):
+            return None
         parent = SimpleNamespace(
-            locator=checkpoint.locator.model_copy(
-                update={"commit": saved_commit, "generation": saved.generation}
+            locator=locator.model_copy(
+                update={
+                    "commit": lineage.saved_commit,
+                    "generation": lineage.saved.generation,
+                }
             ),
-            manifest=saved,
+            manifest=lineage.saved,
         )
         if not _terminal_result_in_history(
             git, parent, previous.intent, previous.receipt
@@ -114,7 +175,7 @@ def unpublished_outcome(git, checkpoint, start, *, previous=None):
             return None
     return _outcome(
         "incomplete",
-        _CODE,
+        _RESEAL if reseal else _PREPARED,
         start=start,
         operation_id=owner,
         phase="prepared",
@@ -122,7 +183,11 @@ def unpublished_outcome(git, checkpoint, start, *, previous=None):
         checkpoint=checkpoint.locator.commit,
         history="prepared",
         recovery=True,
-        message="Restore the saved review from its unpublished preparation.",
+        message=(
+            "Finish publishing the restored review locator and release its lease."
+            if reseal
+            else "Restore the saved review from its unpublished preparation."
+        ),
     )
 
 
@@ -147,7 +212,11 @@ def restore_unpublished_collection(vault, prepared, *, cancel):
         history = inspect_history(root, active_operation=operation)
         if history.status != "intact" or history.admission.status != "supported":
             raise OSError("Current repository admission is unavailable")
-        locator = _restore_saved_checkpoint(root, history.checkpoint, prepared)
+        locator = (
+            _reseal_restored_checkpoint(root, history.checkpoint, prepared)
+            if prepared.code == _RESEAL
+            else _restore_saved_checkpoint(root, history.checkpoint, prepared)
+        )
         _release(root, operation)
         acquired = False
         return _outcome(
@@ -178,11 +247,23 @@ def restore_unpublished_collection(vault, prepared, *, cancel):
 
 def _matches_offer(observed, offer):
     return (
-        observed.code == _CODE
+        observed.code == offer.code
+        and offer.code in UNPUBLISHED_RECOVERY_CODES
         and observed.operation_id == offer.operation_id
         and observed.generation == offer.generation
         and observed.checkpoint_commit == offer.unpublished_checkpoint
     )
+
+
+def _reseal_restored_checkpoint(root, checkpoint, offer):
+    locator = checkpoint.locator
+    if (
+        locator.commit != offer.unpublished_checkpoint
+        or checkpoint.manifest.abandoned_collection_preparation is None
+    ):
+        raise OSError("Current restored review changed")
+    _persist_checkpoint_locator(root, locator, replace_pending=True)
+    return locator
 
 
 def _restore_saved_checkpoint(root, checkpoint, prepared):
@@ -216,8 +297,9 @@ def _restore_saved_checkpoint(root, checkpoint, prepared):
         collection_baseline_commit=restored_fields["collection_baseline_commit"],
         abandoned_collection_preparation=tip.locator.commit,
     )
-    restored = saved.model_copy(
-        update={
+    restored = CheckpointManifest.model_validate(
+        saved.model_dump()
+        | {
             **restored_fields,
             "generation": tip.locator.generation + 1,
             "previous": tip.locator.commit,

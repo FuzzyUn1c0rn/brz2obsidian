@@ -2107,9 +2107,6 @@ def _inspect_update_status(
         )
         _, intent, receipt, stopped, commit = records[-1]
         active_graph = next(graph for graph in graphs if graph.commit == commit)
-        orphan = unpublished_outcome(git, checkpoint, start, previous=active_graph)
-        if orphan is not None:
-            return orphan
         observation = _OperationObservation(
             active_graph,
             checkpoint,
@@ -2146,6 +2143,9 @@ def _inspect_update_status(
                     demands=demands,
                     observation=observation,
                 )
+        orphan = unpublished_outcome(git, checkpoint, start, previous=active_graph)
+        if orphan is not None:
+            return orphan
         observations.append(observation)
         review_generation = (
             intent.review_generation
@@ -2175,7 +2175,7 @@ def _inspect_update_status(
             return _terminal_operation_status(
                 root, git, checkpoint, intent, receipt, commit, start, review_generation
             )
-        return _unfinished_operation_status(
+        observed = _unfinished_operation_status(
             root,
             intent,
             active_graph.intent_commit,
@@ -2185,6 +2185,9 @@ def _inspect_update_status(
             start,
             review_generation,
         )
+        from .collection_result_locator import with_result_locator_status
+
+        return with_result_locator_status(root, checkpoint, observed, retained_result)
     except OSError, ValueError, TypeError, UnicodeError, IndexError:
         return _outcome(
             "unknown",

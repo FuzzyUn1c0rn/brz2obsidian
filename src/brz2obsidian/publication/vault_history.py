@@ -1691,11 +1691,15 @@ def _locator_at_owned_tip(root, git, locator, trusted_association):
     if tip == locator.commit and names == {"locator.json"}:
         return locator
     if trusted_association is None:
+        from .collection_result_locator import locator_after_scoped_result
         from .unpublished_collection import locator_after_unpublished_preparation
 
         advanced = locator_after_unpublished_preparation(root, git, locator, tip, names)
         if advanced is not None:
             return advanced
+        result_locator = locator_after_scoped_result(root, git, locator, tip, names)
+        if result_locator is not None:
+            return result_locator
     raise OSError("Owned checkpoint root or locator metadata changed")
 
 
@@ -4598,8 +4602,6 @@ def _publish_locator(root, git, association, manifest, writes):
     if git.call("rev-parse", "--verify", writes.ref).decode().strip() != writes.commit:
         raise OSError("Owned checkpoint ref did not retain its commit")
     writes.retained = True
-    metadata_dir = root / ".brz2obsidian"
-    metadata_dir.mkdir(exist_ok=True)
     locator = CheckpointLocator(
         schema_id="brz2obsidian.checkpoint-locator",
         schema_version=1,
@@ -4607,13 +4609,22 @@ def _publish_locator(root, git, association, manifest, writes):
         generation=generation,
         commit=writes.commit,
     )
+    _persist_checkpoint_locator(root, locator)
+    return locator
+
+
+def _persist_checkpoint_locator(root, locator, *, replace_pending=False):
+    metadata_dir = root / ".brz2obsidian"
+    metadata_dir.mkdir(exist_ok=True)
     temporary = metadata_dir / "locator.pending"
+    if replace_pending and os.path.lexists(temporary):
+        observe_file(root, temporary, prefix_limit=0)
+        temporary.unlink()
     with temporary.open("xb") as output:
         output.write(locator.model_dump_json().encode())
         output.flush()
         os.fsync(output.fileno())
     os.replace(temporary, metadata_dir / "locator.json")
-    return locator
 
 
 def _publish_capture_locator(request, base, manifest, writes):
@@ -4766,12 +4777,14 @@ def _discard_under_lease(root, operation, expected_commit, writes):
         discarded_review=locator.commit,
         collection_record_path=prior.collection_record_path,
     )
-    manifest = prior.model_copy(
-        update={
+    manifest = CheckpointManifest.model_validate(
+        prior.model_dump()
+        | {
             "generation": locator.generation + 1,
             "previous": locator.commit,
             "discarded_review": locator.commit,
             "collection_baseline_commit": None,
+            "abandoned_collection_preparation": None,
             "preimage": prior.vault,
             "proposed": (),
             "observed_source": None,

@@ -144,6 +144,30 @@ def _choose_undo(operations, vault, undo, keep_path):
     return undo
 
 
+def _choose_recovery(operations, vault, offered):
+    while offered.review.requirements:
+        review = offered.review
+        requirement = review.requirements[0]
+        change = next(
+            row
+            for row in review.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        offered = operations.resolve_recovery(
+            vault,
+            offered,
+            action(
+                review,
+                change,
+                domain=requirement.domain,
+                choice="reverse" if requirement.domain == "reversal" else "current",
+                decision_id="recover:" + change.change_id,
+            ),
+        )
+        assert offered.status == "offered", offered
+    return offered
+
+
 def test_first_import_undo_keeps_later_bytes_and_blocks_duplicate_identity():
     vault = _vault(established=False)
     before = _user_git(vault)
@@ -222,26 +246,7 @@ def test_interrupted_second_import_resolves_without_changing_first_collection(
     operations = Operations()
     offered_recovery = operations.prepare_recovery(vault, direction=direction)
     assert offered_recovery.status == "offered", offered_recovery
-    while offered_recovery.review.requirements:
-        review = offered_recovery.review
-        requirement = review.requirements[0]
-        change = next(
-            row
-            for row in review.proposal.changes
-            if row.change_id == requirement.change_id
-        )
-        offered_recovery = operations.resolve_recovery(
-            vault,
-            offered_recovery,
-            action(
-                review,
-                change,
-                domain=requirement.domain,
-                choice="reverse" if requirement.domain == "reversal" else "current",
-                decision_id="recover:" + change.change_id,
-            ),
-        )
-        assert offered_recovery.status == "offered", offered_recovery
+    offered_recovery = _choose_recovery(operations, vault, offered_recovery)
     recovered = operations.execute_recovery(vault, offered_recovery)
     if direction == "finish":
         assert recovered.status == "applied", recovered
@@ -315,11 +320,25 @@ def test_alternating_updates_use_each_exact_baseline_and_keep_the_moved_location
         "Assets/protected.bin": "brain-a",
         "Imports/Brain B/Assets/protected.bin": "brain-b",
     }
-    assert Operations().prepare_undo(vault).status == "offered"
+    fresh = Operations()
+    undo = fresh.prepare_undo(vault)
+    assert undo.status == "offered", undo
+    assert undo.target_receipt_commit == applied.application.receipt_commit
+    reversal = next(row for row in undo.review.facts.subjects if row.path == moved_path)
+    assert reversal.baseline.content.data == original_b
+    assert reversal.incoming.data == original_b
+    assert undo.review.ready, (undo.review.blockers, undo.review.requirements)
+    undone = fresh.execute_undo(vault, undo)
+    assert undone.status == "undone", undone
+    assert (vault / moved_path).read_bytes() == original_b
+    assert not (vault / path_b).exists()
+    assert _source_note(vault, "brain-b", path_b).chunks[0].data == original_b
+    assert (vault / "Opening.md").read_bytes() == expected_a
+    assert _source_note(vault, "brain-a", "Opening.md").chunks[0].data == expected_a
     assert _user_git(vault) == before
 
 
-_PREPARED_REF_EXIT = """
+_CHECKPOINT_REF_EXIT = """
 import os
 import sys
 from pathlib import Path
@@ -329,7 +348,7 @@ from brz2obsidian.publication import vault_history
 
 publish = vault_history._publish_locator
 def stop_after_ref(root, git, association, manifest, writes):
-    if manifest.collection_preparation_owner is not None:
+    if manifest.boundary == sys.argv[2]:
         git.call('update-ref', writes.ref, writes.commit, manifest.previous)
         os._exit(81)
     return publish(root, git, association, manifest, writes)
@@ -341,9 +360,45 @@ print(result.model_dump_json(), flush=True)
 """
 
 
-@pytest.mark.parametrize("boundary", ["prepared", "ref_before_locator"])
+_RESTORE_BOUNDARY_EXIT = """
+import os
+import sys
+from brz2obsidian.application.operations import Operations
+from brz2obsidian.publication import unpublished_collection
+
+vault, boundary = sys.argv[1:]
+publish = unpublished_collection._publish_locator
+def interrupt(root, git, association, manifest, writes):
+    assert manifest.abandoned_collection_preparation
+    if boundary == "before_ref":
+        os._exit(82)
+    if boundary == "before_locator":
+        git.call("update-ref", writes.ref, writes.commit, manifest.previous)
+        os._exit(82)
+    assert boundary == "after_locator"
+    publish(root, git, association, manifest, writes)
+    os._exit(82)
+
+unpublished_collection._publish_locator = interrupt
+ops = Operations()
+offer = ops.prepare_recovery(vault, direction="restore")
+assert offer.code == "unpublished_collection_prepared", offer
+result = ops.execute_recovery(vault, offer)
+print(result.model_dump_json(), flush=True)
+"""
+
+
+@pytest.mark.parametrize(
+    ("boundary", "restore_boundary"),
+    [
+        ("prepared", "before_ref"),
+        ("prepared", "before_locator"),
+        ("ref_before_locator", "before_locator"),
+        ("prepared", "after_locator"),
+    ],
+)
 def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
-    monkeypatch, boundary
+    monkeypatch, boundary, restore_boundary
 ):
     from brz2obsidian.publication import vault_apply
 
@@ -369,7 +424,7 @@ def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
         plan = vault.parent / "collection-preparation.json"
         plan.write_text(review.preparation.model_dump_json(), encoding="utf-8")
         process = subprocess.run(
-            [sys.executable, "-c", _PREPARED_REF_EXIT, str(plan)],
+            [sys.executable, "-c", _CHECKPOINT_REF_EXIT, str(plan), "prepared"],
             capture_output=True,
             check=False,
             timeout=120,
@@ -399,9 +454,29 @@ def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
     offered = fresh.prepare_recovery(vault, direction="restore")
     assert offered.status == "cleanup", offered
     assert offered.unpublished_checkpoint and offered.intent_commit is None
-    recovered = fresh.execute_recovery(vault, offered)
+    process = subprocess.run(
+        [sys.executable, "-c", _RESTORE_BOUNDARY_EXIT, str(vault), restore_boundary],
+        capture_output=True,
+        check=False,
+        timeout=150,
+    )
+    assert process.returncode == 82, (process.stdout, process.stderr)
+    restarted = Operations()
+    next_offer = restarted.prepare_recovery(vault, direction="restore")
+    expected_code = (
+        "unpublished_collection_prepared"
+        if restore_boundary == "before_ref"
+        else "restored_collection_locator_pending"
+    )
+    assert (next_offer.status, next_offer.code) == ("cleanup", expected_code), (
+        next_offer
+    )
+    assert next_offer.operation_id == offered.operation_id
+    recovered = restarted.execute_recovery(vault, next_offer)
     assert recovered.code == "saved_collection_review_restored", recovered
     assert not recovered.authored_files_changed and not recovered.recovery_required
+    if restore_boundary != "before_ref":
+        assert recovered.checkpoint_commit == next_offer.unpublished_checkpoint
     resumed = fresh.resume_update(vault)
     assert resumed.code == "resumed", resumed
     assert resumed.operation_id == review.operation_id
@@ -415,4 +490,49 @@ def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
     assert discarded.code == "saved_review_discarded", discarded
     undo = fresh.prepare_undo(vault)
     assert undo.target_receipt_commit == completed.application.receipt_commit
+    assert _user_git(vault) == before
+
+
+def test_published_result_ref_recovers_before_locator_and_receipt():
+    vault = _vault(established=True)
+    before = _user_git(vault)
+    original_a = (vault / "Opening.md").read_bytes()
+    source_b = vault.parent / "brain-b"
+    path_b, record_b, bytes_b, _ = _payload(
+        source_b, "brain-b", scoped=True, body=b"Published B.\r\n"
+    )
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, source_b, record_path=record_b
+    )
+    assert offered.ready, offered
+    plan = vault.parent / "collection-preparation.json"
+    plan.write_text(offered.preparation.model_dump_json(), encoding="utf-8")
+    stopped = subprocess.run(
+        [sys.executable, "-c", _CHECKPOINT_REF_EXIT, str(plan), "result"],
+        capture_output=True,
+        check=False,
+        timeout=150,
+    )
+    assert stopped.returncode == 81, (stopped.stdout, stopped.stderr)
+    assert (vault / path_b).read_bytes() == bytes_b
+    fresh = Operations()
+    reseal = fresh.prepare_recovery(vault)
+    assert (reseal.status, reseal.code) == ("cleanup", "scoped_result_locator_pending")
+    assert reseal.intent_commit and reseal.result_locator_checkpoint
+    result_commit = fresh.read_checkpoint(vault).locator.commit
+    assert result_commit == reseal.result_locator_checkpoint
+    resealed = fresh.execute_recovery(vault, reseal)
+    assert resealed.code == "scoped_result_locator_resealed", resealed
+    assert resealed.recovery_required
+    assert fresh.read_checkpoint(vault).locator.commit == result_commit
+    recovery = fresh.prepare_recovery(vault, direction="finish")
+    assert recovery.status == "offered", recovery
+    recovered = fresh.execute_recovery(vault, _choose_recovery(fresh, vault, recovery))
+    assert recovered.status == "applied", recovered
+    assert recovered.published_files == 0
+    assert (vault / path_b).read_bytes() == bytes_b
+    assert (vault / "Opening.md").read_bytes() == original_a
+    assert _source_note(vault, "brain-a", "Opening.md").chunks[0].data == original_a
+    assert _source_note(vault, "brain-b", path_b).chunks[0].data == bytes_b
     assert _user_git(vault) == before
