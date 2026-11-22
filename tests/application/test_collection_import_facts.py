@@ -1397,3 +1397,104 @@ def test_first_import_observes_without_retaining_an_unrelated_ignored_note():
     }
     assert private.read_bytes() == authored
     assert not (vault / path).exists()
+
+
+def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes():
+    from brz2obsidian.publication.collection_placement import (
+        prove_ignored_reversal_documents,
+    )
+    from brz2obsidian.publication.vault_recovery import _unobserved_recovery_targets
+
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    _stage_placement(stage, path, record_path, note, record)
+    (vault / ".gitignore").write_bytes(b"Private/\n")
+    (vault / "Author.md").write_bytes(
+        b"[Existing image](Private/retained.png)\r\n"
+        b"[[Private/Reference#Heading|Existing section]]\r\n"
+        b"[[Private/Warning#Never existed]]\r\n"
+    )
+    ignored = {
+        "Private/retained.png": b"\x00\xff\x80 unique excluded bytes",
+        "Private/Reference.md": b"# Heading\r\n\r\nOther authored bytes.\r\n",
+        "Private/Warning.md": b"# A different heading\r\n",
+    }
+    for relative, content in ignored.items():
+        target = vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert offered.ready, offered.code
+    preserved = {
+        row.after.path
+        for row in offered.import_link_impact.observations
+        if row.kind == "preserved"
+    }
+    assert preserved == {"Private/Reference.md", "Private/retained.png"}
+    assert any(
+        row.kind == "preexisting_warning"
+        and row.before == row.after
+        and row.after.status == "fragment_missing"
+        for row in offered.import_link_impact.observations
+    )
+    context = offered.preparation.review.facts.link_context
+    expected_digests = {
+        relative: hashlib.sha256(content).hexdigest()
+        for relative, content in ignored.items()
+    }
+    assert dict(context.import_passive_targets) == expected_digests
+    states = {row.target_id for row in context.current_target_facts}
+    ignored_ids = {
+        row.target_id
+        for row in context.current_targets
+        if row.canonical_path in ignored
+    }
+    assert not ignored_ids & states
+    saved = operations.save_update(offered.preparation)
+    assert saved.code == "saved", saved.code
+    checkpoint = operations.read_checkpoint(vault)
+    manifest = checkpoint.manifest
+    retained = (
+        manifest.vault
+        + manifest.preimage
+        + manifest.proposed
+        + manifest.review_content
+        + manifest.source
+    )
+    assert not set(ignored) & {row.path for row in retained}
+    assert not set(expected_digests.values()) & {row.sha256 for row in retained}
+    resumed = Operations().resume_update(vault)
+    assert resumed.ready
+    facts = resumed.preparation.review.facts
+    admission = operations.inspect_history(vault).admission
+    inventory = {row.path: row for row in admission.inventory}
+    _, _, passive = _unobserved_recovery_targets(
+        facts, admission, inventory, facts.identity_inventory
+    )
+    assert passive == ignored_ids
+    ignored_note = "Private/Reference.md"
+    assert prove_ignored_reversal_documents(admission, (path,), {}) == {
+        ignored_note,
+        "Private/Warning.md",
+    }
+    assert {
+        relative: (vault / relative).read_bytes() for relative in ignored
+    } == ignored
+    assert not (vault / path).exists()
+
+    produced = vault / path
+    produced.parent.mkdir(parents=True, exist_ok=True)
+    produced.write_bytes(note)
+    (vault / ignored_note).write_bytes(ignored[ignored_note] + f"[[{path}]]\n".encode())
+    refreshed = operations.inspect_history(vault).admission
+    with pytest.raises(OSError, match="depends on a recovery output"):
+        prove_ignored_reversal_documents(refreshed, (path,), {})
+    with pytest.raises(OSError, match="Passive import link target changed"):
+        _unobserved_recovery_targets(
+            facts,
+            refreshed,
+            {row.path: row for row in refreshed.inventory},
+            facts.identity_inventory,
+        )

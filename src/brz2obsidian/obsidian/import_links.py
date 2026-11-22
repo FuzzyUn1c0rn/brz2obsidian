@@ -229,6 +229,44 @@ def _may_reach_import(document, incoming, property_values):
     )
 
 
+def import_links_depend_on(existing, authored_paths, affected_paths):
+    """Identify authored dependencies on any of a set of possible changes."""
+    affected = set(affected_paths)
+    if not affected:
+        return False
+    documents = tuple(
+        _authored_documents(
+            {path: existing[path] for path in authored_paths},
+            _catalog(existing, (), ()),
+        )
+    )
+    property_values = base_note_property_values(
+        existing,
+        {
+            name
+            for document in documents
+            if isinstance(document, BaseDocument)
+            for name in document.uncertain_properties
+        },
+    )
+    remaining = _catalog(
+        {path: content for path, content in existing.items() if path not in affected},
+        (),
+        (),
+    )
+    return any(
+        _may_reach_import(document, affected, property_values)
+        or any(
+            occurrence.meaning.path in affected
+            or affected.intersection(occurrence.meaning.candidates)
+            or occurrence.meaning
+            != resolve_occurrence(occurrence, *remaining, "complete")
+            for occurrence in document.occurrences
+        )
+        for document in documents
+    )
+
+
 def _path_conflicts(existing, incoming):
     before = {_key(path) for path in existing}
     after = {_key(path) for path in incoming}

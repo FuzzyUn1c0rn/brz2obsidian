@@ -385,11 +385,33 @@ def _observed_documents_bound(context, identity_inventory):
     return True
 
 
-def _observed_target_bound(target, states, identity_inventory):
+def passive_import_target(context, target):
+    path = target.canonical_path
+    return (
+        target.kind in ("note", "resource")
+        and target.identity is None
+        and path is not None
+        and target.target_id == f"physical:{path}"
+        and target.representations == (path,)
+        and any(path == candidate for candidate, _ in context.import_passive_targets)
+    )
+
+
+def _observed_target_bound(target, states, facts):
     entries = tuple(
-        e for e in identity_inventory if e.current.path == target.canonical_path
+        e for e in facts.identity_inventory if e.current.path == target.canonical_path
     )
     matching = tuple(s for s in states if s.target_id == target.target_id)
+    if (
+        not matching
+        and not entries
+        and passive_import_target(facts.link_context, target)
+        and (
+            facts.format_operation.kind == "collection_import"
+            or any(subject.operation_reversal is not None for subject in facts.subjects)
+        )
+    ):
+        return True
     if len(matching) != 1:
         return False
     (state,) = matching
@@ -448,9 +470,7 @@ def current_observation_problem(facts):
         context.inventory,
     )
     for target in targets:
-        if target.kind != "tag" and not _observed_target_bound(
-            target, states, facts.identity_inventory
-        ):
+        if target.kind != "tag" and not _observed_target_bound(target, states, facts):
             return "current_link_context_unbound"
     return None
 

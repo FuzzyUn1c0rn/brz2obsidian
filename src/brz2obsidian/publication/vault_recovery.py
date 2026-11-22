@@ -319,6 +319,7 @@ def _unobserved_recovery_targets(
     from brz2obsidian.core.review_links import (
         current_lookup_coverage,
         current_observation_problem,
+        passive_import_target,
     )
 
     target_by_id = {target.target_id: target for target in context.current_targets}
@@ -338,17 +339,28 @@ def _unobserved_recovery_targets(
         )
     ):
         raise OSError("Current recovery target lookup is incomplete")
+    passive = set()
+    passive_digests = dict(context.import_passive_targets)
     for target_id in unobserved:
         target = target_by_id[target_id]
         path = target.canonical_path
+        row = inventory.get(path)
+        preserved = (
+            passive_import_target(context, target)
+            and row is not None
+            and row.exclusion == "git_ignore"
+            and passive_digests[path] == row.sha256
+        )
+        if path in passive_digests and not preserved:
+            raise OSError("Passive import link target changed")
         if (
-            target.kind != "resource"
+            path is None
+            or not preserved
+            and (target.kind != "resource" or path.casefold().endswith(".md"))
             or target.identity is not None
-            or path is None
             or not _safe_relative(path)
             or target.representations != (path,)
-            or path.casefold().endswith(".md")
-            or path not in inventory
+            or row is None
             or any(entry.current.path == path for entry in identity_inventory)
             or any(
                 d.source_path == path
@@ -363,7 +375,9 @@ def _unobserved_recovery_targets(
                 "Unobserved recovery resource is not bounded physical metadata"
             )
         validate_targets((target,))
-    return unobserved, state_by_id
+        if preserved:
+            passive.add(target_id)
+    return unobserved, state_by_id, passive
 
 
 def _observed_recovery_target_facts(
@@ -633,7 +647,7 @@ def _refresh_recovery_link_context(
     _owner,
 ):
     context = original_facts.link_context
-    unobserved, state_by_id = _unobserved_recovery_targets(
+    unobserved, state_by_id, passive = _unobserved_recovery_targets(
         original_facts, admission, inventory, identity_inventory
     )
     target_facts = _observed_recovery_target_facts(
@@ -670,6 +684,11 @@ def _refresh_recovery_link_context(
         if (selected_removal or row.path in operation_owned_notes)
         and (row.path.casefold().endswith(".md") or row.path in owned_records)
         and row.path not in known_document_paths
+        and not (
+            original_facts.format_operation.kind == "collection_import"
+            and row.exclusion == "git_ignore"
+            and row.path not in current
+        )
     ):
         observed_document = current[path]
         if observed_document.content is None:
@@ -796,7 +815,7 @@ def _refresh_recovery_link_context(
             "incoming_documents": tuple(incoming_documents),
         }
     )
-    return context, unobserved
+    return context, unobserved - passive
 
 
 def _recovery_subject_current(
@@ -1049,10 +1068,17 @@ def _review_observation(
         if selected_removal:
             # Every present authored note can own an inbound link to a target
             # selected for removal, including notes added after the stop.
+            ignored = set()
+            if original.facts.format_operation.kind == "collection_import":
+                from .collection_placement import prove_ignored_reversal_documents
+
+                ignored = prove_ignored_reversal_documents(
+                    admission, intent.affected_paths, selected_files
+                )
             paths.update(
                 row.path
                 for row in admission.inventory
-                if row.path.casefold().endswith(".md")
+                if row.path.casefold().endswith(".md") and row.path not in ignored
             )
     _require_recovery_tracking_consent(
         original, query_plan, query_subjects, retained, admission, paths, inventory

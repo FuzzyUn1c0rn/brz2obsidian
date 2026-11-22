@@ -323,9 +323,14 @@ def _required_observation_paths(facts, inventory, managed, *, _owner):
         if expanded == related:
             break
         related = expanded
-    if facts.format_operation.kind == "collection_import":
-        related.update(_authored_observation_targets(context, inventory))
     needed = {targets[key].canonical_path for key in related if key in targets}
+    if facts.format_operation.kind == "collection_import":
+        excluded = {row.path for row in inventory if row.excluded}
+        needed.update(
+            targets[key].canonical_path
+            for key in _authored_observation_targets(context, inventory)
+            if key in targets and targets[key].canonical_path not in excluded
+        )
     return needed
 
 

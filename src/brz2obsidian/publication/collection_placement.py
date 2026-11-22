@@ -16,7 +16,10 @@ from brz2obsidian.contracts import (
     MigrationRefused,
 )
 from brz2obsidian.core.import_placement import validate_import_location
-from brz2obsidian.obsidian.import_links import inspect_import_links
+from brz2obsidian.obsidian.import_links import (
+    import_links_depend_on,
+    inspect_import_links,
+)
 
 from .git_payload import verify_blobs
 from .vault_admission import _safe_relative, _walk
@@ -182,6 +185,27 @@ def observe_collection_placement(
     )
 
 
+def passive_import_targets(admission, impact):
+    """Bind preserved Git-ignored targets without keeping their file contents."""
+    observed = {
+        (row.path, row.sha256)
+        for row in admission.inventory
+        if row.exclusion == "git_ignore"
+    }
+    return tuple(
+        sorted(
+            observed
+            & {
+                (row.after.path, row.after.target_version)
+                for row in impact.observations
+                if row.before == row.after
+                and row.after.status
+                in ("resolved", "fragment_missing", "fragment_ambiguous")
+            }
+        )
+    )
+
+
 def reviewed_connections(review):
     context = review.producer_facts.link_context
     return context.import_link_connections if context is not None else ()
@@ -218,6 +242,10 @@ def collection_write_refusal(
     if not impact.safe:
         return impact.blockers[0]
     context = review.producer_facts.link_context
+    if context is not None and context.import_passive_targets != passive_import_targets(
+        admission, impact
+    ):
+        return "import_link_meanings_changed"
     if context is not None and context.import_unrelated_documents:
         observed = {
             (row.path, row.sha256)
@@ -227,6 +255,22 @@ def collection_write_refusal(
         if not set(context.import_unrelated_documents) <= observed:
             return "import_link_meanings_changed"
     return None
+
+
+def prove_ignored_reversal_documents(admission, affected_paths, selected):
+    """Keep unmodified ignored notes outside retention after checking their inbound links."""
+    ignored = {
+        row.path
+        for row in admission.inventory
+        if row.exclusion == "git_ignore"
+        and row.path.casefold().endswith(".md")
+        and row.path not in affected_paths
+    }
+    if ignored and import_links_depend_on(
+        existing_files(admission), ignored, set(affected_paths) | set(selected)
+    ):
+        raise OSError("Ignored authored note depends on a recovery output")
+    return ignored
 
 
 class ImportRecoveryLinkChange(ValueError):

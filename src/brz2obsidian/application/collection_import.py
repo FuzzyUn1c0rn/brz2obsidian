@@ -17,6 +17,7 @@ from brz2obsidian.core import prepare_review, refresh_review, validate_review
 from brz2obsidian.publication.collection_placement import (
     collection_connection_choices,
     observe_collection_placement,
+    passive_import_targets,
     read_rendered_collection,
 )
 from brz2obsidian.publication.vault_history import _Git, _read, collection_baselines
@@ -115,7 +116,7 @@ def _collection_facts(
     )
 
 
-def _bind_placement(facts, impact, choices):
+def _bind_placement(facts, admission, impact, choices):
     if impact is None:
         return facts
     context = facts.link_context
@@ -132,6 +133,7 @@ def _bind_placement(facts, impact, choices):
                 update={
                     "import_link_connections": choices,
                     "import_unrelated_documents": warnings,
+                    "import_passive_targets": passive_import_targets(admission, impact),
                 }
             )
         }
@@ -238,7 +240,7 @@ def prepare_collection_import(
         )
         if impact is not None and not impact.safe:
             return _placement_refused(history, impact)
-        facts = _bind_placement(facts, impact, choices)
+        facts = _bind_placement(facts, history.admission, impact, choices)
         history = _scoped(operations, history, facts)
         review = prepare_review(facts, preflight=history.admission.preflight)
         binding = _bind_payload(operations, source, review, incoming)
@@ -340,7 +342,9 @@ def _observe_review(operations, preparation, *, replacement=None):
     )
     if impact is not None and not impact.safe:
         return history, _placement_refused(history, impact, current=True)
-    facts = _bind_placement(facts, impact, prepared.import_link_connections)
+    facts = _bind_placement(
+        facts, history.admission, impact, prepared.import_link_connections
+    )
     history = _scope_review(operations, history, facts, plan)
     changed = (
         facts != plan.producer_facts or history.admission.preflight != plan.preflight
