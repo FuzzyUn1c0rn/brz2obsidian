@@ -59,14 +59,28 @@ def _observation(result, display):
 
 
 def test_rendered_collection_fixture_offers_a_publishable_review(tmp_path):
+    from types import SimpleNamespace
+
+    from brz2obsidian.contracts import CurrentContent
+    from brz2obsidian.publication.vault_recovery import _refresh_recovery_link_context
+
     archive, _ = _incoming_archive(tmp_path / "independent.brz")
     operations = Operations()
     inspected = operations.inspect(archive)
     assert inspected.outcome in ("clean", "warnings"), inspected.findings
     vault = _vault(established=False)
-    _write(vault, "Journal/Author.md", DRAFT_LINKS)
+    _write(vault, ".gitignore", b"Private/\n")
+    _write(
+        vault,
+        "Journal/Author.md",
+        DRAFT_LINKS
+        + b"[[../Private/Reference#Heading|Private heading]]\r\n"
+        + b"![Private image](../Private/private.png)\r\n",
+    )
     _write(vault, "Old/Twin.md", b"# Old heading\n\nExisting body ^old-block\n")
     _write(vault, "Old/Existing.png", images()[1])
+    _write(vault, "Private/Reference.md", b"# Heading\n\nPrivate content.\n")
+    _write(vault, "Private/private.png", images()[1])
     preview = operations.prepare_collection_import_from_source(
         vault,
         archive,
@@ -82,8 +96,16 @@ def test_rendered_collection_fixture_offers_a_publishable_review(tmp_path):
         import_location=LOCATION,
         connections=(choice,),
     )
+    assert offered.ready, (offered.code, offered.findings)
     assert _observation(offered, "Reviewed connection").kind == "approved_connection"
-    assert offered.ready, offered.findings
+    for display, path in (
+        ("Private heading", "Private/Reference.md"),
+        ("Private image", "Private/private.png"),
+    ):
+        link = _observation(offered, display)
+        assert link.kind == "preserved"
+        assert link.before == link.after
+        assert link.after.path == path
     selected = select_review_effects(offered.preparation.review)
     stage = tmp_path / "review"
     assert {row.path: row.content.data for row in selected.files} == {
@@ -93,6 +115,36 @@ def test_rendered_collection_fixture_offers_a_publishable_review(tmp_path):
     }
     assert not selected.remove_paths
     assert not (vault / LOCATION).exists()
+
+    base_path = f"{LOCATION}/Templates/Bases/Categories.base"
+    base = next(row.content for row in selected.files if row.path == base_path)
+    _write(vault, base_path, base.data)
+    observed = operations.inspect_history(vault).admission
+    inventory = {row.path: row for row in observed.inventory}
+    facts = offered.preparation.review.facts
+    identities = list(facts.identity_inventory)
+    current = {row.current.path: row.current for row in identities}
+    current[base_path] = CurrentContent(
+        path=base_path, existence="present", content=base
+    )
+    context, _ = _refresh_recovery_link_context(
+        facts,
+        observed,
+        inventory,
+        identities,
+        current,
+        SimpleNamespace(affected_paths=(base_path,)),
+        {base_path: base},
+        {base_path: inventory[base_path]},
+        selected_removal=False,
+        direction="restore",
+        _owner=None,
+    )
+    (observed_base,) = (
+        d for d in context.current_documents if d.source_path == base_path
+    )
+    assert observed_base.content == base
+    assert observed_base.status == "supported"
 
 
 def test_rendered_collection_import_keeps_authored_links_and_revalidates_connection(

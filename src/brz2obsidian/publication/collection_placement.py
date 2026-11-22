@@ -187,21 +187,24 @@ def observe_collection_placement(
 
 def passive_import_targets(admission, impact):
     """Bind preserved Git-ignored targets without keeping their file contents."""
-    observed = {
-        (row.path, row.sha256)
-        for row in admission.inventory
-        if row.exclusion == "git_ignore"
+    exact = {
+        (row.after.path, row.after.target_version)
+        for row in impact.observations
+        if row.before == row.after
+        and row.after.status in ("resolved", "fragment_missing", "fragment_ambiguous")
+    }
+    alternatives = {
+        path
+        for row in impact.observations
+        if row.before == row.after and row.after.status == "ambiguous"
+        for path in row.after.candidates
     }
     return tuple(
         sorted(
-            observed
-            & {
-                (row.after.path, row.after.target_version)
-                for row in impact.observations
-                if row.before == row.after
-                and row.after.status
-                in ("resolved", "fragment_missing", "fragment_ambiguous")
-            }
+            (row.path, row.sha256)
+            for row in admission.inventory
+            if row.exclusion == "git_ignore"
+            and ((row.path, row.sha256) in exact or row.path in alternatives)
         )
     )
 

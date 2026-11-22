@@ -311,7 +311,7 @@ def _observe_recovery_bytes(root, paths, inventory, *, _owner):
 
 
 def _unobserved_recovery_targets(
-    original_facts, admission, inventory, identity_inventory
+    original_facts, admission, inventory, identity_inventory, *, operation_paths
 ):
     context = original_facts.link_context
     from brz2obsidian.core.identity import _paths_collide
@@ -339,23 +339,31 @@ def _unobserved_recovery_targets(
         )
     ):
         raise OSError("Current recovery target lookup is incomplete")
-    passive = set()
-    passive_digests = dict(context.import_passive_targets)
+    passive = {}
+    retained_passive_paths = dict(context.import_passive_targets)
+    scoped_import = original_facts.format_operation.kind == "collection_import" or bool(
+        retained_passive_paths
+    )
     for target_id in unobserved:
         target = target_by_id[target_id]
         path = target.canonical_path
         row = inventory.get(path)
-        preserved = (
-            passive_import_target(context, target)
+        ignored_observation = (
+            scoped_import
+            and path is not None
+            and target.target_id == f"physical:{path}"
             and row is not None
             and row.exclusion == "git_ignore"
-            and passive_digests[path] == row.sha256
+            and not any(_paths_collide(path, affected) for affected in operation_paths)
         )
-        if path in passive_digests and not preserved:
-            raise OSError("Passive import link target changed")
+        preserved = ignored_observation and passive_import_target(context, target)
+        if path in retained_passive_paths and not preserved:
+            raise OSError(
+                "Passive import link target is no longer outside recovery effects"
+            )
         if (
             path is None
-            or not preserved
+            or not ignored_observation
             and (target.kind != "resource" or path.casefold().endswith(".md"))
             or target.identity is not None
             or not _safe_relative(path)
@@ -376,7 +384,7 @@ def _unobserved_recovery_targets(
             )
         validate_targets((target,))
         if preserved:
-            passive.add(target_id)
+            passive[target_id] = (path, row.sha256)
     return unobserved, state_by_id, passive
 
 
@@ -648,7 +656,11 @@ def _refresh_recovery_link_context(
 ):
     context = original_facts.link_context
     unobserved, state_by_id, passive = _unobserved_recovery_targets(
-        original_facts, admission, inventory, identity_inventory
+        original_facts,
+        admission,
+        inventory,
+        identity_inventory,
+        operation_paths=set(intent.affected_paths) | set(selected_files),
     )
     target_facts = _observed_recovery_target_facts(
         original_facts, current, unobserved, state_by_id, _owner=_owner
@@ -671,18 +683,22 @@ def _refresh_recovery_link_context(
     }
     from brz2obsidian.obsidian_dialect import is_migration_record_path
 
-    owned_records = {
-        subject.path
-        for subject in original_facts.subjects
-        if subject.path in operation_owned_notes
-        and subject.item_id == "support:" + subject.path
-        and is_migration_record_path(subject.path)
-    }
+    owned_documents = (
+        operation_owned_notes
+        if original_facts.format_operation.kind == "collection_import"
+        else {
+            subject.path
+            for subject in original_facts.subjects
+            if subject.path in operation_owned_notes
+            and subject.item_id == "support:" + subject.path
+            and is_migration_record_path(subject.path)
+        }
+    )
     for path in sorted(
         row.path
         for row in admission.inventory
         if (selected_removal or row.path in operation_owned_notes)
-        and (row.path.casefold().endswith(".md") or row.path in owned_records)
+        and (row.path.casefold().endswith(".md") or row.path in owned_documents)
         and row.path not in known_document_paths
         and not (
             original_facts.format_operation.kind == "collection_import"
@@ -805,6 +821,7 @@ def _refresh_recovery_link_context(
             "current_target_facts": lookup_states,
             "incoming_target_facts": tuple(incoming_target_facts),
             "current_documents": tuple(documents),
+            "import_passive_targets": tuple(sorted(passive.values())),
             "import_finished_outputs": _completed_import_outputs(
                 original_facts,
                 current,
@@ -815,7 +832,7 @@ def _refresh_recovery_link_context(
             "incoming_documents": tuple(incoming_documents),
         }
     )
-    return context, unobserved - passive
+    return context, unobserved - passive.keys()
 
 
 def _recovery_subject_current(

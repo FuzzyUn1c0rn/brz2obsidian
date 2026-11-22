@@ -318,8 +318,20 @@ def _required_observation_paths(facts, inventory, managed, *, _owner):
             for other in prospective
         ):
             related.add(target_id)
+    passive_targets = set()
+    if facts.format_operation.kind == "collection_import":
+        passive_targets = {
+            by_path[row.path]
+            for row in inventory
+            if row.exclusion == "git_ignore" and row.path in by_path
+        }
     while True:
-        expanded = related | {other for key in related for other in graph.get(key, ())}
+        expanded = related | {
+            other
+            for key in related
+            for other in graph.get(key, ())
+            if other not in passive_targets
+        }
         if expanded == related:
             break
         related = expanded

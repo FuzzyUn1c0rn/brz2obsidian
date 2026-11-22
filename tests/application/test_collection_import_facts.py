@@ -1258,6 +1258,47 @@ def test_public_collection_review_preserves_relative_links_and_binds_one_connect
     assert (vault / "Journal/Author.md").read_bytes() == authored
 
 
+def test_approved_collection_connection_preserves_ignored_link_candidates():
+    from brz2obsidian.obsidian.import_links import inspect_import_links
+
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    (vault / ".gitignore").write_bytes(b"Private/\n")
+    existing = {
+        "Journal/Author.md": (
+            f"[[{path}|Review connection]]\r\n"
+            "[[Twin|Existing ambiguous link]]\r\n"
+            "[[../Private/Reference#Heading|Existing section]]\r\n"
+            "![Existing image](../Private/retained.png)\r\n"
+        ).encode(),
+        "Public/Twin.md": b"# Public Twin\n",
+        "Private/Twin.md": b"# Private Twin\n",
+        "Private/Reference.md": b"# Heading\n",
+        "Private/retained.png": b"\x00\xff\x80",
+    }
+    for relative, raw in existing.items():
+        target = vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    preview = inspect_import_links(existing, {path: note})
+    (choice,) = tuple(row.connection for row in preview.observations if row.connection)
+    record["import_link_connections"] = [choice.model_dump()]
+    _stage_placement(stage, path, record_path, note, record)
+
+    offered = Operations().prepare_collection_import(
+        vault, stage, record_path=record_path, connections=(choice,)
+    )
+    assert offered.ready, (offered.code, offered.findings)
+    ambiguous = next(
+        row
+        for row in offered.import_link_impact.observations
+        if row.before.display_text == "Existing ambiguous link"
+    )
+    assert ambiguous.kind == "preexisting_warning"
+    assert ambiguous.before == ambiguous.after
+    assert ambiguous.after.candidates == ("Private/Twin.md", "Public/Twin.md")
+    assert not (vault / path).exists()
+
+
 def test_public_collection_review_checks_empty_physical_parents():
     vault, stage, path, record_path, note, record = _placement_fixture()
     _stage_placement(stage, path, record_path, note, record)
@@ -1422,6 +1463,8 @@ def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes
         target = vault / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
+    unlinked = vault / "Private/Unrelated.md"
+    unlinked.write_bytes(b"Original unrelated note.\n")
     operations = Operations()
     offered = operations.prepare_collection_import(
         vault, stage, record_path=record_path
@@ -1471,30 +1514,50 @@ def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes
     admission = operations.inspect_history(vault).admission
     inventory = {row.path: row for row in admission.inventory}
     _, _, passive = _unobserved_recovery_targets(
-        facts, admission, inventory, facts.identity_inventory
+        facts, admission, inventory, facts.identity_inventory, operation_paths={path}
     )
-    assert passive == ignored_ids
+    assert passive.keys() == ignored_ids
     ignored_note = "Private/Reference.md"
     assert prove_ignored_reversal_documents(admission, (path,), {}) == {
         ignored_note,
         "Private/Warning.md",
+        "Private/Unrelated.md",
     }
     assert {
         relative: (vault / relative).read_bytes() for relative in ignored
     } == ignored
     assert not (vault / path).exists()
 
-    produced = vault / path
-    produced.parent.mkdir(parents=True, exist_ok=True)
-    produced.write_bytes(note)
-    (vault / ignored_note).write_bytes(ignored[ignored_note] + f"[[{path}]]\n".encode())
+    later = ignored[ignored_note] + b"Later unrelated private text.\n"
+    (vault / ignored_note).write_bytes(later)
+    unlinked.write_bytes(b"Later unlinked private note.\n")
     refreshed = operations.inspect_history(vault).admission
-    with pytest.raises(OSError, match="depends on a recovery output"):
-        prove_ignored_reversal_documents(refreshed, (path,), {})
-    with pytest.raises(OSError, match="Passive import link target changed"):
+    unobserved, _, passive = _unobserved_recovery_targets(
+        facts,
+        refreshed,
+        {row.path: row for row in refreshed.inventory},
+        facts.identity_inventory,
+        operation_paths={path},
+    )
+    assert passive.keys() == ignored_ids
+    assert dict(passive.values())[ignored_note] == hashlib.sha256(later).hexdigest()
+    assert (vault / ignored_note).read_bytes() == later
+    assert "physical:Private/Unrelated.md" in unobserved
+    assert "physical:Private/Unrelated.md" not in passive
+    assert unlinked.read_bytes() == b"Later unlinked private note.\n"
+    with pytest.raises(OSError, match="no longer outside recovery effects"):
         _unobserved_recovery_targets(
             facts,
             refreshed,
             {row.path: row for row in refreshed.inventory},
             facts.identity_inventory,
+            operation_paths={ignored_note},
         )
+
+    produced = vault / path
+    produced.parent.mkdir(parents=True, exist_ok=True)
+    produced.write_bytes(note)
+    (vault / ignored_note).write_bytes(later + f"[[{path}]]\n".encode())
+    refreshed = operations.inspect_history(vault).admission
+    with pytest.raises(OSError, match="depends on a recovery output"):
+        prove_ignored_reversal_documents(refreshed, (path,), {})
