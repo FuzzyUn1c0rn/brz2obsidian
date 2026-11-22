@@ -1258,21 +1258,24 @@ def test_public_collection_review_preserves_relative_links_and_binds_one_connect
     assert (vault / "Journal/Author.md").read_bytes() == authored
 
 
-def test_approved_collection_connection_preserves_ignored_link_candidates():
+@pytest.mark.parametrize("exclude", [False, True])
+def test_approved_collection_connection_preserves_ignored_link_candidates(exclude):
     from brz2obsidian.obsidian.import_links import inspect_import_links
 
     vault, stage, path, record_path, note, record = _placement_fixture()
-    (vault / ".gitignore").write_bytes(b"Private/\n")
+    (vault / ".gitignore").write_bytes(b"Private/\n" if exclude else b"Other/\n")
     existing = {
         "Journal/Author.md": (
             f"[[{path}|Review connection]]\r\n"
             "[[Twin|Existing ambiguous link]]\r\n"
             "[[../Private/Reference#Heading|Existing section]]\r\n"
+            "[[../Private/Old#Existing|Existing fragment warning]]\r\n"
             "![Existing image](../Private/retained.png)\r\n"
         ).encode(),
         "Public/Twin.md": b"# Public Twin\n",
         "Private/Twin.md": b"# Private Twin\n",
         "Private/Reference.md": b"# Heading\n",
+        "Private/Old.md": b"# Existing\n\n```\nUnrelated old prose\n",
         "Private/retained.png": b"\x00\xff\x80",
     }
     for relative, raw in existing.items():
@@ -1296,6 +1299,17 @@ def test_approved_collection_connection_preserves_ignored_link_candidates():
     assert ambiguous.kind == "preexisting_warning"
     assert ambiguous.before == ambiguous.after
     assert ambiguous.after.candidates == ("Private/Twin.md", "Public/Twin.md")
+    warning = next(
+        row
+        for row in offered.import_link_impact.observations
+        if row.before.display_text == "Existing fragment warning"
+    )
+    assert warning.kind == "preexisting_warning"
+    assert warning.before == warning.after
+    assert warning.after.status == "unknown"
+    assert warning.after.path == "Private/Old.md"
+    passive = dict(offered.preparation.review.facts.link_context.import_passive_targets)
+    assert ("Private/Old.md" in passive) == exclude
     assert not (vault / path).exists()
 
 
@@ -1441,10 +1455,15 @@ def test_first_import_observes_without_retaining_an_unrelated_ignored_note():
 
 
 def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes():
+    from types import SimpleNamespace
+
     from brz2obsidian.publication.collection_placement import (
         prove_ignored_reversal_documents,
     )
-    from brz2obsidian.publication.vault_recovery import _unobserved_recovery_targets
+    from brz2obsidian.publication.vault_recovery import (
+        _refresh_recovery_link_context,
+        _unobserved_recovery_targets,
+    )
 
     vault, stage, path, record_path, note, record = _placement_fixture()
     _stage_placement(stage, path, record_path, note, record)
@@ -1513,7 +1532,7 @@ def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes
     facts = resumed.preparation.review.facts
     admission = operations.inspect_history(vault).admission
     inventory = {row.path: row for row in admission.inventory}
-    _, _, passive = _unobserved_recovery_targets(
+    _, _, passive, _ = _unobserved_recovery_targets(
         facts, admission, inventory, facts.identity_inventory, operation_paths={path}
     )
     assert passive.keys() == ignored_ids
@@ -1532,7 +1551,7 @@ def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes
     (vault / ignored_note).write_bytes(later)
     unlinked.write_bytes(b"Later unlinked private note.\n")
     refreshed = operations.inspect_history(vault).admission
-    unobserved, _, passive = _unobserved_recovery_targets(
+    unobserved, _, passive, _ = _unobserved_recovery_targets(
         facts,
         refreshed,
         {row.path: row for row in refreshed.inventory},
@@ -1561,3 +1580,57 @@ def test_import_preserves_links_to_ignored_targets_without_retaining_their_bytes
     refreshed = operations.inspect_history(vault).admission
     with pytest.raises(OSError, match="depends on a recovery output"):
         prove_ignored_reversal_documents(refreshed, (path,), {})
+
+    produced.unlink()
+    (vault / ignored_note).write_bytes(later)
+    png = vault / "Private/retained.png"
+    png.unlink()
+    renamed = unlinked.with_name("Renamed.md")
+    unlinked.rename(renamed)
+    refreshed = operations.inspect_history(vault).admission
+    inventory = {row.path: row for row in refreshed.inventory}
+    identities = list(facts.identity_inventory)
+    context, unobserved = _refresh_recovery_link_context(
+        facts,
+        refreshed,
+        inventory,
+        identities,
+        {row.current.path: row.current for row in identities},
+        SimpleNamespace(affected_paths=(path,)),
+        {},
+        {},
+        selected_removal=False,
+        direction="restore",
+        _owner=None,
+    )
+    paths = {
+        row.canonical_path for row in context.current_targets + context.incoming_targets
+    }
+    assert not paths.intersection({"Private/retained.png", "Private/Unrelated.md"})
+    assert "physical:Private/retained.png" not in unobserved
+    assert "Private/retained.png" not in dict(context.import_passive_targets)
+    author = next(
+        row for row in context.current_documents if row.source_path == "Author.md"
+    )
+    image = next(
+        row.meaning
+        for row in author.occurrences
+        if row.meaning.display_text == "Existing image"
+    )
+    assert image.status == "missing" and image.path is None
+    assert not png.exists()
+    assert (
+        not unlinked.exists()
+        and renamed.read_bytes() == b"Later unlinked private note.\n"
+    )
+
+    png.mkdir()
+    replaced = operations.inspect_history(vault).admission
+    with pytest.raises(OSError, match="target absence is unverified"):
+        _unobserved_recovery_targets(
+            facts,
+            replaced,
+            {row.path: row for row in replaced.inventory},
+            facts.identity_inventory,
+            operation_paths={path},
+        )

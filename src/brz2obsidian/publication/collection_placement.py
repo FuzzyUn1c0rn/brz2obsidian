@@ -191,7 +191,8 @@ def passive_import_targets(admission, impact):
         (row.after.path, row.after.target_version)
         for row in impact.observations
         if row.before == row.after
-        and row.after.status in ("resolved", "fragment_missing", "fragment_ambiguous")
+        and row.after.status
+        in ("resolved", "fragment_missing", "fragment_ambiguous", "unknown")
     }
     alternatives = {
         path

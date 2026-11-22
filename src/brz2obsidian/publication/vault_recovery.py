@@ -322,6 +322,8 @@ def _unobserved_recovery_targets(
         passive_import_target,
     )
 
+    from .collection_placement import location_conflict
+
     target_by_id = {target.target_id: target for target in context.current_targets}
     state_by_id = {state.target_id: state for state in context.current_target_facts}
     file_target_ids = {
@@ -340,6 +342,8 @@ def _unobserved_recovery_targets(
     ):
         raise OSError("Current recovery target lookup is incomplete")
     passive = {}
+    retired = set()
+    directories = {}
     retained_passive_paths = dict(context.import_passive_targets)
     scoped_import = original_facts.format_operation.kind == "collection_import" or bool(
         retained_passive_paths
@@ -348,27 +352,31 @@ def _unobserved_recovery_targets(
         target = target_by_id[target_id]
         path = target.canonical_path
         row = inventory.get(path)
-        ignored_observation = (
+        outside_recovery = (
             scoped_import
             and path is not None
             and target.target_id == f"physical:{path}"
-            and row is not None
-            and row.exclusion == "git_ignore"
+            and target.kind in ("note", "resource")
             and not any(_paths_collide(path, affected) for affected in operation_paths)
         )
+        ignored_observation = (
+            outside_recovery and row is not None and row.exclusion == "git_ignore"
+        )
+        absent_observation = outside_recovery and row is None
         preserved = ignored_observation and passive_import_target(context, target)
-        if path in retained_passive_paths and not preserved:
+        if path in retained_passive_paths and not (preserved or absent_observation):
             raise OSError(
                 "Passive import link target is no longer outside recovery effects"
             )
         if (
             path is None
-            or not ignored_observation
+            or not (ignored_observation or absent_observation)
             and (target.kind != "resource" or path.casefold().endswith(".md"))
             or target.identity is not None
             or not _safe_relative(path)
             or target.representations != (path,)
             or row is None
+            and not absent_observation
             or any(entry.current.path == path for entry in identity_inventory)
             or any(
                 d.source_path == path
@@ -383,9 +391,18 @@ def _unobserved_recovery_targets(
                 "Unobserved recovery resource is not bounded physical metadata"
             )
         validate_targets((target,))
-        if preserved:
+        if absent_observation:
+            root = Path(admission.vault)
+            if (
+                not admission.inventory_complete
+                or os.path.lexists(root / path)
+                or location_conflict(root, path, directories=directories)
+            ):
+                raise OSError("Lookup-only recovery target absence is unverified")
+            retired.add(target_id)
+        elif preserved:
             passive[target_id] = (path, row.sha256)
-    return unobserved, state_by_id, passive
+    return unobserved, state_by_id, passive, retired
 
 
 def _observed_recovery_target_facts(
@@ -640,6 +657,31 @@ def _completed_import_outputs(facts, current, selected, proposed, *, direction):
     return tuple(sorted(completed))
 
 
+def _reobserve_retired_link_queries(documents, targets, states, inventory, retired):
+    from brz2obsidian.core.link_meanings import resolve_occurrence
+
+    return tuple(
+        document.model_copy(
+            update={
+                "occurrences": tuple(
+                    row.model_copy(
+                        update={
+                            "meaning": resolve_occurrence(
+                                row, targets, states, inventory
+                            )
+                        }
+                    )
+                    if row.meaning.target_id in retired
+                    or retired.intersection(row.meaning.candidates)
+                    else row
+                    for row in document.occurrences
+                )
+            }
+        )
+        for document in documents
+    )
+
+
 def _refresh_recovery_link_context(
     original_facts,
     admission,
@@ -655,7 +697,7 @@ def _refresh_recovery_link_context(
     _owner,
 ):
     context = original_facts.link_context
-    unobserved, state_by_id, passive = _unobserved_recovery_targets(
+    unobserved, state_by_id, passive, retired = _unobserved_recovery_targets(
         original_facts,
         admission,
         inventory,
@@ -666,9 +708,17 @@ def _refresh_recovery_link_context(
         original_facts, current, unobserved, state_by_id, _owner=_owner
     )
     new_documents = []
-    current_targets = list(context.current_targets)
-    incoming_targets = list(context.incoming_targets)
-    incoming_target_facts = list(context.incoming_target_facts)
+    current_targets = [
+        target for target in context.current_targets if target.target_id not in retired
+    ]
+    incoming_targets = [
+        target for target in context.incoming_targets if target.target_id not in retired
+    ]
+    incoming_target_facts = [
+        state
+        for state in context.incoming_target_facts
+        if state.target_id not in retired
+    ]
     incoming_documents = list(context.incoming_documents)
     known_document_paths = {
         document.source_path for document in context.current_documents
@@ -814,6 +864,14 @@ def _refresh_recovery_link_context(
         )
         for document in new_documents
     )
+    if retired:
+        incoming_documents = _reobserve_retired_link_queries(
+            incoming_documents,
+            tuple(incoming_targets),
+            tuple(incoming_target_facts),
+            context.inventory,
+            retired,
+        )
     context = context.model_copy(
         update={
             "current_targets": lookup_targets,
@@ -832,7 +890,7 @@ def _refresh_recovery_link_context(
             "incoming_documents": tuple(incoming_documents),
         }
     )
-    return context, unobserved - passive.keys()
+    return context, unobserved - passive.keys() - retired
 
 
 def _recovery_subject_current(
