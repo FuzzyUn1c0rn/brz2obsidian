@@ -1462,7 +1462,16 @@ class _Inspection:
         terminal_status, terminal_observation_missing = (
             self._discover_terminal_observation(gitdir)
         )
-        if self.checkpoint_observation is not None:
+        from .collection_publication import local_publication_pending
+
+        if local_publication_pending(gitdir):
+            self.finding(
+                "converter_operation",
+                "operation",
+                "A collection checkpoint publication requires metadata recovery.",
+            )
+            self.operation = "recovery_required"
+        elif self.checkpoint_observation is not None:
             _accept_idle_checkpoint(self)
         elif self.recovery_observation is not None:
             self._accept_recovery_observation()

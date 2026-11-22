@@ -1663,7 +1663,11 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
         )
     _, _, raw, _ = observe_file(root, locator_path, prefix_limit=OUTPUT_BUDGET + 1)
     locator = CheckpointLocator.model_validate_json(raw)
-    association = locator.association
+    _validate_locator_association(root, locator.association, trusted_association)
+    return _locator_at_owned_tip(root, git, locator, trusted_association)
+
+
+def _validate_locator_association(root, association, trusted_association=None):
     if trusted_association is None:
         if association.vault_anchor != verify_directory(
             root
@@ -1682,7 +1686,6 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
     expected_ref = "refs/brz2obsidian/imports/" + expected_id + "/checkpoints"
     if association.association_id != expected_id or association.ref != expected_ref:
         raise OSError("Invalid stable checkpoint association")
-    return _locator_at_owned_tip(root, git, locator, trusted_association)
 
 
 def _locator_at_owned_tip(root, git, locator, trusted_association):
@@ -4628,9 +4631,21 @@ def _persist_checkpoint_locator(root, locator, *, replace_pending=False):
 
 
 def _publish_capture_locator(request, base, manifest, writes):
-    locator = _publish_locator(
-        request.root, base.git, base.association, manifest, writes
-    )
+    if request.boundary == "local":
+        from .collection_publication import publish_local_capture
+
+        locator = publish_local_capture(
+            request.root,
+            base.git,
+            base.association,
+            manifest,
+            writes,
+            scoped=request.collection_record_path is not None,
+        )
+    else:
+        locator = _publish_locator(
+            request.root, base.git, base.association, manifest, writes
+        )
     if type(request.owners) is _ApplyReviewOwners:
         request.owners._retain_prepared_export(
             base.git, writes.commit, manifest, request.owned_export
@@ -4717,14 +4732,19 @@ def discard_saved_review(vault, *, expected_commit):
     history = inspect_history(root)
     if history.status != "intact" or history.admission.status != "supported":
         return result("refused", "current_history_unavailable")
-    operation = uuid4().hex
     writes = _CaptureWrites()
+    if _scoped_saved_checkpoint(history.checkpoint.manifest):
+        try:
+            return _discard_checkpoint(root, None, expected_commit, writes, scoped=True)
+        except OSError, ValueError, TypeError, UnicodeError:
+            return _failed_capture(writes)
+    operation = uuid4().hex
     try:
         _acquire(root, operation)
     except OSError, ValueError, TypeError:
         return result("refused", "operation_lease_unavailable")
     try:
-        discarded = _discard_under_lease(root, operation, expected_commit, writes)
+        discarded = _discard_checkpoint(root, operation, expected_commit, writes)
     except OSError, ValueError, TypeError, UnicodeError:
         discarded = _failed_capture(writes)
     finally:
@@ -4744,7 +4764,11 @@ def discard_saved_review(vault, *, expected_commit):
     return discarded
 
 
-def _discard_under_lease(root, operation, expected_commit, writes):
+def _scoped_saved_checkpoint(manifest):
+    return bool(manifest.collection_record_path or manifest.collection_baseline_commit)
+
+
+def _discard_checkpoint(root, operation, expected_commit, writes, *, scoped=False):
     history = inspect_history(root, active_operation=operation)
     if history.status != "intact" or history.admission.status != "supported":
         return result("refused", "current_history_unavailable")
@@ -4812,7 +4836,14 @@ def _discard_under_lease(root, operation, expected_commit, writes):
             )
         ]
         _commit_checkpoint_tree(git, manifest, [*metadata, *roots], writes)
-        published = _publish_locator(root, git, association, manifest, writes)
+        if scoped:
+            from .collection_publication import publish_local_capture
+
+            published = publish_local_capture(
+                root, git, association, manifest, writes, scoped=True
+            )
+        else:
+            published = _publish_locator(root, git, association, manifest, writes)
     return result(
         "captured",
         "saved_review_discarded",

@@ -14,6 +14,9 @@ class VaultOperationLock(ReconciliationContract):
     operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     vault_anchor: str
     git_anchor: str
+    collection_saved_checkpoint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
 
 
 class VaultPathMetadata(ReconciliationContract):

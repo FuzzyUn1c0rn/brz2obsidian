@@ -29,7 +29,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultRecoveryIntent,
 )
 from brz2obsidian.content_fingerprints import canonical_equal
-from brz2obsidian.content_values import content_sha, content_size
+from brz2obsidian.content_values import content_sha, content_size, same_content
 from brz2obsidian.contracts import (
     QUALIFIED_OUTPUT_FORMATS,
     ContentValue,
@@ -63,6 +63,7 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
+from brz2obsidian.publication.collection_publication import release_native_operation
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,
@@ -82,7 +83,6 @@ from brz2obsidian.publication.vault_apply import (
     _park,
     _prepare_parents,
     _proposed_directory,
-    _release,
     _review_fact_paths_match,
     _review_subjects,
     _same_file,
@@ -1788,10 +1788,14 @@ def _reverse_owned_subjects(
     return subjects, baseline_outputs, output_references
 
 
-def _generated_document_paths(git, lineage, source_files):
-    record_path = lineage.collection_record_path
-    if record_path is None:
+def _generated_document_paths(git, lineage, source_files, *, scoped_root=False):
+    if (
+        lineage.collection_record_path is None
+        and lineage.collection_baseline_commit is None
+        and not scoped_root
+    ):
         return None
+    record_path = lineage.collection_record_path or "migration-record.json"
     content = _owned_content(git, source_files.get(record_path))
     if content is None:
         raise OSError("Associated recovery document source mapping is unavailable")
@@ -1812,6 +1816,88 @@ def _generated_document_paths(git, lineage, source_files):
     return paths
 
 
+def _associated_document_reversal(
+    evidence, owner, selected_file, owned_groups, target, *, _owner
+):
+    path = owner.current.path
+    change = next(
+        (
+            change
+            for change in evidence.original.proposal.changes
+            if (change.item_id, change.facet) == (owner.identity.item_id, owner.facet)
+            and change.subject_id == selected_file.subject_id
+        ),
+        None,
+    )
+    if change is None:
+        raise OSError("Associated recovery document has no selected source change")
+    approval = next(
+        (
+            row
+            for row in evidence.original.approvals
+            if row.change_id == change.change_id
+        ),
+        None,
+    )
+    decision = None if approval is None else approval.decision_id
+    query = change.change_id, decision
+    owned = owned_groups.get(query)
+    if owned is None:
+        selection = (
+            review_owned_outputs(evidence.original, (query,))
+            if _owner is None
+            else _owner._history_owned_outputs(evidence.original, (query,))
+        )
+        owned = selection.target_groups[0]
+    matches = tuple(
+        reference
+        for reference in owned
+        if reference.canonical_path == path
+        and reference.identity == owner.identity
+        and reference.target == owner.target
+        and reference.kind == "note"
+    )
+    published = _owned_content(evidence.git, evidence.produced[path], _owner=_owner)
+    if (
+        len(matches) != 1
+        or published is None
+        or not same_content(published, selected_file.content)
+    ):
+        raise OSError("Associated recovery document has no exact published selection")
+    return OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id=evidence.intent.operation_id,
+        operation_kind=evidence.intent.kind,
+        direction="restore",
+        operation_generation=evidence.intent.generation,
+        history_fingerprint=_operation_history_fingerprint(
+            evidence.origin_commit, evidence.intent
+        ),
+        origin_change_id=change.change_id,
+        origin_decision_id=decision,
+        owned_targets=owned,
+        outputs=(
+            OperationReversalOutput(
+                path=path,
+                target_id=matches[0].target_id,
+                produced_existence="present",
+                produced=published,
+                current=owner.current,
+                target_existence="present",
+                target=target,
+            ),
+        ),
+    )
+
+
+def _produced_generated_documents(evidence):
+    manifest = evidence.source_prepared
+    source = {row.path: row for row in manifest.source}
+    paths = _generated_document_paths(evidence.git, manifest, source, scoped_root=True)
+    return {item: source[path] for item, path in paths.items()}
+
+
 def _restore_associated_documents(
     evidence,
     owned_outputs,
@@ -1821,6 +1907,7 @@ def _restore_associated_documents(
     subjects,
     baseline_outputs,
     *,
+    owned_groups,
     _owner,
 ):
     covered = {
@@ -1832,7 +1919,7 @@ def _restore_associated_documents(
     } | set(output_references)
     source_lineage = evidence.retained.owned[evidence.source_prepared.previous][0]
     generated_files = {row.path: row for row in source_lineage.source}
-    original_files = {row.path: row.content for row in owned_outputs.effects.files}
+    original_files = {row.path: row for row in owned_outputs.effects.files}
     original_documents = (
         set()
         if evidence.original.facts.link_context is None
@@ -1846,6 +1933,9 @@ def _restore_associated_documents(
         return
     generated_paths = _generated_document_paths(
         evidence.git, source_lineage, generated_files
+    )
+    produced_documents = (
+        _produced_generated_documents(evidence) if generated_paths is not None else None
     )
     for path in associated:
         owners = tuple(
@@ -1890,6 +1980,28 @@ def _restore_associated_documents(
         target = _owned_content(evidence.git, evidence.before[path], _owner=_owner)
         if generated is None or target is None:
             raise OSError("Associated recovery document source is unavailable")
+        proof = None
+        if produced_documents is not None:
+            generated = _owned_content(
+                evidence.git,
+                produced_documents.get(owner.identity.item_id),
+                _owner=_owner,
+            )
+            if generated is None:
+                raise OSError("Associated recovery document lacks generated output")
+            proof = _associated_document_reversal(
+                evidence,
+                owner,
+                original_files[path],
+                owned_groups,
+                target,
+                _owner=_owner,
+            )
+            output_references[path] = next(
+                reference
+                for reference in proof.owned_targets
+                if reference.canonical_path == path
+            )
         subjects.append(
             ReconciliationSubject(
                 item_id=owner.identity.item_id,
@@ -1906,6 +2018,7 @@ def _restore_associated_documents(
                 output_role="note",
                 structure=None,
                 attachment=None,
+                operation_reversal=proof,
             )
         )
         baseline_outputs.append(
@@ -2098,6 +2211,9 @@ def _restore_review(
         current,
         subjects,
         baseline_outputs,
+        owned_groups=dict(
+            zip(ownership_queries, owned_outputs.target_groups, strict=True)
+        ),
         _owner=_owner,
     )
     if not subjects:
@@ -2313,6 +2429,7 @@ def prepare_recovery(vault, *, direction=None, _owner=None):
         except OSError, ValueError, TypeError, UnicodeError:
             return _recovery_preparation("unavailable", "recovery_review_unavailable")
     observed, authority = _inspect_update_observation(root)
+    from .collection_publication import LOCAL_LOCATOR_PENDING
     from .collection_result_locator import RESULT_LOCATOR_PENDING
     from .unpublished_collection import UNPUBLISHED_RECOVERY_CODES
 
@@ -2325,9 +2442,11 @@ def prepare_recovery(vault, *, direction=None, _owner=None):
         return VaultRecoveryPreparation.model_validate(
             offered.model_dump() | {"result_locator_checkpoint": observed.result_commit}
         )
-    if observed.code in UNPUBLISHED_RECOVERY_CODES and direction in (
-        None,
-        "restore",
+    if (
+        observed.code == LOCAL_LOCATOR_PENDING
+        and direction in (None, "finish", "restore")
+        or observed.code in UNPUBLISHED_RECOVERY_CODES
+        and direction in (None, "restore")
     ):
         return VaultRecoveryPreparation(
             schema_id="brz2obsidian.vault-recovery-preparation",
@@ -2546,7 +2665,7 @@ def _cleanup_verified_terminal(root, saved, *, start, _owners=None):
         ):
             _park(root, saved.operation_id)
             return _outcome("refused", "terminal_cleanup_changed", start=start)
-        _release(root, saved.operation_id)
+        release_native_operation(root, saved.operation_id)
         final = _inspect_update_observation(root, _owners=_owners)[0]
         if final.status not in ("applied", "no_content_change", "undone", "restored"):
             raise OSError("Verified terminal status was not rediscovered")
@@ -3420,7 +3539,7 @@ def _release_recovery_lease(publication, state):
     elif state.acquired:
         pending_exception = sys.exc_info()[0]
         try:
-            _release(publication.root, publication.saved.operation_id)
+            release_native_operation(publication.root, publication.saved.operation_id)
         except OSError, ValueError, TypeError:
             if pending_exception is None or issubclass(
                 pending_exception, (OSError, ValueError, TypeError)
@@ -3474,7 +3593,7 @@ def _release_recovery_lease(publication, state):
 
 
 def _completed_recovery(publication, lineage, paths, state, terminal):
-    _release(publication.root, publication.saved.operation_id)
+    release_native_operation(publication.root, publication.saved.operation_id)
     state.acquired = False
     return _outcome(
         terminal,
@@ -3538,6 +3657,10 @@ def _publish_staged_recovery(
 
 
 def _execute_recovery_cleanup(root, saved, *, cancel, start, owners):
+    from .collection_publication import LOCAL_LOCATOR_PENDING, recover_local_publication
+
+    if saved.code == LOCAL_LOCATOR_PENDING and saved.unpublished_checkpoint is not None:
+        return recover_local_publication(root, saved, cancel=cancel)
     if saved.unpublished_checkpoint is not None:
         from .unpublished_collection import restore_unpublished_collection
 

@@ -451,7 +451,7 @@ def assemble_facts(
     onboarding=False,
     retained_ownership=None,
     retired_note_ids=(),
-    record_path="migration-record.json",
+    record_path=None,
     _owner=None,
 ):
     def content(raw, *, semantic):
@@ -466,6 +466,8 @@ def assemble_facts(
             else value
         )
 
+    explicit_collection = record_path is not None
+    record_path = record_path or "migration-record.json"
     first_import = baseline is None
     new_record = record(incoming, record_path)
     old_record = (
@@ -679,7 +681,7 @@ def assemble_facts(
                 old_record,
                 new_record,
                 current_inventory,
-                scoped_collection=record_path != "migration-record.json",
+                scoped_collection=explicit_collection,
                 _owner=_owner,
             )
         }

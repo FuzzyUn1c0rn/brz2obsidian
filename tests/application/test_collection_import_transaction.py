@@ -11,6 +11,7 @@ from brz2obsidian.application.checkpoint_payload_contracts import (
 )
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_facts import output_identity
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from tests.application.test_collection_import_facts import _incoming_brain
 from tests.application.test_vault_checkpoints import fixture_case, git, user_state
 from tests.reconciliation.test_resolution import action
@@ -132,12 +133,15 @@ def _choose_undo(operations, vault, undo, keep_path):
         undo = operations.resolve_undo(
             vault,
             undo,
-            action(
+            text_choice_action(
                 undo.review,
-                change,
-                domain="reversal",
-                choice="current" if change.path == keep_path else "reverse",
-                decision_id="undo:" + change.change_id,
+                action(
+                    undo.review,
+                    change,
+                    domain="reversal",
+                    choice="current" if change.path == keep_path else "reverse",
+                    decision_id="undo:" + change.change_id,
+                ),
             ),
         )
         assert undo.status == "offered", undo.code
@@ -325,8 +329,10 @@ def test_alternating_updates_use_each_exact_baseline_and_keep_the_moved_location
     assert undo.status == "offered", undo
     assert undo.target_receipt_commit == applied.application.receipt_commit
     reversal = next(row for row in undo.review.facts.subjects if row.path == moved_path)
-    assert reversal.baseline.content.data == original_b
-    assert reversal.incoming.data == original_b
+    proof = reversal.operation_reversal.outputs[0]
+    assert proof.produced.data == incoming
+    assert proof.target.data == original_b
+    undo = _choose_undo(fresh, vault, undo, None)
     assert undo.review.ready, (undo.review.blockers, undo.review.requirements)
     undone = fresh.execute_undo(vault, undo)
     assert undone.status == "undone", undone
@@ -338,22 +344,71 @@ def test_alternating_updates_use_each_exact_baseline_and_keep_the_moved_location
     assert _user_git(vault) == before
 
 
+def test_explicit_root_collection_update_reverses_moved_note():
+    vault = _vault(established=True)
+    before = _user_git(vault)
+    original_a = (vault / "Opening.md").read_bytes()
+    source_b = vault.parent / "brain-b"
+    path_b, record_b, bytes_b, _ = _payload(
+        source_b, "brain-b", scoped=True, body=b"Imported B.\r\n"
+    )
+    operations = Operations()
+    imported = operations.prepare_collection_import(
+        vault, source_b, record_path=record_b
+    )
+    assert operations.apply_update(imported.preparation).status == "applied"
+    moved = vault / "Moved/Root note.md"
+    moved.parent.mkdir()
+    (vault / "Opening.md").rename(moved)
+    source_a = vault.parent / "brain-a-next"
+    path_a, record_a, bytes_a, _ = _payload(
+        source_a, "brain-a", scoped=False, body=b"Updated A.\r\n", asset=True
+    )
+    review = operations.prepare_collection_update(vault, source_a, record_path=record_a)
+    assert review.ready, review
+    applied = operations.apply_update(review.preparation)
+    assert applied.status == "applied", applied
+    assert moved.read_bytes() == bytes_a
+    assert _source_note(vault, "brain-a", path_a).chunks[0].data == bytes_a
+    fresh = Operations()
+    undo = fresh.prepare_undo(vault)
+    assert undo.status == "offered", undo
+    assert undo.target_receipt_commit == applied.application.receipt_commit
+    restored = fresh.execute_undo(vault, _choose_undo(fresh, vault, undo, None))
+    assert restored.status == "undone", restored
+    assert moved.read_bytes() == original_a
+    assert not (vault / path_a).exists()
+    assert (vault / path_b).read_bytes() == bytes_b
+    assert _source_note(vault, "brain-a", path_a).chunks[0].data == original_a
+    assert _source_note(vault, "brain-b", path_b).chunks[0].data == bytes_b
+    assert _user_git(vault) == before
+
+
 _CHECKPOINT_REF_EXIT = """
 import os
 import sys
 from pathlib import Path
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_contracts import UpdatePreparation
-from brz2obsidian.publication import vault_history
+from brz2obsidian.publication import vault_apply, vault_history
 
 publish = vault_history._publish_locator
 def stop_after_ref(root, git, association, manifest, writes):
-    if manifest.boundary == sys.argv[2]:
-        git.call('update-ref', writes.ref, writes.commit, manifest.previous)
+    boundary, *cut = sys.argv[2:]
+    if manifest.boundary == boundary:
+        if cut != ["before_ref"]:
+            git.call('update-ref', writes.ref, writes.commit, manifest.previous or "0" * 40)
         os._exit(81)
     return publish(root, git, association, manifest, writes)
 
-vault_history._publish_locator = stop_after_ref
+if sys.argv[2] == "started":
+    acquire = vault_apply._acquire_reviewed_apply
+    def stop_after_marker(*args, **kwargs):
+        assert acquire(*args, **kwargs)
+        os._exit(81)
+    vault_apply._acquire_reviewed_apply = stop_after_marker
+else:
+    vault_history._publish_locator = stop_after_ref
 plan = UpdatePreparation.model_validate_json(Path(sys.argv[1]).read_bytes())
 result = Operations().apply_update(plan)
 print(result.model_dump_json(), flush=True)
@@ -365,6 +420,7 @@ import os
 import sys
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.publication import unpublished_collection
+from pathlib import Path
 
 vault, boundary = sys.argv[1:]
 publish = unpublished_collection._publish_locator
@@ -379,7 +435,15 @@ def interrupt(root, git, association, manifest, writes):
     publish(root, git, association, manifest, writes)
     os._exit(82)
 
-unpublished_collection._publish_locator = interrupt
+if boundary == "inside_retirement":
+    unlink = Path.unlink
+    def stop_inside_retirement(path, *args, **kwargs):
+        unlink(path, *args, **kwargs)
+        if path.name == "owner.json" and path.is_relative_to(Path(vault) / ".git"):
+            os._exit(82)
+    Path.unlink = stop_inside_retirement
+else:
+    unpublished_collection._publish_locator = interrupt
 ops = Operations()
 offer = ops.prepare_recovery(vault, direction="restore")
 assert offer.code == "unpublished_collection_prepared", offer
@@ -395,6 +459,7 @@ print(result.model_dump_json(), flush=True)
         ("prepared", "before_locator"),
         ("ref_before_locator", "before_locator"),
         ("prepared", "after_locator"),
+        ("prepared", "inside_retirement"),
     ],
 )
 def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
@@ -462,21 +527,25 @@ def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
     )
     assert process.returncode == 82, (process.stdout, process.stderr)
     restarted = Operations()
-    next_offer = restarted.prepare_recovery(vault, direction="restore")
-    expected_code = (
-        "unpublished_collection_prepared"
-        if restore_boundary == "before_ref"
-        else "restored_collection_locator_pending"
-    )
-    assert (next_offer.status, next_offer.code) == ("cleanup", expected_code), (
-        next_offer
-    )
-    assert next_offer.operation_id == offered.operation_id
-    recovered = restarted.execute_recovery(vault, next_offer)
-    assert recovered.code == "saved_collection_review_restored", recovered
-    assert not recovered.authored_files_changed and not recovered.recovery_required
-    if restore_boundary != "before_ref":
-        assert recovered.checkpoint_commit == next_offer.unpublished_checkpoint
+    if restore_boundary == "inside_retirement":
+        assert not (vault / ".git/brz2obsidian").exists()
+        assert restarted.inspect_history(vault).status == "intact"
+    else:
+        next_offer = restarted.prepare_recovery(vault, direction="restore")
+        expected_code = (
+            "unpublished_collection_prepared"
+            if restore_boundary == "before_ref"
+            else "restored_collection_locator_pending"
+        )
+        assert (next_offer.status, next_offer.code) == ("cleanup", expected_code), (
+            next_offer
+        )
+        assert next_offer.operation_id == offered.operation_id
+        recovered = restarted.execute_recovery(vault, next_offer)
+        assert recovered.code == "saved_collection_review_restored", recovered
+        assert not recovered.authored_files_changed and not recovered.recovery_required
+        if restore_boundary != "before_ref":
+            assert recovered.checkpoint_commit == next_offer.unpublished_checkpoint
     resumed = fresh.resume_update(vault)
     assert resumed.code == "resumed", resumed
     assert resumed.operation_id == review.operation_id
@@ -490,6 +559,78 @@ def test_unpublished_preparation_restores_saved_review_and_keeps_latest_undo(
     assert discarded.code == "saved_review_discarded", discarded
     undo = fresh.prepare_undo(vault)
     assert undo.target_receipt_commit == completed.application.receipt_commit
+    assert _user_git(vault) == before
+
+
+@pytest.mark.parametrize(
+    "established, cut",
+    [
+        (False, "after_ref"),
+        (True, "before_ref"),
+        (True, "after_ref"),
+        (True, "after_marker"),
+    ],
+)
+def test_apply_recovers_interrupted_internal_saved_review(established, cut):
+    vault = _vault(established=established)
+    before = _user_git(vault)
+    prior = Operations().read_checkpoint(vault).locator
+    source = vault.parent / "brain-b"
+    path, record_path, _, _ = _payload(
+        source, "brain-b", scoped=True, body=b"Saved before Apply.\r\n"
+    )
+    offered = Operations().prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    assert offered.ready, offered
+    plan = vault.parent / "collection-preparation.json"
+    plan.write_text(offered.preparation.model_dump_json(), encoding="utf-8")
+    stopped = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _CHECKPOINT_REF_EXIT,
+            str(plan),
+            "started" if cut == "after_marker" else "local",
+            cut,
+        ],
+        capture_output=True,
+        check=False,
+        timeout=150,
+    )
+    assert stopped.returncode == 81, (stopped.stdout, stopped.stderr)
+    fresh = Operations()
+    assert fresh.inspect_history(vault).admission.status == "recovery_first"
+    offer = fresh.prepare_recovery(vault)
+    expected_offer, expected_recovery = {
+        "before_ref": (
+            "collection_local_locator_pending",
+            "collection_local_publication_abandoned",
+        ),
+        "after_ref": (
+            "collection_local_locator_pending",
+            "collection_local_locator_resealed",
+        ),
+        "after_marker": ("scoped_apply_start_pending", "scoped_apply_start_released"),
+    }[cut]
+    assert (offer.status, offer.code) == ("cleanup", expected_offer), offer
+    recovered = fresh.execute_recovery(vault, offer)
+    assert recovered.code == expected_recovery, recovered
+    assert recovered.published_files == 0
+    assert not (vault / path).exists()
+    assert not (vault / record_path).exists()
+    if cut != "before_ref":
+        assert (
+            fresh.read_checkpoint(vault).locator.commit == offer.unpublished_checkpoint
+        )
+        assert fresh.resume_update(vault).code == "resumed"
+        assert _source_note(vault, "brain-b", path).code == "collection_not_active"
+    else:
+        assert fresh.read_checkpoint(vault).locator == prior
+    if established:
+        assert (vault / "Opening.md").read_bytes() == _source_note(
+            vault, "brain-a", "Opening.md"
+        ).chunks[0].data
     assert _user_git(vault) == before
 
 
@@ -520,12 +661,14 @@ def test_published_result_ref_recovers_before_locator_and_receipt():
     reseal = fresh.prepare_recovery(vault)
     assert (reseal.status, reseal.code) == ("cleanup", "scoped_result_locator_pending")
     assert reseal.intent_commit and reseal.result_locator_checkpoint
-    result_commit = fresh.read_checkpoint(vault).locator.commit
+    ref = offered.preparation.locator.association.ref
+    result_commit = git(vault, "rev-parse", ref).decode().strip()
     assert result_commit == reseal.result_locator_checkpoint
+    assert fresh.inspect_history(vault).admission.status == "recovery_first"
     resealed = fresh.execute_recovery(vault, reseal)
     assert resealed.code == "scoped_result_locator_resealed", resealed
     assert resealed.recovery_required
-    assert fresh.read_checkpoint(vault).locator.commit == result_commit
+    assert git(vault, "rev-parse", ref).decode().strip() == result_commit
     recovery = fresh.prepare_recovery(vault, direction="finish")
     assert recovery.status == "offered", recovery
     recovered = fresh.execute_recovery(vault, _choose_recovery(fresh, vault, recovery))

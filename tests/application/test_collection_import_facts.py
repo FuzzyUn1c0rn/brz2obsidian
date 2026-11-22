@@ -13,9 +13,10 @@ from tests.application.test_vault_checkpoints import fixture_case, git
 from tests.reconciliation.test_resolution import preflight
 
 
-def _incoming_brain():
-    path = "Imports/Brain B/Opening.md"
-    record_path = "Imports/Brain B/migration-record.json"
+def _incoming_brain(*, scoped=True):
+    prefix = "Imports/Brain B/" if scoped else ""
+    path = prefix + "Opening.md"
+    record_path = prefix + "migration-record.json"
     record = {
         "schema": "brz2obsidian.migration",
         "schema_version": 9,
@@ -136,8 +137,9 @@ def test_first_import_review_inspection_and_refresh_reobserve_current_inputs():
     assert operations.read_checkpoint(vault).status == "absent"
 
 
-def test_scoped_update_binds_incoming_bytes_to_the_moved_note():
-    path, record_path, original = _incoming_brain()
+@pytest.mark.parametrize("scoped", [True, False], ids=["nested", "root"])
+def test_scoped_update_binds_incoming_bytes_to_the_moved_note(scoped):
+    path, record_path, original = _incoming_brain(scoped=scoped)
     record = json.loads(original[record_path])
     record["source_identity"]["snapshot_digest"] = "next-b"
     updated = original | {
@@ -165,21 +167,43 @@ def test_scoped_update_binds_incoming_bytes_to_the_moved_note():
     }
 
 
+@pytest.mark.parametrize("scoped", [True, False], ids=["nested", "root"])
 def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
-    monkeypatch,
+    monkeypatch, scoped
 ):
     from types import SimpleNamespace
 
     from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import review_owned_outputs
     from brz2obsidian.publication import vault_recovery
 
-    path, record_path, original = _incoming_brain()
+    path, record_path, original = _incoming_brain(scoped=scoped)
     moved = "Moved/Opening.md"
-    authored = original[path].replace(b"New B text.", b"Authored preimage.")
+    authored = original[path]
     produced = original[path].replace(b"New B text.", b"Applied update.")
+    next_record = json.loads(original[record_path])
+    next_record["source_identity"]["snapshot_digest"] = "new-b"
+    updated = original | {path: produced, record_path: json.dumps(next_record).encode()}
+    origin = prepare_review(
+        assemble_facts(
+            original,
+            updated,
+            {moved: authored, record_path: original[record_path]},
+            record_path=record_path,
+            proposal_id="selected-update",
+            generation=1,
+        ),
+        preflight=preflight(),
+    )
+    assert origin.ready, origin.blockers
+    selected_change = next(
+        change for change in origin.proposal.changes if change.path == moved
+    )
+    queries = ((selected_change.change_id, None),)
+    owned_outputs = review_owned_outputs(origin, queries)
     facts = assemble_facts(
         original,
-        original,
+        updated,
         {moved: produced, record_path: original[record_path]},
         record_path=record_path,
         proposal_id="reverse-b",
@@ -194,15 +218,33 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
     selected = SimpleNamespace(path=moved, content=ExactContent(data=produced))
     predecessor = SimpleNamespace(
         identity=facts.incoming_identity,
-        collection_record_path=record_path,
+        collection_record_path=record_path if scoped else None,
+        collection_baseline_commit=None if scoped else "a" * 40,
         source=(mapping, generated),
+    )
+    produced_source = SimpleNamespace(
+        previous="retained",
+        identity=facts.incoming_identity,
+        collection_record_path=record_path if scoped else None,
+        collection_baseline_commit=None,
+        source=tuple(
+            SimpleNamespace(path=relative, content=ExactContent(data=raw))
+            for relative, raw in updated.items()
+        ),
     )
     evidence = SimpleNamespace(
         git=None,
-        intent=SimpleNamespace(affected_paths=(moved,)),
-        source_prepared=SimpleNamespace(previous="retained"),
+        intent=SimpleNamespace(
+            affected_paths=(moved,),
+            operation_id="a" * 32,
+            generation=9,
+            association_id="b" * 64,
+            kind="apply",
+        ),
+        origin_commit="c" * 40,
+        source_prepared=produced_source,
         retained=SimpleNamespace(owned={"retained": (predecessor, None)}),
-        original=SimpleNamespace(facts=facts),
+        original=origin,
         before={moved: physical_preimage},
         produced={moved: selected},
     )
@@ -216,12 +258,13 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
         subjects, baselines = [], []
         vault_recovery._restore_associated_documents(
             evidence,
-            SimpleNamespace(effects=SimpleNamespace(files=(selected,))),
+            owned_outputs,
             facts,
             {},
             {moved: owner.current},
             subjects,
             baselines,
+            owned_groups={},
             _owner=None,
         )
         return subjects[0], baselines[0]
@@ -229,10 +272,17 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
     subject, baseline = reversed_note()
     assert (subject.path, subject.baseline.content.data, subject.incoming.data) == (
         moved,
-        original[path],
+        produced,
         authored,
     )
-    assert (baseline.item_id, baseline.content.data) == ("opening", original[path])
+    assert (baseline.item_id, baseline.content.data) == ("opening", produced)
+    proof = subject.operation_reversal
+    assert proof is not None
+    assert [
+        (row.path, row.produced.data, row.target.data) for row in proof.outputs
+    ] == [
+        (moved, produced, authored),
+    ]
 
     duplicate = json.loads(original[record_path])
     duplicate["item_targets"].append(duplicate["item_targets"][0])
@@ -241,8 +291,47 @@ def test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity(
         reversed_note()
 
 
+def test_interrupted_scoped_apply_start_releases_marker_without_checkpoint_write():
+    from brz2obsidian.publication import vault_apply
+
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    path, record_path, incoming = _incoming_brain()
+    for relative, raw in incoming.items():
+        (source / relative).parent.mkdir(parents=True, exist_ok=True)
+        (source / relative).write_bytes(raw)
+    operations = Operations()
+    offered = operations.prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    saved = operations.save_update(offered.preparation)
+    assert saved.code == "saved", saved
+    operation_id = "d" * 32
+    vault_apply._acquire_reviewed_apply(
+        vault, operation_id, operations.read_checkpoint(vault), None
+    )
+    fresh = Operations()
+    live_offer = fresh.prepare_recovery(vault)
+    busy = fresh.execute_recovery(vault, live_offer)
+    assert busy.recovery_required and vault_apply.owns_operation(vault, operation_id)
+    vault_apply._park(vault, operation_id)
+    assert fresh.inspect_history(vault).admission.status == "recovery_first"
+    recovery = fresh.prepare_recovery(vault)
+    assert (recovery.status, recovery.code) == ("cleanup", "scoped_apply_start_pending")
+    assert recovery.unpublished_checkpoint == saved.checkpoint_commit
+    recovered = fresh.execute_recovery(vault, recovery)
+    assert recovered.code == "scoped_apply_start_released", recovered
+    assert not recovered.authored_files_changed
+    assert not (vault / ".git/brz2obsidian").exists()
+    assert fresh.read_checkpoint(vault).locator.commit == saved.checkpoint_commit
+    assert fresh.resume_update(vault).code == "resumed"
+    assert not (vault / path).exists()
+
+
 @pytest.mark.parametrize(
-    "boundary", ["prepared_locator", "saved_locator", "lease_release"]
+    "boundary",
+    ["prepared_locator", "saved_locator", "lease_release", "inside_retirement"],
 )
 def test_unpublished_collection_recovery_can_itself_be_interrupted(
     monkeypatch, boundary
@@ -303,13 +392,38 @@ def test_unpublished_collection_recovery_can_itself_be_interrupted(
     assert offered.intent_commit is None
     assert Operations().inspect_history(vault).admission.status == "recovery_first"
     assert not (vault / path).exists()
+    if boundary == "inside_retirement":
+        original_unlink = type(vault).unlink
+        injected = []
+
+        def stop_after_owner_removal(marker_file, *args, **kwargs):
+            original_unlink(marker_file, *args, **kwargs)
+            if marker_file.name == "owner.json" and marker_file.is_relative_to(
+                vault / ".git"
+            ):
+                injected.append(marker_file)
+                raise OSError("Injected interruption during marker deletion")
+
+        with monkeypatch.context() as injection:
+            injection.setattr(type(vault), "unlink", stop_after_owner_removal)
+            Operations().execute_recovery(vault, offered)
+        assert injected
+        resumed = Operations().resume_update(vault)
+        assert resumed.code == "resumed", resumed
+        assert resumed.operation_id == plan.proposal.proposal_id
+        assert not (vault / ".git/brz2obsidian").exists()
+        assert not (vault / path).exists()
+        return
+
     with monkeypatch.context() as injection:
         if boundary == "lease_release":
 
             def stop_before_release(root, operation):
                 raise OSError("Injected interruption after locator replacement")
 
-            injection.setattr(vault_apply, "_release", stop_before_release)
+            injection.setattr(
+                unpublished_collection, "_retire_collection_marker", stop_before_release
+            )
         else:
 
             def stop_after_ref(root, native_git, association, manifest, writes):
@@ -369,6 +483,109 @@ def test_unpublished_collection_recovery_can_itself_be_interrupted(
         .prepare_collection_import(vault, source, record_path=record_path)
         .ready
     )
+
+
+@pytest.mark.parametrize("advanced", [False, True], ids=["before_ref", "after_ref"])
+def test_first_collection_saved_checkpoint_can_recover_without_old_locator(
+    monkeypatch, advanced
+):
+    from brz2obsidian.publication import collection_publication, vault_history
+
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    path, record_path, incoming = _incoming_brain()
+    for relative, raw in incoming.items():
+        (source / relative).parent.mkdir(parents=True, exist_ok=True)
+        (source / relative).write_bytes(raw)
+    established = vault / "Authored.md"
+    established.write_bytes(b"Independent note.\r\n")
+    operations = Operations()
+    review = operations.prepare_collection_import(
+        vault, source, record_path=record_path
+    )
+    assert review.ready, review
+
+    def interrupted(root, native_git, association, manifest, writes):
+        assert manifest.boundary == "local"
+        assert manifest.previous is None
+        if advanced:
+            native_git.call("update-ref", writes.ref, writes.commit, "0" * 40)
+        raise OSError("Injected interruption during scoped LOCAL publication")
+
+    with monkeypatch.context() as injection:
+        injection.setattr(vault_history, "_publish_locator", interrupted)
+        failed = operations.save_update(review.preparation)
+    assert failed.code == "capture_unavailable", failed
+    assert not (vault / ".brz2obsidian/locator.json").exists()
+    fresh = Operations()
+    assert fresh.inspect_history(vault).admission.status == "recovery_first"
+    recovery = fresh.prepare_recovery(vault)
+    assert (
+        recovery.status,
+        recovery.code,
+    ) == ("cleanup", "collection_local_locator_pending"), recovery
+    assert recovery.unpublished_checkpoint is not None
+    assert (
+        fresh.prepare_collection_import(vault, source, record_path=record_path).code
+        == "recovery_first"
+    )
+    journal_path = vault / ".git" / collection_publication._JOURNAL
+    journal_bytes = journal_path.read_bytes()
+    wrong_anchor = json.loads(journal_bytes)
+    wrong_anchor["locator"]["association"]["vault_anchor"] += "-wrong"
+    journal_path.write_bytes(json.dumps(wrong_anchor).encode())
+    try:
+        invalid = fresh.prepare_recovery(vault)
+        assert (invalid.status, invalid.code) == (
+            "unavailable",
+            "collection_local_publication_invalid",
+        )
+    finally:
+        journal_path.write_bytes(journal_bytes)
+    with collection_publication.collection_publication_guard(vault):
+        busy = fresh.execute_recovery(vault, recovery)
+        assert busy.recovery_required and journal_path.read_bytes() == journal_bytes
+    recovered = fresh.execute_recovery(vault, recovery)
+    assert recovered.code == (
+        "collection_local_locator_resealed"
+        if advanced
+        else "collection_local_publication_abandoned"
+    ), recovered
+    assert not recovered.authored_files_changed
+    assert not (vault / path).exists()
+    assert established.read_bytes() == b"Independent note.\r\n"
+    if advanced:
+        assert (
+            fresh.read_checkpoint(vault).locator.commit
+            == recovery.unpublished_checkpoint
+        )
+        assert fresh.resume_update(vault).code == "resumed"
+
+        def interrupt_discard(root, native_git, association, manifest, writes):
+            assert manifest.discarded_review == recovery.unpublished_checkpoint
+            native_git.call("update-ref", writes.ref, writes.commit, manifest.previous)
+            raise OSError("Injected interruption during scoped discard")
+
+        with monkeypatch.context() as injection:
+            injection.setattr(vault_history, "_publish_locator", interrupt_discard)
+            discarded = fresh.discard_saved_review(
+                vault, expected_commit=recovery.unpublished_checkpoint
+            )
+        assert discarded.code == "capture_unavailable", discarded
+        discard_recovery = fresh.prepare_recovery(vault)
+        assert discard_recovery.code == "collection_local_locator_pending"
+        assert (
+            fresh.execute_recovery(vault, discard_recovery).code
+            == "collection_local_locator_resealed"
+        )
+        assert (
+            fresh.read_checkpoint(vault).locator.commit
+            == discard_recovery.unpublished_checkpoint
+        )
+        assert fresh.load_update(vault).code == "saved_update_unavailable"
+    else:
+        assert fresh.read_checkpoint(vault).status == "absent"
 
 
 def test_saved_unrelated_review_keeps_the_established_source_available():

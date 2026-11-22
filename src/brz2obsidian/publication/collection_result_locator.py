@@ -66,7 +66,13 @@ def locator_after_scoped_result(root, git, saved_locator, tip, names):
         or git.call("rev-parse", "--verify", ref).decode().strip()
         != graph.intent_commit
         or not _result_locator_matches(manifest, prepared, intent)
-        or not _owned_marker_matches(root, intent.operation_id)
+        or not _owned_marker_matches(
+            root,
+            intent.operation_id,
+            saved_checkpoint=prepared.previous
+            if prepared.collection_preparation_owner
+            else None,
+        )
     ):
         return None
     return saved_locator.model_copy(

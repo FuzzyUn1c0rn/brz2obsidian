@@ -1505,6 +1505,11 @@ class _OperationObservation(NamedTuple):
 
 def _inspect_update_observation(vault, *, _owners=None):
     """Return fresh status and validated graph facts for this one public call."""
+    from .collection_publication import local_publication_status
+
+    pending = local_publication_status(Path(vault).absolute())
+    if pending is not None:
+        return pending, None
     observations = []
     status = _inspect_update_status(vault, observations=observations, _owners=_owners)
     observation = observations[0] if observations else None
@@ -2532,6 +2537,7 @@ class _OwnedCleanupFailure(Exception):
 
 @dataclass
 class _ApplyProgress:
+    scoped: bool = False
     """Track transitions that determine failure reporting and lease cleanup."""
 
     phase: str = "admission"
@@ -2898,6 +2904,8 @@ def _retain_apply_preparation(publication, observed, proposed_root, state):
     if prepared.status != "captured" and not (
         reused_undo_prepared or reused_format_prepared
     ):
+        if state.scoped and prepared.history_retained:
+            state.prepared_commit = prepared.commit
         return publication.outcome(
             "refused" if prepared.status == "refused" else "failed",
             "prepare_" + prepared.code,
@@ -2907,6 +2915,7 @@ def _retain_apply_preparation(publication, observed, proposed_root, state):
             phase=state.phase,
             history="prepared" if prepared.history_retained else "none",
             checkpoint=prepared.commit,
+            recovery=state.scoped and prepared.history_retained,
         )
     state.prepared_commit = prepared.commit
     if reused_undo_prepared or reused_format_prepared:
@@ -3367,12 +3376,18 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
 
 
 def _release_apply_lease(root, operation_id, state, outcome, start):
-    if state.acquired and state.intent_commit is not None:
+    from .collection_publication import release_native_operation
+
+    if state.acquired and (
+        state.intent_commit is not None
+        or state.scoped
+        and state.prepared_commit is not None
+    ):
         _park(root, operation_id)
-    if state.acquired and state.intent_commit is None:
+    elif state.acquired:
         pending_exception = sys.exc_info()[0]
         try:
-            _release(root, operation_id)
+            release_native_operation(root, operation_id)
         except OSError, ValueError, TypeError:
             if pending_exception is None or issubclass(
                 pending_exception, (OSError, ValueError, TypeError)
@@ -3531,7 +3546,9 @@ def _execute_staged_apply(name, publication, paths, observed, state):
 
 
 def _completed_apply(root, operation_id, state, outcome, start, undo_target, changed):
-    _release(root, operation_id)
+    from .collection_publication import release_native_operation
+
+    release_native_operation(root, operation_id)
     state.acquired = False
     return outcome(
         "undone" if undo_target else "applied" if changed else "no_content_change",
@@ -3571,6 +3588,18 @@ def _publish_staged_apply(publication, paths, observed, state):
         )
     with _proposed_directory(root.parent) as name:
         return _execute_staged_apply(name, publication, paths, observed, state)
+
+
+def _acquire_reviewed_apply(root, operation_id, checkpoint, undo_target):
+    from .collection_publication import acquire_collection_apply
+    from .vault_history import _scoped_saved_checkpoint
+
+    scoped = undo_target is None and _scoped_saved_checkpoint(checkpoint.manifest)
+    if scoped:
+        acquire_collection_apply(root, operation_id, checkpoint.locator)
+    else:
+        _acquire(root, operation_id)
+    return scoped
 
 
 def _apply_reviewed_update(
@@ -3650,7 +3679,9 @@ def _apply_reviewed_update(
         )
         if refusal is not None:
             return outcome("refused", refusal, start=start)
-        _acquire(root, operation_id)
+        state.scoped = _acquire_reviewed_apply(
+            root, operation_id, first.checkpoint, undo_target
+        )
         state.acquired = True
         observed = _observe_apply_under_lease(
             root,
