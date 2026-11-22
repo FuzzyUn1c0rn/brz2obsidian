@@ -271,18 +271,24 @@ def _observation_link_graph(context):
     return graph
 
 
+def _authored_observation_targets(context, inventory):
+    excluded = {row.path for row in inventory if row.excluded}
+    return {
+        target_id
+        for document in context.current_documents
+        if document.source_path not in excluded
+        for occurrence in document.occurrences
+        for target_id in (occurrence.meaning.target_id, *occurrence.meaning.candidates)
+        if target_id is not None
+    }
+
+
 def _required_observation_paths(facts, inventory, managed, *, _owner):
     context = facts.link_context
     targets = {row.target_id: row for row in context.current_targets}
     graph = _observation_link_graph(context)
     related = {key for key in targets if key.startswith("subject:")}
     by_path = {row.canonical_path: row.target_id for row in targets.values()}
-    if facts.format_operation.kind == "collection_import":
-        related.update(
-            by_path[document.source_path]
-            for document in context.current_documents
-            if document.source_path in by_path
-        )
     # Identity suggestions remain suggestions, but their exact candidate files
     # are consumed evidence and cannot be discarded as unrelated context.
     if any(
@@ -317,6 +323,8 @@ def _required_observation_paths(facts, inventory, managed, *, _owner):
         if expanded == related:
             break
         related = expanded
+    if facts.format_operation.kind == "collection_import":
+        related.update(_authored_observation_targets(context, inventory))
     needed = {targets[key].canonical_path for key in related if key in targets}
     return needed
 
@@ -381,7 +389,8 @@ def _observed_facts(
             document = documents.get(row.path)
             if (
                 row.path in needed
-                or document is not None
+                or facts.format_operation.kind != "collection_import"
+                and document is not None
                 and document.status != "supported"
             ):
                 raise _ExcludedDependency

@@ -599,6 +599,25 @@ def _observe_authored_recovery_note(
     return parsed, reference, state
 
 
+def _completed_import_outputs(facts, current, selected, proposed, *, direction):
+    if direction != "finish" or facts.format_operation.kind != "collection_import":
+        return ()
+    completed = []
+    for path, content in selected.items():
+        observed = current.get(path)
+        row = proposed.get(path)
+        if (
+            observed is not None
+            and observed.existence == "present"
+            and same_content(observed.content, content)
+            and row is not None
+            and row.size == content_size(content)
+            and row.sha256 == content_sha(content)
+        ):
+            completed.append((path, row.sha256))
+    return tuple(sorted(completed))
+
+
 def _refresh_recovery_link_context(
     original_facts,
     admission,
@@ -735,6 +754,8 @@ def _refresh_recovery_link_context(
                 target_facts=lookup_states,
                 inventory="complete",
                 output_format=original_facts.incoming_identity.output_format,
+                authored_links=original_facts.format_operation.kind
+                == "collection_import",
                 record_format=_current_record_format(
                     original_facts,
                     observed_document.path,
@@ -765,6 +786,13 @@ def _refresh_recovery_link_context(
             "current_target_facts": lookup_states,
             "incoming_target_facts": tuple(incoming_target_facts),
             "current_documents": tuple(documents),
+            "import_finished_outputs": _completed_import_outputs(
+                original_facts,
+                current,
+                selected_files,
+                ownership_proposed,
+                direction=direction,
+            ),
             "incoming_documents": tuple(incoming_documents),
         }
     )
@@ -2537,9 +2565,7 @@ def _build_recovery_review(
             else None
         )
     except ImportRecoveryLinkChange as error:
-        return _recovery_preparation(
-            "refused", str(error), observed=observed, directions=directions
-        )
+        return _recovery_preparation("refused", str(error))
     except OSError, ValueError, TypeError, UnicodeError:
         return _recovery_preparation("unavailable", "recovery_review_unavailable")
     return _recovery_preparation(

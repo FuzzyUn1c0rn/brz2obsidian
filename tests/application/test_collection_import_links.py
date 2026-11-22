@@ -273,3 +273,60 @@ def test_import_continuation_only_blocks_actual_new_link_effects():
     assert (
         next(row for row in impact.observations if row.connection).after.path == missing
     )
+
+
+def test_base_grouped_literals_and_bare_note_properties_preserve_target_evidence():
+    from brz2obsidian.obsidian.import_links import inspect_import_links
+
+    target = "Imports/B/Notes/Future.md"
+    incoming = {target: b"# Future\n"}
+
+    def inspect(expression, value):
+        return inspect_import_links(
+            {
+                "Index.base": f"formulas: {{open: 'link({expression})'}}\n".encode(),
+                "Authored.md": f'---\nnext: "{value}"\n---\n'.encode(),
+            },
+            incoming,
+        )
+
+    for expression in ('("Fut" + "ure")', '("Fut") + (("ure"))'):
+        impact = inspect(expression, "Elsewhere/Other.md")
+        assert impact.blockers == ("connection_required",), expression
+        assert impact.observations[0].after.path == target
+
+    for expression in ("next", "(next)", "note.next", 'note["next"]'):
+        assert inspect(expression, target + "#Future").blockers == (
+            "affected_link_uncertain",
+        ), expression
+        unrelated = inspect(expression, "Elsewhere/Other.md#Heading")
+        assert unrelated.safe and unrelated.warnings == ("Index.base",)
+
+
+def test_embedded_base_and_fixed_image_targets_participate_in_import_review():
+    from brz2obsidian.obsidian.import_links import (
+        inspect_import_links,
+        reserved_import_names,
+    )
+
+    note = "Imports/B/Notes/Future.md"
+    image = "Imports/B/Attachments/Picture.png"
+    incoming = {note: b"# Future\n", image: b"\x00\xff"}
+    formulas = (
+        f"formulas:\n  title: 'link(\"{note}\")'\n  thumbnail: 'image(\"{image}\")'\n"
+    )
+    existing = {
+        "Authored.md": ("# Story\n\n```base\n" + formulas + "```\n").encode(),
+    }
+    assert {"future", "picture.png"} <= set(
+        reserved_import_names(existing, "Imports/B")
+    )
+    impact = inspect_import_links(existing, incoming)
+    assert impact.blockers == ("changed_meaning", "connection_required")
+    assert {row.after.path for row in impact.observations} == {note, image}
+    assert all(row.document_path == "Authored.md" for row in impact.observations)
+
+    ordinary_code = {
+        "Authored.md": existing["Authored.md"].replace(b"```base", b"```yaml")
+    }
+    assert inspect_import_links(ordinary_code, incoming).safe

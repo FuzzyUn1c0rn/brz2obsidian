@@ -920,6 +920,24 @@ def _unrelated_import_document(facts, document):
     )
 
 
+def _retained_import_links(context, document):
+    selection = (document.source_path, document.content.identity.sha256)
+    if selection not in context.import_finished_outputs:
+        return {}
+    matches = tuple(
+        row
+        for row in context.incoming_documents
+        if row.source_path == document.source_path
+        and row.document_id == document.document_id
+        and same_content(row.content, document.content)
+    )
+    return (
+        {row.occurrence_id: row for row in matches[0].occurrences}
+        if len(matches) == 1
+        else {}
+    )
+
+
 def _renew_import_connections(facts, document, prior, resolved):
     if (
         facts.format_operation.kind != "collection_import"
@@ -935,6 +953,7 @@ def _renew_import_connections(facts, document, prior, resolved):
         and row.document_sha256 == document.content.identity.sha256
     }
     old_occurrences = {row.occurrence_id: row for row in prior.occurrences}
+    retained_links = _retained_import_links(facts.link_context, document)
     occurrences = []
     for row, actual in zip(document.occurrences, resolved, strict=True):
         ordinal = row.occurrence_id.rsplit(":link:", 1)[-1]
@@ -947,7 +966,11 @@ def _renew_import_connections(facts, document, prior, resolved):
             old_occurrences.get(row.occurrence_id) == row
             and row.meaning.status == "missing"
             and actual.status == "resolved"
-            and key in choices
+            and (
+                key in choices
+                or retained_links.get(row.occurrence_id)
+                == row.model_copy(update={"meaning": actual})
+            )
         ):
             row = row.model_copy(update={"meaning": actual})
         occurrences.append(row)

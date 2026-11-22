@@ -31,6 +31,7 @@ from .formats import (
     format_findings,
     format_proposal,
     output_semantics,
+    retained_import_output,
     review_facts,
 )
 from .link_meanings import _OccurrenceMeanings, validate_current_link_context
@@ -355,6 +356,11 @@ def _reconcile_subject(
             ("compatible", subject.incoming, "source_only", True)
             if facts.format_operation.automatic_merge
             and _new_source_output(facts, subject)
+            else None
+        )
+        or (
+            ("no_change", subject.current.content, "already_current", False)
+            if retained_import_output(facts, subject)
             else None
         )
         or (policy.proposal if policy_allowed else None)

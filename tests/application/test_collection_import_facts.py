@@ -1329,3 +1329,71 @@ def test_saved_collection_review_resumes_with_its_source_still_inactive():
         == note
     )
     assert not (vault / path).exists()
+
+
+def test_recovery_link_refusal_keeps_fresh_direction_discovery_available(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import vault_recovery
+    from brz2obsidian.publication.collection_placement import ImportRecoveryLinkChange
+
+    commit = "b" * 40
+    observed = SimpleNamespace(
+        status="incomplete",
+        code="cancelled_after_intent",
+        recovery_required=True,
+        operation_id="a" * 32,
+        generation=2,
+        intent_commit=commit,
+        kind="apply",
+    )
+    origin = SimpleNamespace(prepared_commit=commit)
+    proof = SimpleNamespace(
+        graph=SimpleNamespace(
+            receipt=None, authorities=((commit, origin),), intent=origin
+        ),
+        owned={commit: (None, SimpleNamespace(saved=SimpleNamespace(plan=None)))},
+    )
+    monkeypatch.setattr(
+        vault_recovery, "_inspect_update_observation", lambda root: (observed, proof)
+    )
+    monkeypatch.setattr(
+        vault_recovery, "recovery_operation_marker", lambda root, authority: True
+    )
+
+    def affected(*args, **kwargs):
+        raise ImportRecoveryLinkChange("recovery_import_link_changes")
+
+    monkeypatch.setattr(vault_recovery, "_finish_review", affected)
+    refused = Operations().prepare_recovery(tmp_path, direction="finish")
+    assert (refused.status, refused.code, refused.review) == (
+        "refused",
+        "recovery_import_link_changes",
+        None,
+    )
+    choices = Operations().prepare_recovery(tmp_path)
+    assert choices.status == "offered"
+    assert choices.operation_id == observed.operation_id
+    assert choices.available_directions == ("finish", "restore")
+
+
+def test_first_import_observes_without_retaining_an_unrelated_ignored_note():
+    vault, stage, path, record_path, note, record = _placement_fixture()
+    _stage_placement(stage, path, record_path, note, record)
+    (vault / ".gitignore").write_bytes(b"Private/\n")
+    private = vault / "Private/Independent.md"
+    private.parent.mkdir()
+    authored = b"# Independent\r\n\r\nOnly authored prose.\r\n"
+    private.write_bytes(authored)
+    result = Operations().prepare_collection_import(
+        vault, stage, record_path=record_path
+    )
+    assert result.ready, result.code
+    assert "Private/Independent.md" not in {
+        row.source_path
+        for row in result.preparation.review.facts.link_context.current_documents
+    }
+    assert private.read_bytes() == authored
+    assert not (vault / path).exists()

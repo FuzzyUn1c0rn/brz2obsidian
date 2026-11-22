@@ -8,7 +8,7 @@ import yaml
 
 from brz2obsidian.contracts import ExactContent, LinkMeaning, LinkQuery
 
-from .links import interpret_links
+from .links import _code_ranges, interpret_links
 
 _TOKEN = re.compile(r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z_][\w]*|[^\s]""")
 _STRING = re.compile(r""""([^"\\]*)"|'([^'\\]*)' """.rstrip())
@@ -36,18 +36,38 @@ class BaseDocument:
 
 
 def _literal(tokens):
-    if not tokens or any(token != "+" for token in tokens[1::2]):
-        return None
     values = []
-    for token in tokens[::2]:
-        matched = _STRING.fullmatch(token)
-        if matched is None:
+    depth = 0
+    needs_value = True
+    for token in tokens:
+        if token == "(" and needs_value:
+            depth += 1
+        elif token == ")" and not needs_value and depth:
+            depth -= 1
+        elif token == "+" and not needs_value:
+            needs_value = True
+        elif needs_value and (matched := _STRING.fullmatch(token)) is not None:
+            values.append(matched[1] if matched[1] is not None else matched[2])
+            needs_value = False
+        else:
             return None
-        values.append(matched[1] if matched[1] is not None else matched[2])
-    return "".join(values) if len(tokens) % 2 else None
+    return "".join(values) if not needs_value and not depth else None
+
+
+def _ungroup_property(tokens):
+    start, stop = 0, len(tokens)
+    while start + 1 < stop and tokens[start] == "(" and tokens[stop - 1] == ")":
+        start += 1
+        stop -= 1
+    if stop - start == 1 and tokens[start].isidentifier():
+        return tokens[start]
+    return None
 
 
 def _note_properties(tokens):
+    bare = _ungroup_property(tokens)
+    if bare is not None:
+        yield bare
     for i in range(len(tokens) - 2):
         owner, access, name = tokens[i : i + 3]
         if owner == "note" and access == "." and name.isidentifier():
@@ -72,7 +92,7 @@ def _calls(expression):
     tokens = tuple(_TOKEN.findall(expression))
     for i, token in enumerate(tokens[:-1]):
         if (
-            token in ("file", "link")
+            token in ("file", "image", "link")
             and tokens[i + 1] == "("
             and (not i or tokens[i - 1] != ".")
         ):
@@ -115,7 +135,7 @@ def _wiki_destination(target):
     return f"[[{target}]]"
 
 
-def _fixed_reference(target, display, path, ordinal, catalog):
+def _fixed_reference(target, display, path, occurrence_id, catalog):
     if re.match(r"(?i)^[a-z][a-z+.-]*://", target):
         return None
     interpreted = interpret_links(
@@ -139,12 +159,13 @@ def _fixed_reference(target, display, path, ordinal, catalog):
         if display is None
         else row.meaning.model_copy(update={"display_text": display})
     )
-    return BaseOccurrence(f"{path}:base:{ordinal}", row.query, meaning)
+    return BaseOccurrence(occurrence_id, row.query, meaning)
 
 
-def inspect_base_document(path, raw, catalog):
+def inspect_base_document(path, raw, catalog, *, document=None, prefix=None):
     """Observe literal path arguments and retain evidence for unsupported calls."""
-    content = ExactContent(data=raw)
+    content = document if document is not None else ExactContent(data=raw)
+    prefix = f"{path}:base" if prefix is None else prefix
     try:
         value = yaml.safe_load(raw.decode("utf-8"))
     except UnicodeDecodeError, yaml.YAMLError, RecursionError:
@@ -159,7 +180,11 @@ def inspect_base_document(path, raw, catalog):
                 None
                 if target is None
                 else _fixed_reference(
-                    target, _literal(display), path, len(occurrences), catalog
+                    target,
+                    _literal(display),
+                    path,
+                    f"{prefix}:{len(occurrences)}",
+                    catalog,
                 )
             )
             if row is None:
@@ -180,6 +205,40 @@ def inspect_base_document(path, raw, catalog):
         False,
         tuple(sorted(properties)),
     )
+
+
+def _base_fence_content(chunk):
+    lines = chunk.splitlines(keepends=True)
+    opening = re.fullmatch(r" {0,3}(`{3,}|~{3,})[ \t]*base\s*", lines[0])
+    if opening is None:
+        return None
+    marker = opening[1]
+    end = len(lines)
+    if end > 1 and re.fullmatch(
+        r" {0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}\s*",
+        lines[-1],
+    ):
+        end -= 1
+    return "".join(lines[1:end]).encode("utf-8")
+
+
+def inspect_embedded_bases(path, content, catalog):
+    """Observe only Markdown code ranges explicitly declared as native Bases."""
+    try:
+        text = content.data.decode("utf-8")
+    except UnicodeDecodeError:
+        return
+    ranges, _ = _code_ranges(text)
+    for index, (start, end) in enumerate(ranges):
+        raw = _base_fence_content(text[start:end])
+        if raw is not None:
+            yield inspect_base_document(
+                path,
+                raw,
+                catalog,
+                document=content,
+                prefix=f"{path}:base:{index}",
+            )
 
 
 def base_note_property_values(files, names):

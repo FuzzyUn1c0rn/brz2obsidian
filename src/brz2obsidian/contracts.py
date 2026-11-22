@@ -2339,6 +2339,9 @@ class LinkContext(ReconciliationContract):
         default=(),
         exclude_if=lambda value: not value,
     )
+    import_finished_outputs: tuple[tuple[str, str], ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class LinkValidationBaseline(ReconciliationContract):

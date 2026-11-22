@@ -177,11 +177,26 @@ def obsolete_support_listing(facts, subject):
     )
 
 
+def retained_import_output(facts, subject):
+    context = facts.link_context
+    return (
+        facts.format_operation.kind == "collection_import"
+        and context is not None
+        and subject.current.existence == "present"
+        and subject.current.path == subject.path
+        and subject.incoming is not None
+        and same_content(subject.current.content, subject.incoming)
+        and (subject.path, subject.incoming.identity.sha256)
+        in context.import_finished_outputs
+    )
+
+
 def format_proposal(facts, subject):
     """Retain explicit choices where the selected operation lacks safe evidence."""
     operation = facts.format_operation
     if (
         operation.kind == "attachment_cleanup"
+        or retained_import_output(facts, subject)
         or automatic_onboarding(facts, subject)
         or automatic_transition(facts, subject)
         or obsolete_support_listing(facts, subject)
@@ -250,6 +265,7 @@ def _new_source_output(facts, subject):
 def review_facts(facts, subject):
     if (
         facts.format_operation.kind == "attachment_cleanup"
+        or retained_import_output(facts, subject)
         or automatic_onboarding(facts, subject)
         or automatic_transition(facts, subject)
         or automatic_configuration(facts, subject)

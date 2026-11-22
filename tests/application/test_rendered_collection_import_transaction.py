@@ -1,6 +1,8 @@
 """Native source-to-vault evidence for scoped placement and authored link review."""
 
 import json
+import re
+from urllib.parse import unquote
 from zipfile import ZipFile
 
 from brz2obsidian.application.operations import Operations
@@ -245,7 +247,13 @@ def test_rendered_collection_import_keeps_authored_links_and_revalidates_connect
         if row["relative_path"].endswith("/picture.png")
     )
     assert (vault / picture).read_bytes() == asset
-    assert picture in (vault / notes["Future"]).read_text(encoding="utf-8")
+    future = vault / notes["Future"]
+    image_reference = re.search(
+        r"!\[Picture\]\(([^)]+)\)", future.read_text(encoding="utf-8")
+    )
+    assert image_reference is not None
+    destination = unquote(image_reference[1].removeprefix("<").removesuffix(">"))
+    assert (future.parent / destination).resolve() == (vault / picture).resolve()
     assert notes["Future"] in (vault / notes["Independent entry"]).read_text(
         encoding="utf-8"
     )

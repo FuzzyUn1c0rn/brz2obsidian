@@ -23,6 +23,7 @@ from .base_import_links import (
     BaseDocument,
     base_note_property_values,
     inspect_base_document,
+    inspect_embedded_bases,
 )
 from .links import interpret_link_target, interpret_links
 
@@ -86,23 +87,25 @@ def _link_state(path, existence, value):
 
 def _authored_documents(files, catalog):
     targets, states = catalog
-    return tuple(
-        inspect_base_document(path, raw, catalog)
-        if path.lower().endswith(".base")
-        else interpret_links(
-            ExactContent(data=raw),
-            document_id=path,
-            source_path=path,
-            path_mode="vault",
-            targets=targets,
-            target_facts=states,
-            inventory="complete",
-            output_format=9,
-            authored_links=True,
-        )
-        for path, raw in sorted(files.items())
-        if isinstance(raw, bytes) and path.lower().endswith((".md", ".base"))
-    )
+    for path, raw in sorted(files.items()):
+        if not isinstance(raw, bytes):
+            continue
+        if path.casefold().endswith(".base"):
+            yield inspect_base_document(path, raw, catalog)
+        elif path.casefold().endswith(".md"):
+            content = ExactContent(data=raw)
+            yield interpret_links(
+                content,
+                document_id=path,
+                source_path=path,
+                path_mode="vault",
+                targets=targets,
+                target_facts=states,
+                inventory="complete",
+                output_format=9,
+                authored_links=True,
+            )
+            yield from inspect_embedded_bases(path, content, catalog)
 
 
 def _existing_kind(status):
@@ -174,7 +177,10 @@ def _base_may_reach_import(document, incoming, property_values):
     for token in (*document.uncertain, *property_targets):
         if not token:
             continue
-        value = _key(token.removeprefix("[[").removesuffix("]]").lstrip("/"))
+        destination = token.removeprefix("[[").removesuffix("]]")
+        value = _key(destination.partition("|")[0].partition("#")[0].lstrip("/"))
+        if not value:
+            continue
         for path in incoming:
             normalized = _key(path)
             if "/" in value and any(
@@ -267,13 +273,15 @@ def inspect_import_links(
         return ImportLinkImpact(blockers=("import_target_occupied",))
     before = _catalog(existing, reserved_paths, gap_paths)
     after = _catalog(existing | incoming, reserved_paths, gap_paths)
-    documents = _authored_documents(
-        {
-            path: data
-            for path, data in existing.items()
-            if path not in unchanged_generated
-        },
-        before,
+    documents = tuple(
+        _authored_documents(
+            {
+                path: data
+                for path, data in existing.items()
+                if path not in unchanged_generated
+            },
+            before,
+        )
     )
     approved = frozenset(connections)
     observations = tuple(
