@@ -183,6 +183,34 @@ termination, does not establish completion or replace receipt validation.
 | `2` | Setup/execution error or source changed during execution |
 | `3` | Incomplete/interrupted execution |
 
+### Windows checkpoint fixtures in Codex
+
+Native checkpoint tests use Python's system temporary directory for disposable
+vaults outside the project repository. Codex's Windows sandbox can supply a
+longer `Temp` path under `AppData\Local\Packages`. In a reproduced failure,
+the Git checkpoint lock path grew from 178 characters with the normal Windows
+temp directory to 266 in the sandbox. Git `update-ref` exited 128 with
+`cannot lock ref` and `unable to create directory`. The test fixture surfaced
+this as `capture_unavailable` before it reached Undo. Both the main checkout and
+a linked worktree reproduced the failure with the long temp path.
+
+For an unfamiliar Windows execution context, check the actual temp directory
+from the project interpreter in the shell that will launch the checks.
+
+```powershell
+& $python -c "import tempfile; print(tempfile.gettempdir())"
+```
+
+If Codex supplies the long sandbox path, the verified setup is an approved
+command outside the sandbox with the normal, shorter Windows temp directory.
+Check the temp path again in that command's context and run `tools/check.py`
+for focused verification or `tools/coverage_suite.py` for the maintained
+bundle. In the [Undo tests](../tests/application/test_vault_undo.py),
+`test_small_latest_undo_reverses_one_note_and_refuses_reuse` can confirm
+checkpoint setup before a broad run. A one-off `git -c core.longpaths=true
+update-ref` probe confirmed the path-length cause. The passing Undo run used the
+shorter temp directory with the existing Git configuration.
+
 ### Receipt validation
 
 Before accepting automated check claims, validate the receipt against separately
