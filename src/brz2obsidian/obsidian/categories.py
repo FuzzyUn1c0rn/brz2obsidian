@@ -9,6 +9,8 @@ from brz2obsidian.core.import_categories import (
     view_paths,
 )
 
+from .templates import TEMPLATE_DATE_VARIABLE
+
 
 def classification_records(plan):
     targets = {t.item_key: t for t in plan.item_targets}
@@ -111,6 +113,10 @@ def scoped_category_outputs(plan):
         )
     outputs = {"Categories.md": "\n".join(lines) + "\n"}
     nonmembers = _nonmember_paths(plan)
+    date_variable = json.dumps(TEMPLATE_DATE_VARIABLE)
+    exclude_template = (
+        f"!(note.created == {date_variable} && note.updated == {date_variable})"
+    )
     for item in approved_views(snapshot, plan.item_targets, plan.category_choices):
         destination = shared[item.original_identity]
         note, base = view_paths(item)
@@ -128,6 +134,7 @@ def scoped_category_outputs(plan):
                 "    - " + json.dumps(value, ensure_ascii=False) + "\n"
                 for value in (
                     'file.ext == "md"',
+                    exclude_template,
                     *(
                         f"file.path != {json.dumps(path, ensure_ascii=False)}"
                         for path in nonmembers

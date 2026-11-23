@@ -591,9 +591,44 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     assert filters[-1] == f'list(categories).contains(link("{shared}"))'
     assert 'file.path != "Templates/Existing category.md"' in filters
     assert f'file.path != "{location}/Templates/New note.md"' in filters
-    assert all(row.startswith('file.path != "') for row in filters[1:-1])
     assert all("Projects/Attachments/Member.md" not in row for row in filters)
     assert "note.categories" in view
+
+    later_facts = facts.model_copy(
+        update={
+            "identity": facts.identity.model_copy(update={"source_id": "later-brain"}),
+            "collection_title": "Boreal",
+        }
+    )
+    later = render(
+        plan(
+            analyze(later_facts, POLICY),
+            output_format=9,
+            import_location="Imports/Boreal",
+            category_choices=(choice,),
+        ),
+        meta,
+    )
+    assert not set(approved.manifest).intersection(later.manifest)
+    later_template = next(
+        path
+        for path in later.manifest
+        if path.startswith("Imports/Boreal/Templates/Projects") and path.endswith(".md")
+    )
+    later_member = "Imports/Boreal/Notes/Alpha.md"
+    template = mapping(generated(later, later_template).split("---", 2)[1])
+    member = mapping(generated(later, later_member).split("---", 2)[1])
+    assert template["categories"] == member["categories"] == [f"[[{shared}]]"]
+    assert template["created"] == template["updated"] == "{{date:YYYY-MM-DD}}"
+    assert member["created"] != template["created"]
+    assert member["updated"] != template["updated"]
+    assert all(later_template not in row for row in filters)
+    exclude_template = '!(note.created == "{{date:YYYY-MM-DD}}" && note.updated == "{{date:YYYY-MM-DD}}")'
+    assert exclude_template in filters
+    assert all(
+        row == exclude_template or row.startswith('file.path != "')
+        for row in filters[1:-1]
+    )
 
     original = {row.relative_path: row.content for row in approved.generated_files}
     incoming = {row.relative_path: row.content for row in declined.generated_files}

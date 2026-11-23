@@ -7,6 +7,7 @@ from ._frontmatter import frontmatter
 from .bases import CATEGORY_VIEWS, MEMBERS
 from .guide import vault_guide
 
+TEMPLATE_DATE_VARIABLE = "{{date:YYYY-MM-DD}}"
 TEMPLATE_CONFIGURATION = {"folder": "Templates", "dateFormat": "YYYY-MM-DD"}
 PROPERTY_TYPES = {
     "categories": "multitext",
@@ -26,8 +27,8 @@ def new_object_template(category=None, tags=()):
         "categories": [category] if category else [],
         "appearance_category": category,
         "icon": None,
-        "created": "{{date:YYYY-MM-DD}}",
-        "updated": "{{date:YYYY-MM-DD}}",
+        "created": TEMPLATE_DATE_VARIABLE,
+        "updated": TEMPLATE_DATE_VARIABLE,
         "tags": list(tags),
         "aliases": [],
     }
