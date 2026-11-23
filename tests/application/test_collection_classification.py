@@ -959,7 +959,13 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
     from types import SimpleNamespace
 
     import pytest
+    from pydantic import ValidationError
 
+    from brz2obsidian.application.checkpoint_contracts import (
+        CheckpointFile,
+        CheckpointManifest,
+    )
+    from brz2obsidian.application.source_payload_contracts import ReviewedSourceBinding
     from brz2obsidian.application.update_facts import output_identity
     from brz2obsidian.application.update_facts import target as path_target
     from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
@@ -995,14 +1001,70 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
             }
         ],
     }
-    manifest = SimpleNamespace(
-        identity=output_identity(record),
-        collection_record_path=record_path,
-        collection_baseline_commit=None,
-        source=tuple(
-            SimpleNamespace(path=path) for path in (record_path, category_path)
-        ),
+    saved_commit, baseline_commit = "c" * 40, "b" * 40
+    files = tuple(
+        CheckpointFile(
+            path=relative,
+            mode="100644",
+            size=1,
+            sha256="a" * 64,
+            object_id="a" * 40,
+        )
+        for relative in sorted((record_path, category_path))
     )
+    identity_model = output_identity(record)
+    binding = ReviewedSourceBinding(
+        schema_id="brz2obsidian.reviewed-source-binding",
+        schema_version=1,
+        proposal_id="legacy-scoped-category",
+        generation=1,
+        incoming_identity=identity_model,
+        target_source_version=None,
+        source_anchor="synthetic staging directory",
+        files=(),
+        fingerprint=ReviewedSourceBinding.digest(()),
+    )
+    manifest = CheckpointManifest(
+        schema_id="brz2obsidian.checkpoint-manifest",
+        schema_version=1,
+        association_id="a" * 64,
+        generation=3,
+        boundary="prepared",
+        identity=identity_model,
+        collection_record_path=record_path,
+        source=files,
+        vault=(),
+        preimage=(),
+        proposed=(),
+        review_content=(),
+        recovery_gaps=(),
+        semantic_fingerprint="a" * 64,
+        policy_fingerprint="b" * 64,
+        policy_continuity_fingerprint="c" * 64,
+        previous=saved_commit,
+        review_object="d" * 40,
+        review_size=1,
+        review_sha256="e" * 64,
+        reviewed_source=binding,
+    )
+    with pytest.raises(ValidationError, match="collection selection"):
+        CheckpointManifest.model_validate(
+            {
+                **manifest.model_dump(),
+                "collection_baseline_commit": baseline_commit,
+            }
+        )
+    saved = CheckpointManifest.model_validate(
+        {
+            **manifest.model_dump(),
+            "boundary": "local",
+            "generation": 2,
+            "previous": baseline_commit,
+            "collection_baseline_commit": baseline_commit,
+        }
+    )
+    assert manifest.collection_baseline_commit is None
+    assert saved.source == files
     context = SimpleNamespace(
         current_targets=(category,),
         incoming_targets=(category,),
@@ -1042,16 +1104,21 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
         incoming_identity=manifest.identity,
     )
     plan = SimpleNamespace(facts=facts)
-    (restored,) = vault_recovery._restore_target_states(
-        plan,
-        context,
-        {},
-        {current_path: before_key},
-        {current_path},
-        git,
-        _owner=None,
-        retained_category_identities=bindings,
-    )
+
+    def restore(owned_categories=()):
+        (restored,) = vault_recovery._restore_target_states(
+            plan,
+            context,
+            {},
+            {current_path: before_key},
+            {current_path},
+            git,
+            _owner=None,
+            retained_category_identities=owned_categories,
+        )
+        return restored
+
+    restored = restore(bindings)
     assert restored.content == before
     assert restored.file_roles.category
     assert restored.file_roles.path == current_path
@@ -1073,26 +1140,54 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
     wrong_identity = ExactContent(data=edited.data.replace(b'"topic"', b'"unrelated"'))
     assert not reread(wrong_identity).file_roles.category
 
-    manifest.collection_record_path = None
-    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
-    (unqualified,) = vault_recovery._restore_target_states(
-        plan, context, {}, {current_path: before_key}, {current_path}, git, _owner=None
+    unscoped = CheckpointManifest.model_validate(
+        {**manifest.model_dump(), "collection_record_path": None}
     )
-    assert not unqualified.file_roles.category
-    manifest.collection_record_path = record_path
-    previous = SimpleNamespace(**vars(manifest))
-    records[id(previous)] = deepcopy(record)
+    assert not vault_recovery._retained_scoped_categories(git, unscoped, graph, context)
+    assert not restore().file_roles.category
+    records[id(saved)] = deepcopy(record)
+    predecessor_only = CheckpointManifest.model_validate(
+        {
+            **manifest.model_dump(),
+            "source": tuple(
+                row for row in manifest.source if row.path != category_path
+            ),
+        }
+    )
     record["item_targets"][0]["creation_reasons"] = []
-    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+    records[id(predecessor_only)] = record
+    assert not vault_recovery._retained_scoped_categories(
+        git, predecessor_only, graph, context
+    )
 
-    manifest.collection_baseline_commit = "b" * 40
-    graph.owned[manifest.collection_baseline_commit] = (previous,)
-    assert vault_recovery._retained_scoped_categories(
-        git, manifest, graph, context
-    ) == {identity}
-    previous.collection_record_path = "Imports/Another/migration-record.json"
-    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+    graph.owned[saved_commit] = (saved, None)
+    assert baseline_commit not in graph.owned
+    proof = vault_recovery._retained_scoped_categories(
+        git, predecessor_only, graph, context
+    )
+    assert proof == {identity}
+    assert restore(proof).file_roles.category
+    foreign = CheckpointManifest.model_validate(
+        {
+            **saved.model_dump(),
+            "collection_record_path": "Imports/Another/migration-record.json",
+            "source": tuple(
+                row.model_copy(update={"path": row.path.replace("Atlas", "Another")})
+                for row in saved.source
+            ),
+        }
+    )
+    unrelated = CheckpointManifest.model_validate(
+        {**saved.model_dump(), "association_id": "f" * 64}
+    )
+    for untrusted in (foreign, unrelated):
+        graph.owned[saved_commit] = (untrusted, None)
+        assert not vault_recovery._retained_scoped_categories(
+            git, predecessor_only, graph, context
+        )
 
     record["item_targets"] *= 2
     with pytest.raises(OSError, match="ambiguous source identity"):
-        vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+        vault_recovery._retained_scoped_categories(
+            git, predecessor_only, graph, context
+        )

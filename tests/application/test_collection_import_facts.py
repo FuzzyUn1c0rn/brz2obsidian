@@ -495,6 +495,7 @@ def test_finish_rebinds_already_published_imported_undo_to_active_intent(monkeyp
             undo.preflight,
             {moved: observed},
             retained,
+            frozenset(),
         ),
     )
     monkeypatch.setattr(

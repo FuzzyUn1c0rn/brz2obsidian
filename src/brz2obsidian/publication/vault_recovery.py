@@ -1118,12 +1118,20 @@ def _retained_scoped_categories(git, prepared, retained, context):
     }
     if not candidates:
         return frozenset()
-    previous = retained.owned.get(prepared.collection_baseline_commit)
-    manifests = (prepared,) if previous is None else (prepared, previous[0])
-    confirmed = set()
-    for manifest in manifests:
-        if manifest.collection_record_path == record_path:
-            confirmed.update(_retained_category_record_identities(git, manifest))
+    confirmed = _retained_category_record_identities(git, prepared)
+    previous = retained.owned.get(prepared.previous)
+    saved = previous[0] if previous is not None else None
+    if (
+        saved is not None
+        and saved.boundary == "local"
+        and saved.collection_baseline_commit is not None
+        and saved.association_id == prepared.association_id
+        and saved.generation + 1 == prepared.generation
+        and saved.collection_record_path == record_path
+        and (saved.identity.module_id, saved.identity.collection_id)
+        == (prepared.identity.module_id, prepared.identity.collection_id)
+    ):
+        confirmed.update(_retained_category_record_identities(git, saved))
     return frozenset(candidates & confirmed)
 
 
