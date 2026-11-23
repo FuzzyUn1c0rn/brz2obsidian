@@ -1,5 +1,14 @@
 {
   "selectors": [
+    "tests/application/test_collection_import_transaction.py::test_published_result_ref_recovers_before_locator_and_receipt",
+    "tests/application/test_collection_import_transaction.py::test_apply_recovers_interrupted_internal_saved_review[True-after_ref]",
+    "tests/application/test_collection_import_transaction.py::test_interrupted_second_import_resolves_without_changing_first_collection",
+    "tests/application/test_collection_import_facts.py::test_unpublished_collection_recovery_can_itself_be_interrupted[prepared_locator]",
+    "tests/application/test_collection_import_facts.py::test_unpublished_collection_recovery_can_itself_be_interrupted[saved_locator]",
+    "tests/application/test_collection_import_facts.py::test_already_published_import_asset_is_current_lookup_evidence",
+    "tests/application/test_collection_import_facts.py::test_public_collection_review_checks_empty_physical_parents",
+    "tests/application/test_collection_import_links.py::test_import_links_preserve_exact_targets_and_require_each_explicit_connection",
+    "tests/application/test_collection_import_links.py::test_shortest_relative_and_qualified_links_track_only_relevant_names",
     "tests/application/test_rendered_collection_import_transaction.py::test_rendered_collection_import_keeps_authored_links_and_revalidates_connection",
     "tests/application/test_collection_import_links.py::test_base_grouped_literals_and_bare_note_properties_preserve_target_evidence",
     "tests/application/test_collection_import_links.py::test_embedded_base_and_fixed_image_targets_participate_in_import_review",
