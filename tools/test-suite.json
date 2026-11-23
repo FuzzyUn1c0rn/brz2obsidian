@@ -24,6 +24,7 @@
     "tests/application/test_collection_import_facts.py::test_root_undo_locator_proof_requires_exact_owned_receipt",
     "tests/application/test_collection_import_facts.py::test_scoped_terminal_receipt_offers_cleanup_after_later_edit",
     "tests/application/test_collection_import_facts.py::test_finish_rebinds_already_published_imported_undo_to_active_intent",
+    "tests/application/test_collection_import_facts.py::test_scoped_update_undo_recovers_after_its_asset_was_removed",
     "tests/application/test_collection_import_facts.py::test_saved_unrelated_review_keeps_the_established_source_available",
     "tests/application/test_rendered_collection_import_transaction.py::test_rendered_collection_fixture_offers_a_publishable_review",
     "tests/application/test_collection_import_facts.py::test_scoped_reversal_reads_generated_predecessor_by_moved_note_identity",

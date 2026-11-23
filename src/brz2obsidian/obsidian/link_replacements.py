@@ -58,15 +58,34 @@ def render_link_replacement(
             and parsed.occurrences[0].query == occurrence.query
         )
 
+    prior = occurrence.meaning
+    restoring_known_absence = (
+        prior.status == "missing"
+        and document.inventory == "complete"
+        and prior.target_id is not None
+        and prior.target_version is None
+        and not prior.candidates
+        and prior.model_copy(
+            update={"status": "resolved", "target_version": selected.target_version}
+        )
+        == selected
+    )
     relative_markdown = (
         document.path_mode == "vault"
         and document.status == "supported"
         and occurrence.syntax == "markdown"
         and occurrence.query is not None
-        and occurrence.meaning.status == "resolved"
+        and (prior.status == "resolved" or restoring_known_absence)
         and admits_original_query(8)
         and not admits_original_query(7)
     )
+    if (
+        relative_markdown
+        and restoring_known_absence
+        and agrees(occurrence.raw, selected, output_format=8)
+    ):
+        return occurrence.raw
+    relative_markdown = relative_markdown and not restoring_known_absence
     output_format = 8 if relative_markdown else 7
     if agrees(occurrence.raw, selected, output_format=output_format):
         return occurrence.raw

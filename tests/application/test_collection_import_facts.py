@@ -585,7 +585,7 @@ def test_scoped_update_undo_recovers_after_its_asset_was_removed(monkeypatch):
     record["asset_targets"] = [{"asset_id": "icon", "relative_path": asset}]
     after = before | {
         asset: binary,
-        note: before[note] + f"\n![[{asset}]]\n".encode(),
+        note: before[note] + b"\n![Exact asset](./Assets/new.bin)\n",
         record_path: json.dumps(record).encode(),
     }
 

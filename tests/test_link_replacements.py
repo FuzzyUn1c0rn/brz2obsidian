@@ -557,3 +557,97 @@ def test_link_replacement_requires_the_bound_resolved_occurrence():
             targets=(target,),
             target_facts=(state,),
         )
+
+
+def test_restoring_a_missing_resource_keeps_the_exact_relative_markdown_embed():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    restored = target_for_links(
+        "restored", "Imports/Brain/Attachments/Data Set/picture.png", kind="resource"
+    )
+    alternate = target_for_links(
+        "other", "Imports/Brain/Attachments/other.png", kind="resource"
+    )
+    missing = interpret_link_target(
+        None, target_id=restored.target_id, existence="missing", memberships=()
+    )
+    present, other = tuple(
+        interpret_link_target(
+            ExactContent(data=b"\x89PNG\x00\xff"),
+            target_id=target.target_id,
+            existence="present",
+            memberships=(),
+        )
+        for target in (restored, alternate)
+    )
+    targets = (restored, alternate)
+    raw = b"![Exact picture](../Attachments/Data%20Set/picture.png)"
+
+    def observe(token, states, *, registry=targets):
+        return interpret_links(
+            ExactContent(data=token),
+            document_id="owner",
+            source_path="Imports/Brain/Notes/Future.md",
+            path_mode="vault",
+            targets=registry,
+            target_facts=states,
+            inventory="complete",
+            output_format=9,
+        )
+
+    document = observe(raw, (missing, other))
+    (occurrence,) = document.occurrences
+    assert occurrence.meaning.status == "missing"
+    assert occurrence.meaning.target_id == restored.target_id
+    final_states = (present, other)
+    selected = observe(raw, final_states).occurrences[0].meaning
+    assert selected.status == "resolved" and selected.target_id == restored.target_id
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            selected,
+            targets=targets,
+            target_facts=final_states,
+        )
+        == raw
+    )
+
+    redirect = b"![Exact picture](Imports/Brain/Attachments/other.png)"
+    chosen = observe(redirect, final_states).occurrences[0].meaning
+    assert chosen.status == "resolved" and chosen.target_id == alternate.target_id
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            chosen,
+            targets=targets,
+            target_facts=final_states,
+        )
+        == redirect
+    )
+    competing = target_for_links("competing", restored.canonical_path, kind="resource")
+    with pytest.raises(ValueError, match="selected destination cannot preserve"):
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            selected,
+            targets=(*targets, competing),
+            target_facts=final_states,
+        )
+    unknown = observe(raw, (other,))
+    ambiguous = observe(raw, (missing, other), registry=(*targets, competing))
+    qualified = b"![Exact picture](Imports/Brain/Attachments/Data%20Set/picture.png)"
+    for uncertain, status in ((unknown, "unknown"), (ambiguous, "ambiguous")):
+        (reference,) = uncertain.occurrences
+        assert reference.meaning.status == status
+        assert (
+            render_link_replacement(
+                uncertain,
+                reference.occurrence_id,
+                selected,
+                targets=targets,
+                target_facts=final_states,
+            )
+            == qualified
+        )
