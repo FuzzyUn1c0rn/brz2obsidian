@@ -40,6 +40,7 @@ from brz2obsidian.contracts import (
     FormatBaselineOutput,
     IdentityInventoryItem,
     IdentityTargetFacts,
+    ImportedItemIdentity,
     OperationReversalOutput,
     OperationReversalTarget,
     ReconciliationSubject,
@@ -406,7 +407,13 @@ def _unobserved_recovery_targets(
 
 
 def _observed_recovery_target_facts(
-    original_facts, current, unobserved, state_by_id, *, _owner
+    original_facts,
+    current,
+    unobserved,
+    state_by_id,
+    *,
+    retained_category_identities,
+    _owner,
 ):
     context = original_facts.link_context
     target_facts = []
@@ -434,6 +441,7 @@ def _observed_recovery_target_facts(
                     if observed_target.existence == "absent"
                     else "present",
                     membership_targets=context.current_targets,
+                    retained_category_identities=retained_category_identities,
                     source_path=target.canonical_path,
                     output_format=old.structure.output_format
                     if old.structure is not None
@@ -461,6 +469,7 @@ def _observe_operation_owned_note(
     path_known,
     direction,
     owned_record_path,
+    retained_category_identities,
     _owner,
 ):
     context = original_facts.link_context
@@ -521,6 +530,8 @@ def _observe_operation_owned_note(
         existence="present",
         membership_targets=tuple(current_targets),
         source_path=path,
+        qualify_roles=retained_target.identity in retained_category_identities,
+        retained_category_identities=retained_category_identities,
         _owner=None if _owner is None else _owner._session,
     )
     parsed = interpret_links(
@@ -697,6 +708,7 @@ def _refresh_recovery_link_context(
     selected_removal,
     direction,
     owned_record_path=None,
+    retained_category_identities=(),
     _owner,
 ):
     context = original_facts.link_context
@@ -708,7 +720,12 @@ def _refresh_recovery_link_context(
         operation_paths=set(intent.affected_paths) | set(selected_files),
     )
     target_facts = _observed_recovery_target_facts(
-        original_facts, current, unobserved, state_by_id, _owner=_owner
+        original_facts,
+        current,
+        unobserved,
+        state_by_id,
+        retained_category_identities=retained_category_identities,
+        _owner=_owner,
     )
     new_documents = []
     current_targets = [
@@ -781,6 +798,7 @@ def _refresh_recovery_link_context(
                 path_known=path in known_identity_paths,
                 direction=direction,
                 owned_record_path=owned_record_path,
+                retained_category_identities=retained_category_identities,
                 _owner=_owner,
             )
             known_identity_paths.add(path)
@@ -1077,6 +1095,69 @@ def _observed_collection_resources(facts, original):
     )
 
 
+def _retained_scoped_categories(git, prepared, retained, context):
+    record_path = prepared.collection_record_path
+    if (
+        context is None
+        or record_path is None
+        or not record_path.endswith("/migration-record.json")
+        or not _safe_relative(record_path)
+    ):
+        return frozenset()
+    candidates = {
+        target.identity
+        for lookup in (context.current_targets, context.incoming_targets)
+        for target in lookup
+        if target.kind == "category"
+        and target.status == "safe"
+        and target.category_anchor is None
+        and target.identity is not None
+        and target.target_id == f"subject:{target.identity.item_id}:content"
+        and (target.identity.module_id, target.identity.collection_id)
+        == (prepared.identity.module_id, prepared.identity.collection_id)
+    }
+    if not candidates:
+        return frozenset()
+    previous = retained.owned.get(prepared.collection_baseline_commit)
+    manifests = (prepared,) if previous is None else (prepared, previous[0])
+    confirmed = set()
+    for manifest in manifests:
+        if manifest.collection_record_path == record_path:
+            confirmed.update(_retained_category_record_identities(git, manifest))
+    return frozenset(candidates & confirmed)
+
+
+def _retained_category_record_identities(git, manifest):
+    from .collection_placement import _retained_record
+
+    value = _retained_record(git, manifest)
+    if output_identity(value) != manifest.identity:
+        raise OSError("Retained category record is for a different source")
+    sources = {row.path for row in manifest.source}
+    scope = manifest.collection_record_path.rsplit("/", 1)[0]
+    categories, used = set(), set()
+    for row in value["item_targets"]:
+        item_id = row["original_identity"]
+        if item_id in used:
+            raise OSError("Retained category record has ambiguous source identity")
+        used.add(item_id)
+        path = row["relative_path"]
+        if (
+            row["created"]
+            and "definition" in row.get("creation_reasons", ())
+            and path in sources
+            and path.startswith(scope + "/Categories/")
+        ):
+            categories.add(
+                ImportedItemIdentity(
+                    module_id=manifest.identity.module_id,
+                    collection_id=manifest.identity.collection_id,
+                    item_id=item_id,
+                )
+            )
+    return categories
+
+
 def _review_observation(
     root,
     observed,
@@ -1166,6 +1247,9 @@ def _review_observation(
     current = _observe_recovery_bytes(root, paths, inventory, _owner=_owner)
     original_facts = original.facts
     context = original_facts.link_context
+    retained_category_identities = _retained_scoped_categories(
+        git, prepared, retained, context
+    )
     identity_inventory = list(original_facts.identity_inventory)
     if context is not None:
         context, unobserved = _refresh_recovery_link_context(
@@ -1180,6 +1264,7 @@ def _review_observation(
             selected_removal=selected_removal,
             direction=direction,
             owned_record_path=prepared.collection_record_path,
+            retained_category_identities=retained_category_identities,
             _owner=_owner,
         )
     facts = original_facts.model_copy(
@@ -1211,7 +1296,17 @@ def _review_observation(
     # current bytes, or a broken graph still reach the ordinary refresh rules.
     original_prepared = retained.owned[intent.prepared_commit][0]
     preflight = _review_preflight(admission, original_prepared, original, retained)
-    return original, intent, origin_commit, git, facts, preflight, current, retained
+    return (
+        original,
+        intent,
+        origin_commit,
+        git,
+        facts,
+        preflight,
+        current,
+        retained,
+        retained_category_identities,
+    )
 
 
 def _review_preflight(admission, prepared, original, retained):
@@ -1466,7 +1561,7 @@ def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, 
 
 
 def _finish_review(root, observed, *, previous=None, authority=None, _owner=None):
-    original, intent, origin_commit, git, facts, preflight, current, retained = (
+    original, intent, origin_commit, git, facts, preflight, current, retained, _ = (
         _review_observation(
             root,
             observed,
@@ -1612,7 +1707,15 @@ def _retained_source(root, git, rows):
 
 
 def _restore_target_states(
-    original, context, current_states, before, affected, git, *, _owner
+    original,
+    context,
+    current_states,
+    before,
+    affected,
+    git,
+    *,
+    _owner,
+    retained_category_identities=(),
 ):
     target_states = []
     target_state = (
@@ -1627,7 +1730,11 @@ def _restore_target_states(
         and original_context.import_classification_approval is not None
     ):
         target_state = link_state
-        options = {"membership_targets": context.current_targets, "_owner": _owner}
+        options = {
+            "membership_targets": context.current_targets,
+            "retained_category_identities": retained_category_identities,
+            "_owner": _owner,
+        }
     for target in context.current_targets:
         if target.kind == "tag":
             continue
@@ -1657,7 +1764,15 @@ def _restore_target_states(
 
 
 def _restore_link_context(
-    original, facts, before, affected, git, *, owned_record_path, _owner=None
+    original,
+    facts,
+    before,
+    affected,
+    git,
+    *,
+    owned_record_path,
+    retained_category_identities,
+    _owner=None,
 ):
     """Interpret the exact original target inventory with current link owners."""
     context = facts.link_context
@@ -1668,7 +1783,14 @@ def _restore_link_context(
     if len(current_states) != len(context.current_target_facts):
         raise OSError("Current recovery lookup is ambiguous")
     target_states = _restore_target_states(
-        original, context, current_states, before, affected, git, _owner=_owner
+        original,
+        context,
+        current_states,
+        before,
+        affected,
+        git,
+        _owner=_owner,
+        retained_category_identities=retained_category_identities,
     )
     candidates = {doc.source_path: doc for doc in context.current_documents}
     if original_context is not None:
@@ -2470,16 +2592,24 @@ def _restore_review_context(
 def _restore_review(
     root, observed, *, previous=None, authority=None, undo_target=None, _owner=None
 ):
-    original, intent, origin_commit, git, facts, preflight, current, retained = (
-        _review_observation(
-            root,
-            observed,
-            direction="restore",
-            authority=authority,
-            next_generation=(previous.proposal.generation + 1 if previous else None),
-            undo_target=undo_target,
-            _owner=_owner,
-        )
+    (
+        original,
+        intent,
+        origin_commit,
+        git,
+        facts,
+        preflight,
+        current,
+        retained,
+        retained_category_identities,
+    ) = _review_observation(
+        root,
+        observed,
+        direction="restore",
+        authority=authority,
+        next_generation=(previous.proposal.generation + 1 if previous else None),
+        undo_target=undo_target,
+        _owner=_owner,
     )
     before = {row.path: row for row in intent.before}
     produced = {row.path: row for row in intent.proposed}
@@ -2589,6 +2719,7 @@ def _restore_review(
                 set(intent.affected_paths),
                 git,
                 owned_record_path=source_prepared.collection_record_path,
+                retained_category_identities=retained_category_identities,
                 _owner=_owner,
             ),
             "source_version_memory": (),

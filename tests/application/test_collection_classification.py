@@ -952,3 +952,133 @@ def test_classified_restore_before_rebinds_peer_memberships_to_current_lookup(
         assert unsupported.structure.issues == ("membership_target_unknown",)
         assert unsupported.memberships == ()
         assert blockers == ("selected_provider_invalid",)
+
+
+def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from brz2obsidian.application.update_facts import output_identity
+    from brz2obsidian.application.update_facts import target as path_target
+    from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
+    from brz2obsidian.publication import collection_placement, vault_recovery
+    from tests.application.test_graph_modules import IDENTITY, POLICY
+    from tests.reconciliation.test_memberships import target
+
+    record_path = "Imports/Atlas/migration-record.json"
+    category_path = "Imports/Atlas/Categories/Topic.md"
+    current_path = "Moved/Topic.md"
+    identity = ImportedItemIdentity(
+        module_id=IDENTITY.module_id, collection_id=IDENTITY.source_id, item_id="topic"
+    )
+    category_id = "subject:topic:content"
+    category = target(category_id, "category", f"[[{current_path}]]").model_copy(
+        update={
+            "identity": identity,
+            "canonical_path": current_path,
+            "target": path_target(current_path),
+        }
+    )
+    record = {
+        "source_identity": IDENTITY.model_dump(),
+        "profile_id": POLICY.profile_id,
+        "profile_version": POLICY.profile_version,
+        "schema_version": 9,
+        "item_targets": [
+            {
+                "original_identity": "topic",
+                "created": True,
+                "relative_path": category_path,
+                "creation_reasons": ["definition"],
+            }
+        ],
+    }
+    manifest = SimpleNamespace(
+        identity=output_identity(record),
+        collection_record_path=record_path,
+        collection_baseline_commit=None,
+        source=tuple(
+            SimpleNamespace(path=path) for path in (record_path, category_path)
+        ),
+    )
+    context = SimpleNamespace(
+        current_targets=(category,),
+        incoming_targets=(category,),
+        import_classification_approval="a" * 64,
+    )
+    graph = SimpleNamespace(owned={})
+    git = object()
+
+    def read_record(actual_git, actual_manifest):
+        assert (actual_git, actual_manifest) == (git, manifest)
+        return record
+
+    monkeypatch.setattr(collection_placement, "_retained_record", read_record)
+    bindings = vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+    assert bindings == {identity}
+    assert category.category_anchor is None
+    assert context.current_targets == (category,)
+
+    before = ExactContent(
+        data=(
+            f'---\nsource_collection_id: "{identity.collection_id}"\n'
+            f'source_item_id: "{identity.item_id}"\n'
+            'tags: ["categories"]\n---\nExact retained category.\r\n'
+        ).encode()
+    )
+    before_key = object()
+    monkeypatch.setattr(
+        vault_recovery,
+        "_owned_content",
+        lambda _git, entry, *, _owner: {before_key: before}[entry],
+    )
+    facts = SimpleNamespace(
+        link_context=context,
+        baseline_identity=manifest.identity,
+        incoming_identity=manifest.identity,
+    )
+    plan = SimpleNamespace(facts=facts)
+    (restored,) = vault_recovery._restore_target_states(
+        plan,
+        context,
+        {},
+        {current_path: before_key},
+        {current_path},
+        git,
+        _owner=None,
+        retained_category_identities=bindings,
+    )
+    assert restored.content == before
+    assert restored.file_roles.category
+    assert restored.file_roles.path == current_path
+
+    def reread(content):
+        (observed,) = vault_recovery._observed_recovery_target_facts(
+            facts,
+            {current_path: SimpleNamespace(content=content, existence="present")},
+            set(),
+            {category_id: restored},
+            retained_category_identities=bindings,
+            _owner=None,
+        )
+        return observed
+
+    edited = ExactContent(data=before.data + b"Later authored prose.\r\n")
+    observed = reread(edited)
+    assert observed.content == edited and observed.file_roles.category
+    wrong_identity = ExactContent(data=edited.data.replace(b'"topic"', b'"unrelated"'))
+    assert not reread(wrong_identity).file_roles.category
+
+    manifest.collection_record_path = None
+    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+    (unqualified,) = vault_recovery._restore_target_states(
+        plan, context, {}, {current_path: before_key}, {current_path}, git, _owner=None
+    )
+    assert not unqualified.file_roles.category
+    manifest.collection_record_path = record_path
+    record["item_targets"][0]["creation_reasons"] = []
+    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+    record["item_targets"] *= 2
+    with pytest.raises(OSError, match="ambiguous source identity"):
+        vault_recovery._retained_scoped_categories(git, manifest, graph, context)

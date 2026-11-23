@@ -304,6 +304,7 @@ def link_state(
     source_path=None,
     output_format=7,
     qualify_roles=False,
+    retained_category_identities=(),
     _owner=None,
 ):
     if _owner is not None:
@@ -316,6 +317,7 @@ def link_state(
             source_path=source_path,
             output_format=output_format,
             qualify_roles=qualify_roles,
+            retained_category_identities=retained_category_identities,
         )
     document = (
         interpret_structure(
@@ -343,6 +345,7 @@ def link_state(
         source_path=source_path,
         output_format=output_format,
         qualify_roles=qualify_roles,
+        retained_category_identities=retained_category_identities,
     )
 
 

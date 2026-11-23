@@ -101,6 +101,7 @@ def interpret_link_target(
     source_path=None,
     output_format=7,
     qualify_roles=False,
+    retained_category_identities=(),
 ):
     from .interpretation import interpret_structure
 
@@ -137,6 +138,7 @@ def interpret_link_target(
                     and (
                         row.category_anchor is not None
                         or row.target_id.startswith("shared-category:")
+                        or row.identity in retained_category_identities
                     )
                 ),
                 None,
