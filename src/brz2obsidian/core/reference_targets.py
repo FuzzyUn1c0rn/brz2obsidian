@@ -52,6 +52,10 @@ def _target_meaning(record, paths):
         if record.kind != "category" or identity is not None:
             raise ValueError("structure_conflict")
         return "vault_category", record.target.normalized_path
+    if record.category_anchor == "scoped_identity" and (
+        record.kind != "category" or identity is None
+    ):
+        raise ValueError("structure_conflict")
     if record.kind in ("category", "relationship") or (
         record.kind == "note" and identity is not None
     ):

@@ -718,6 +718,7 @@ def assert_inward_imports(root):
         "application/update_lifecycle.py": {
             "brz2obsidian.application.attachment_cleanup",
             "brz2obsidian.application.checkpoint_payload_contracts",
+            "brz2obsidian.application.collection_import",
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.format_configuration",
             "brz2obsidian.application.format_transition",
@@ -747,6 +748,9 @@ def assert_inward_imports(root):
         "application/operations.py": {
             "brz2obsidian.application.attachment_cleanup",
             "brz2obsidian.application.checking",
+            "brz2obsidian.application.collection_classification",
+            "brz2obsidian.application.collection_import",
+            "brz2obsidian.application.collection_placement",
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.conversion",
             "brz2obsidian.application.diagnostics",
@@ -756,6 +760,7 @@ def assert_inward_imports(root):
             "brz2obsidian.application.onboarding",
             "brz2obsidian.application.owned_preparation",
             "brz2obsidian.application.review_choices",
+            "brz2obsidian.application.update_contracts",
             "brz2obsidian.application.update_lifecycle",
             "brz2obsidian.application.update_session",
             "brz2obsidian.application.vault_update_contracts",
@@ -841,6 +846,7 @@ def assert_inward_imports(root):
             "brz2obsidian.application.vault_update_contracts",
             "brz2obsidian.core",
             "brz2obsidian.obsidian",
+            "brz2obsidian.obsidian_dialect",
         },
         "publication/vault_repair.py": {
             "brz2obsidian.application.vault_progress_contracts",
@@ -1001,6 +1007,48 @@ def assert_inward_imports(root):
             "brz2obsidian.application.update_output",
             "brz2obsidian.application.update_stream",
             "brz2obsidian.application.update_worker_contracts",
+        },
+        "application/collection_classification.py": {
+            "brz2obsidian.application.collection_import",
+            "brz2obsidian.application.update_facts",
+            "brz2obsidian.obsidian.import_classification",
+            "brz2obsidian.publication.collection_placement",
+            "brz2obsidian.publication.vault_history",
+        },
+        "application/collection_import.py": {
+            "brz2obsidian.application.checkpoint_payload_contracts",
+            "brz2obsidian.application.update_contracts",
+            "brz2obsidian.application.update_facts",
+            "brz2obsidian.application.update_lifecycle",
+            "brz2obsidian.publication.collection_placement",
+            "brz2obsidian.publication.vault_history",
+        },
+        "application/collection_placement.py": {
+            "brz2obsidian.application.collection_import",
+            "brz2obsidian.application.update_contracts",
+            "brz2obsidian.obsidian.import_classification",
+            "brz2obsidian.obsidian.import_links",
+            "brz2obsidian.publication.collection_placement",
+        },
+        "publication/collection_placement.py": {
+            "brz2obsidian.core.import_placement",
+            "brz2obsidian.obsidian.import_classification",
+            "brz2obsidian.obsidian.import_links",
+            "brz2obsidian.obsidian_dialect",
+        },
+        "publication/collection_publication.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.vault_recovery_contracts",
+            "brz2obsidian.application.vault_update_contracts",
+        },
+        "publication/collection_result_locator.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+        },
+        "publication/collection_undo_publication.py": {
+            "brz2obsidian.application.vault_recovery_contracts",
+        },
+        "publication/unpublished_collection.py": {
+            "brz2obsidian.application.checkpoint_contracts",
         },
         "publication/attachment_ownership.py": {
             "brz2obsidian.application.checkpoint_contracts",

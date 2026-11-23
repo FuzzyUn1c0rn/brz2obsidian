@@ -1,10 +1,7 @@
 """Physical source/current/baseline composition behind Operations."""
 
 import hashlib
-import io
 import json
-import os
-import stat
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +29,10 @@ from brz2obsidian.core import (
 from brz2obsidian.core.formats import obsolete_support_listing
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
-from brz2obsidian.publication.vault_native import available_memory, observe_file
+from brz2obsidian.publication.vault_native import (
+    available_memory,
+    read_observed_payload,
+)
 
 from .update_contracts import (
     UpdateComparison,
@@ -188,24 +188,7 @@ def _read_physical(root, rows, *, _owner=None):
     )
     if _owner is not None:
         return _owner._physical_payload(root, rows)
-    if sum(row.size for row in rows) > available_memory() // 4:
-        raise ValueError("comparison_resources_unavailable")
-    result = {}
-    for row in rows:
-        sink = io.BytesIO()
-        info, digest, _, physical_identity = observe_file(
-            root, Path(root) / row.path, prefix_limit=0, sink=sink
-        )
-        if (info.st_size, digest) != (row.size, row.sha256):
-            raise ValueError("observed_payload_changed")
-        mode = "100755" if os.name != "nt" and info.st_mode & stat.S_IXUSR else "100644"
-        if (
-            getattr(row, "mode", mode) != mode
-            or getattr(row, "identity", physical_identity) != physical_identity
-        ):
-            raise ValueError("observed_identity_changed")
-        result[row.path] = sink.getvalue()
-    return result
+    return read_observed_payload(root, rows)
 
 
 def _read_source(operations, vault, checkpoint, observed=None, *, _owner=None):

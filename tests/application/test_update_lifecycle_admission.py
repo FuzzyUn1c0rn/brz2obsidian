@@ -244,6 +244,8 @@ def admitted_case(tmp_path, monkeypatch, request):
                 identity=plan.facts.incoming_identity,
                 source=binding.files,
                 vault=tuple(r for r in inventory if not r.excluded),
+                discarded_review=None,
+                collection_baseline_commit=None,
                 reviewed_source=binding,
                 observed_source=observed,
             ),

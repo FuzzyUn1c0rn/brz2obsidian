@@ -16,7 +16,7 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 from brz2obsidian.core import analyze, plan, prepare_review, select_review_effects
-from brz2obsidian.obsidian import render
+from brz2obsidian.obsidian import interpret_link_target, render
 from tests.application.test_module_seams import METADATA
 from tests.reconciliation.test_resolution import preflight
 from tests.support.notes import note_body
@@ -657,6 +657,39 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     assert previous_category.identity is not None
     assert previous_category.identity.collection_id == facts.identity.source_id
     assert previous_category.identity.item_id == "topics"
+    assert previous_category.category_anchor == "scoped_identity"
+    prior_state = next(
+        state
+        for state in second_import.link_context.current_target_facts
+        if state.target_id == previous_category.target_id
+    )
+    assert prior_state.file_roles.category
+    moved_path = "Refiled/Topics.md"
+    moved = previous_category.model_copy(
+        update={
+            "canonical_path": moved_path,
+            "target": previous_category.target.model_copy(
+                update={"normalized_path": moved_path.casefold()}
+            ),
+        }
+    )
+    content = prior_state.content
+    mismatched = type(content)(
+        data=content.data.replace(
+            facts.identity.source_id.encode(), b"another-collection"
+        )
+    )
+    for observed, expected_role in ((content, True), (mismatched, False)):
+        moved_state = interpret_link_target(
+            observed,
+            target_id=moved.target_id,
+            existence="present",
+            memberships=(),
+            membership_targets=(moved,),
+            source_path=moved_path,
+            output_format=9,
+        )
+        assert moved_state.file_roles.category is expected_role
     assert lookup[shared].category_anchor == "observed_path"
     assert lookup[shared].identity is None
     review_second = prepare_review(second_import, preflight=preflight())

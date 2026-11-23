@@ -1140,7 +1140,7 @@ class ReferenceTarget(ReconciliationContract):
     representations: tuple[str, ...]
     validation_fingerprint: str = Field(min_length=1)
     status: Literal["safe", "unsafe", "unknown"]
-    category_anchor: Literal["observed_path"] | None = Field(
+    category_anchor: Literal["observed_path", "scoped_identity"] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

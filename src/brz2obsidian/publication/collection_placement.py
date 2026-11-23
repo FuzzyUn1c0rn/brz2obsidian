@@ -6,8 +6,6 @@ import unicodedata
 from hashlib import sha256
 from pathlib import Path
 
-from brz2obsidian.application.update_facts import classification_view_paths, record
-from brz2obsidian.application.update_lifecycle import _read_physical
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ContentIdentity,
@@ -26,11 +24,20 @@ from brz2obsidian.obsidian.import_links import (
     import_links_depend_on,
     inspect_import_links,
 )
+from brz2obsidian.obsidian_dialect import (
+    classification_view_paths,
+    read_migration_record,
+)
 
 from .git_payload import verify_blobs
 from .vault_admission import _safe_relative, _walk
 from .vault_history import _Git, collection_baselines
-from .vault_native import available_memory, observe_file, verify_directory
+from .vault_native import (
+    available_memory,
+    observe_file,
+    read_observed_payload,
+    verify_directory,
+)
 
 
 def read_rendered_collection(root, record_path):
@@ -98,7 +105,7 @@ def existing_files(admission):
     documents = tuple(
         row for row in rows if row.path.casefold().endswith((".md", ".base"))
     )
-    exact = _read_physical(admission.vault, documents)
+    exact = read_observed_payload(admission.vault, documents)
     return {
         row.path: exact[row.path]
         if row.path in exact
@@ -736,9 +743,8 @@ def _require_classified_update_finish(
         and _record_matches(successor, proposed_rows.get(record_path))
     ):
         raise ImportRecoveryLinkChange("recovery_import_classifications_unavailable")
-    before, incoming = (
-        record({record_path: data}, record_path) for data in (predecessor, successor)
-    )
+    before = read_migration_record(predecessor)
+    incoming = read_migration_record(successor)
     sources = _classifications_for_paths(facts, before, incoming, paths)
     sources.update(
         _new_member_sources(facts, incoming, remaining, before_rows, proposed_rows)

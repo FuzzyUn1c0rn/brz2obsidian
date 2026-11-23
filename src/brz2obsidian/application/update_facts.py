@@ -41,7 +41,12 @@ from brz2obsidian.obsidian import (
     interpret_structure,
 )
 from brz2obsidian.obsidian.sections import retained_relationship_survives
-from brz2obsidian.obsidian_dialect import category, native_properties
+from brz2obsidian.obsidian_dialect import (
+    category,
+    classification_view_paths,
+    native_properties,
+    read_migration_record,
+)
 
 
 def digest(value):
@@ -62,11 +67,7 @@ def target(path):
 
 
 def record(payload, record_path="migration-record.json"):
-    raw = payload[record_path]
-    value = json.loads(raw.data if isinstance(raw, InlineExactContent) else raw)
-    if value.get("schema") != "brz2obsidian.migration":
-        raise ValueError("association_record_invalid")
-    return value
+    return read_migration_record(payload[record_path])
 
 
 def output_identity(value):
@@ -149,11 +150,11 @@ def _shared_membership_target(claim, path, inventory):
         representations=_representations(path, "category"),
         validation_fingerprint=digest(("shared category", claim, path)),
         status="unknown" if len(observed) > 1 else "safe",
-        category_anchor="observed_path" if identity is None else None,
+        category_anchor="observed_path" if identity is None else "scoped_identity",
     )
 
 
-def _membership_targets(records, inventory=()):
+def _membership_targets(records, inventory=(), *, scoped_record=False):
     rows, tokens, shared = {}, {}, {}
     scoped_mappings = any(
         value.get("category_mappings") or value.get("vault_tag_mappings")
@@ -201,6 +202,7 @@ def _membership_targets(records, inventory=()):
                 representations=_representations(path, "category"),
                 validation_fingerprint=digest((claim.model_dump(), path, "category")),
                 status="unknown" if len(observed) > 1 else "safe",
+                category_anchor="scoped_identity" if scoped_record else None,
             )
         )
     if scoped_mappings:
@@ -579,14 +581,6 @@ def _classification_mappings(record, targets):
     return {key: tuple(values) for key, values in reasons.items()}
 
 
-def classification_view_paths(value):
-    return {
-        path
-        for row in value.get("category_mappings", ())
-        for path in row.get("view_paths", ())
-    }
-
-
 def _retired_classification_views(old, new, remap):
     if not remap:
         return set()
@@ -859,6 +853,7 @@ def assemble_facts(
                 new_record,
                 current_inventory,
                 scoped_collection=explicit_collection,
+                record_path=record_path,
                 classification_remap=classification_remap,
                 _owner=_owner,
             )
@@ -1271,7 +1266,9 @@ def _add_unrepresented_link_targets(
         incoming_targets.append(reference)
 
 
-def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
+def _interpret_link_documents(
+    facts, paths, current_lookup, incoming_lookup, *, record_path
+):
     current_targets, current_states = current_lookup
     incoming_targets, incoming_states = incoming_lookup
     current_documents, incoming_documents = [], []
@@ -1294,6 +1291,7 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
                         else facts.baseline_identity.output_format
                     ),
                     record_format=facts.baseline_identity.output_format,
+                    owned_record_path=record_path,
                     authored_links=facts.format_operation.kind == "collection_import",
                 )
             )
@@ -1311,6 +1309,7 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
                         target_facts=tuple(incoming_states),
                         inventory="complete",
                         output_format=facts.incoming_identity.output_format,
+                        owned_record_path=record_path,
                         authored_links=(
                             facts.format_operation.kind == "collection_import"
                             and subject is None
@@ -1368,6 +1367,7 @@ def _link_context(
     physical_inventory,
     *,
     scoped_collection=False,
+    record_path,
     classification_remap=False,
     _owner=None,
 ):
@@ -1383,10 +1383,15 @@ def _link_context(
     observed_identities = {
         (row.identity, row.facet) for row in facts.identity_inventory
     }
+    scoped_record = "/" in record_path
     current_memberships = _membership_targets(
-        (baseline_record, incoming_record), facts.identity_inventory
+        (baseline_record, incoming_record),
+        facts.identity_inventory,
+        scoped_record=scoped_record,
     )
-    incoming_memberships = _membership_targets((incoming_record,))
+    incoming_memberships = _membership_targets(
+        (incoming_record,), scoped_record=scoped_record
+    )
     if incoming_record.get("vault_tag_mappings") or incoming_record.get(
         "category_mappings"
     ):
@@ -1400,6 +1405,11 @@ def _link_context(
         record.identity
         for record in current_memberships + incoming_memberships
         if record.kind == "category"
+    }
+    current_category_anchors = {
+        row.target_id: row.category_anchor
+        for row in current_memberships
+        if row.kind == "category"
     }
     shared_categories = {
         row.canonical_path: row
@@ -1444,6 +1454,7 @@ def _link_context(
             ),
             validation_fingerprint=digest((target_id, row.current.path)),
             status="safe",
+            category_anchor=current_category_anchors.get(target_id),
         )
         if actual.kind == "resource":
             actual = actual.model_copy(update={"identity": None})
@@ -1565,6 +1576,7 @@ def _link_context(
         paths,
         (current_targets, current_states),
         (incoming_targets, incoming_states),
+        record_path=record_path,
     )
     return LinkContext(
         schema_id="brz2obsidian.link-context",

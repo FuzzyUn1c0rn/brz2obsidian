@@ -848,7 +848,11 @@ def test_classified_restore_before_rebinds_peer_memberships_to_current_lookup(
 
     def category(identifier, path, *extra):
         return target(identifier, "category", f"[[{path}]]", *extra).model_copy(
-            update={"canonical_path": path, "target": path_target(path)}
+            update={
+                "canonical_path": path,
+                "target": path_target(path),
+                "category_anchor": "scoped_identity",
+            }
         )
 
     peer = category("E", "Imports/Atlas/Categories/E.md")
@@ -870,7 +874,9 @@ def test_classified_restore_before_rebinds_peer_memberships_to_current_lookup(
     owned = object()
     journal = object()
     prior = (
-        '---\ncategories:\n  - "{provider}"\n  - "[[Categories/Manual.md]]"\n'
+        f'---\nsource_collection_id: "{peer.identity.collection_id}"\n'
+        f'source_item_id: "{peer.identity.item_id}"\n'
+        'categories:\n  - "{provider}"\n  - "[[Categories/Manual.md]]"\n'
         'appearance_category: "{provider}"\ntags:\n  - "categories"\n---\nExact authored tail.\r\n'
     )
 

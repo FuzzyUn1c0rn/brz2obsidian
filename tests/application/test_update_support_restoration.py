@@ -332,6 +332,8 @@ def test_saved_old_base_facts_resume_through_closed_worker_without_losing_edited
                         boundary="local",
                         identity=output_identity(record(baseline)),
                         source=baseline_rows,
+                        discarded_review=None,
+                        collection_baseline_commit=None,
                         reviewed_source=binding,
                         observed_source=SourceIdentity.model_validate(
                             record(incoming)["source_identity"]

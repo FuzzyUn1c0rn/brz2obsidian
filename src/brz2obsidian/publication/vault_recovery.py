@@ -460,6 +460,7 @@ def _observe_operation_owned_note(
     *,
     path_known,
     direction,
+    owned_record_path,
     _owner,
 ):
     context = original_facts.link_context
@@ -534,6 +535,7 @@ def _observe_operation_owned_note(
         record_format=_current_record_format(
             original_facts, path, observed_document.content
         ),
+        owned_record_path=owned_record_path,
     )
     if parsed.status != "supported":
         raise OSError("Operation-owned recovery note interpretation failed")
@@ -694,6 +696,7 @@ def _refresh_recovery_link_context(
     *,
     selected_removal,
     direction,
+    owned_record_path=None,
     _owner,
 ):
     context = original_facts.link_context
@@ -777,6 +780,7 @@ def _refresh_recovery_link_context(
                 identity_inventory,
                 path_known=path in known_identity_paths,
                 direction=direction,
+                owned_record_path=owned_record_path,
                 _owner=_owner,
             )
             known_identity_paths.add(path)
@@ -846,6 +850,7 @@ def _refresh_recovery_link_context(
                     observed_document.path,
                     observed_document.content,
                 ),
+                owned_record_path=owned_record_path,
             )
         )
     documents.extend(
@@ -861,6 +866,7 @@ def _refresh_recovery_link_context(
             record_format=_current_record_format(
                 original_facts, document.source_path, document.content
             ),
+            owned_record_path=owned_record_path,
         )
         for document in new_documents
     )
@@ -1108,10 +1114,10 @@ def _review_observation(
     admission, query_plan, query_subjects = _admit_recovery_review(
         root, original, selected, retained, _owner=_owner
     )
+    prepared = retained.owned[intent.prepared_commit][0]
     if direction == "finish":
         from .collection_placement import require_collection_finish_links
 
-        prepared = retained.owned[intent.prepared_commit][0]
         require_collection_finish_links(
             admission,
             retained.checkpoint,
@@ -1173,6 +1179,7 @@ def _review_observation(
             ownership_proposed,
             selected_removal=selected_removal,
             direction=direction,
+            owned_record_path=prepared.collection_record_path,
             _owner=_owner,
         )
     facts = original_facts.model_copy(
@@ -1649,7 +1656,9 @@ def _restore_target_states(
     return target_states
 
 
-def _restore_link_context(original, facts, before, affected, git, *, _owner=None):
+def _restore_link_context(
+    original, facts, before, affected, git, *, owned_record_path, _owner=None
+):
     """Interpret the exact original target inventory with current link owners."""
     context = facts.link_context
     if context is None:
@@ -1692,6 +1701,7 @@ def _restore_link_context(original, facts, before, affected, git, *, _owner=None
                 inventory="complete",
                 output_format=original.facts.incoming_identity.output_format,
                 record_format=original.facts.baseline_identity.output_format,
+                owned_record_path=owned_record_path,
             )
         )
     return context.model_copy(
@@ -2573,7 +2583,13 @@ def _restore_review(
             "identity_inventory": facts.identity_inventory,
             "format_operation": format_operation,
             "link_context": _restore_link_context(
-                original, facts, before, set(intent.affected_paths), git, _owner=_owner
+                original,
+                facts,
+                before,
+                set(intent.affected_paths),
+                git,
+                owned_record_path=source_prepared.collection_record_path,
+                _owner=_owner,
             ),
             "source_version_memory": (),
             "association_decisions": (),

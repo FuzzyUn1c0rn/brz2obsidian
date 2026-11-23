@@ -126,9 +126,20 @@ def interpret_link_target(
             path=source_path,
             existence=existence,
             reference_query=reference_query,
-            scoped_category=any(
-                row.kind == "category" and row.canonical_path == source_path
-                for row in membership_targets
+            category_target=next(
+                (
+                    row
+                    for row in membership_targets
+                    if row.kind == "category"
+                    and row.target_id == target_id
+                    and row.canonical_path == source_path
+                    and row.status == "safe"
+                    and (
+                        row.category_anchor is not None
+                        or row.target_id.startswith("shared-category:")
+                    )
+                ),
+                None,
             ),
         )
         if (output_format in QUALIFIED_OUTPUT_FORMATS or qualify_roles)
@@ -352,6 +363,7 @@ def interpret_links(
     inventory,
     output_format=7,
     record_format=None,
+    owned_record_path=None,
     authored_links=False,
 ):
     occurrences, issues = [], []
@@ -380,7 +392,12 @@ def interpret_links(
     ):
         if record_format is None:
             record_format = output_format
-        if not migration_record_data(text, source_path, record_format=record_format):
+        if not migration_record_data(
+            text,
+            source_path,
+            record_format=record_format,
+            owned_record_path=owned_record_path,
+        ):
             issues.append("record_data_unsupported")
         return document()
     masked, code_issues = _code_ranges(text)
