@@ -1,10 +1,7 @@
 """Physical source/current/baseline composition behind Operations."""
 
 import hashlib
-import io
 import json
-import os
-import stat
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +29,10 @@ from brz2obsidian.core import (
 from brz2obsidian.core.formats import obsolete_support_listing
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
-from brz2obsidian.publication.vault_native import available_memory, observe_file
+from brz2obsidian.publication.vault_native import (
+    available_memory,
+    read_observed_payload,
+)
 
 from .update_contracts import (
     UpdateComparison,
@@ -188,24 +188,7 @@ def _read_physical(root, rows, *, _owner=None):
     )
     if _owner is not None:
         return _owner._physical_payload(root, rows)
-    if sum(row.size for row in rows) > available_memory() // 4:
-        raise ValueError("comparison_resources_unavailable")
-    result = {}
-    for row in rows:
-        sink = io.BytesIO()
-        info, digest, _, physical_identity = observe_file(
-            root, Path(root) / row.path, prefix_limit=0, sink=sink
-        )
-        if (info.st_size, digest) != (row.size, row.sha256):
-            raise ValueError("observed_payload_changed")
-        mode = "100755" if os.name != "nt" and info.st_mode & stat.S_IXUSR else "100644"
-        if (
-            getattr(row, "mode", mode) != mode
-            or getattr(row, "identity", physical_identity) != physical_identity
-        ):
-            raise ValueError("observed_identity_changed")
-        result[row.path] = sink.getvalue()
-    return result
+    return read_observed_payload(root, rows)
 
 
 def _read_source(operations, vault, checkpoint, observed=None, *, _owner=None):
@@ -241,7 +224,7 @@ class _ExcludedDependency(ValueError):
 
 
 def _managed_observation_paths(baseline, incoming, retained_ownership, inventory):
-    managed = set(baseline) | set(incoming)
+    managed = set(baseline or ()) | set(incoming)
     if retained_ownership is not None:
         owned = {proof.source_path for proof in retained_ownership}
         assets = {
@@ -269,6 +252,18 @@ def _observation_link_graph(context):
                     graph.setdefault(document.document_id, set()).add(target_id)
                     graph.setdefault(target_id, set()).add(document.document_id)
     return graph
+
+
+def _authored_observation_targets(context, inventory):
+    excluded = {row.path for row in inventory if row.excluded}
+    return {
+        target_id
+        for document in context.current_documents
+        if document.source_path not in excluded
+        for occurrence in document.occurrences
+        for target_id in (occurrence.meaning.target_id, *occurrence.meaning.candidates)
+        if target_id is not None
+    }
 
 
 def _required_observation_paths(facts, inventory, managed, *, _owner):
@@ -306,12 +301,31 @@ def _required_observation_paths(facts, inventory, managed, *, _owner):
             for other in prospective
         ):
             related.add(target_id)
+    passive_targets = set()
+    if facts.format_operation.kind == "collection_import":
+        passive_targets = {
+            by_path[row.path]
+            for row in inventory
+            if row.exclusion == "git_ignore" and row.path in by_path
+        }
     while True:
-        expanded = related | {other for key in related for other in graph.get(key, ())}
+        expanded = related | {
+            other
+            for key in related
+            for other in graph.get(key, ())
+            if other not in passive_targets
+        }
         if expanded == related:
             break
         related = expanded
     needed = {targets[key].canonical_path for key in related if key in targets}
+    if facts.format_operation.kind == "collection_import":
+        excluded = {row.path for row in inventory if row.excluded}
+        needed.update(
+            targets[key].canonical_path
+            for key in _authored_observation_targets(context, inventory)
+            if key in targets and targets[key].canonical_path not in excluded
+        )
     return needed
 
 
@@ -325,7 +339,7 @@ def _observed_facts(
     _owner=None,
     **identity,
 ):
-    if retained_review is None:
+    if retained_review is None and "record_path" not in identity:
         retained_review = (
             getattr(_owner, "_tip", None)
             if _owner is not None
@@ -333,7 +347,7 @@ def _observed_facts(
         )
     retired_note_ids = (
         retained_review.saved.plan.producer_facts.retired_note_ids
-        if retained_review is not None
+        if retained_review is not None and baseline is not None
         else ()
     )
     inventory = history.admission.inventory
@@ -375,7 +389,8 @@ def _observed_facts(
             document = documents.get(row.path)
             if (
                 row.path in needed
-                or document is not None
+                or facts.format_operation.kind != "collection_import"
+                and document is not None
                 and document.status != "supported"
             ):
                 raise _ExcludedDependency
@@ -710,6 +725,8 @@ def _prepared(
     *,
     source_ref=None,
     original_source_ref=None,
+    collection_record_path=None,
+    import_link_connections=(),
     status="prepared_review",
     code="prepared",
     stale=0,
@@ -719,7 +736,8 @@ def _prepared(
         next(
             subject.incoming.data
             for subject in review.facts.subjects
-            if subject.item_id == "support:migration-record.json"
+            if subject.item_id
+            == "support:" + (collection_record_path or "migration-record.json")
         )
     )
     gaps = tuple(
@@ -750,6 +768,8 @@ def _prepared(
         payload_directory=str(directory),
         source_ref=source_ref,
         original_source_ref=original_source_ref,
+        collection_record_path=collection_record_path,
+        import_link_connections=import_link_connections,
         source_binding=binding,
         observed_source=observed_source,
         retained_source_provenance=retained_provenance,
@@ -868,6 +888,13 @@ def _memory(plan):
 
 
 def _producer_memory(checkpoint, proposal_id=None, *, _owner=None):
+    if checkpoint.manifest.discarded_review is not None:
+        discarded = (
+            _owner._load_discarded_review(checkpoint)
+            if _owner is not None
+            else checkpoint._discarded_review
+        )
+        return discarded.saved.plan.producer_facts.source_version_memory
     retained = _owner._tip if _owner is not None else checkpoint.review
     if retained is None:
         return ()
@@ -1242,6 +1269,10 @@ def resolve_update(operations, preparation, action, *, edited=None):
 def refresh_update(operations, preparation, *, source=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
+        if preparation.collection_record_path is not None:
+            from .collection_import import refresh_collection_review
+
+            return refresh_collection_review(operations, preparation, source=source)
         if source is None:
             result = _reobserve(operations, preparation)[1]
             # Explicit Refresh may expose a newly complete review. Internal
@@ -1422,7 +1453,7 @@ def load_update(operations, vault):
     if stopped is not None:
         return stopped
     checkpoint = history.checkpoint
-    if checkpoint.review is None or checkpoint.manifest.reviewed_source is None:
+    if not _saved_review_available(checkpoint):
         return _refused("saved_update_unavailable", history)
     plan = checkpoint.review.saved.plan
     return UpdateResult(
@@ -1448,6 +1479,14 @@ def resume_update(operations, vault):
             return _resume_update(operations, vault, observed)
     except OSError, ValueError, TypeError, AttributeError:
         return _refused("current_inputs_unavailable", action="refresh_update")
+
+
+def _saved_review_available(checkpoint):
+    return (
+        checkpoint.manifest.boundary != "result"
+        and checkpoint.review is not None
+        and checkpoint.manifest.reviewed_source is not None
+    )
 
 
 def _resume_input_facts(operations, history, vault, observed, plan, incoming):
@@ -1498,11 +1537,18 @@ def _resume_update(operations, vault, observed):
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
-        if checkpoint.review is None or checkpoint.manifest.reviewed_source is None:
+        if not _saved_review_available(checkpoint):
             return _refused("saved_update_unavailable", history)
         loaded = checkpoint.review
         binding = checkpoint.manifest.reviewed_source
         plan = loaded.saved.plan
+        if (
+            plan.facts.format_operation.kind == "collection_import"
+            or checkpoint.manifest.collection_baseline_commit is not None
+        ):
+            from .collection_import import resume_collection_review
+
+            return resume_collection_review(operations, history)
         if plan.facts.format_operation.kind == "onboarding":
             from .onboarding import resume_onboarding
 
@@ -1593,29 +1639,16 @@ def inspect_update_review(
             or generation != plan.proposal.generation
         ):
             return refused("review_identity_changed")
-        checkpoint = operations.read_checkpoint(preparation.vault)
-        if preparation.kind == "onboarding" and preparation.locator is None:
-            history = operations.inspect_history(preparation.vault)
-            if (
-                checkpoint.status != "absent"
-                or checkpoint.locator is not None
-                or history.status != "absent"
-                or history.admission.status != "supported"
-                or not history.admission.inventory_complete
-                or history.admission.inventory != preparation.current_inventory
-            ):
-                return refused("association_or_history_changed")
-            directory = Path(preparation.payload_directory).absolute()
-            if (
-                directory.name != "incoming"
-                or directory.parent.parent != Path(tempfile.gettempdir())
-                or not directory.parent.name.startswith("brz2obsidian-update-")
-                or operations.observe_reviewed_source(directory, plan)
-                != preparation.source_binding
-            ):
-                return refused("source_payload_changed")
-        elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
-            return refused("association_or_history_changed")
+        if preparation.collection_record_path is not None:
+            from .collection_import import inspect_collection_authority
+
+            code = inspect_collection_authority(operations, preparation)
+            if code is not None:
+                return refused(code)
+        else:
+            code = _legacy_review_authority(operations, preparation)
+            if code is not None:
+                return refused(code)
         return review_plan_page(
             plan,
             proposal_id=proposal_id,
@@ -1626,8 +1659,35 @@ def inspect_update_review(
             byte_limit=byte_limit,
             queue=queue,
         )
-    except OSError, ValueError, TypeError, AttributeError:
+    except OSError, ValueError, TypeError, AttributeError, KeyError, StopIteration:
         return refused("invalid_review")
+
+
+def _legacy_review_authority(operations, preparation):
+    checkpoint = operations.read_checkpoint(preparation.vault)
+    if preparation.kind == "onboarding" and preparation.locator is None:
+        history = operations.inspect_history(preparation.vault)
+        if (
+            checkpoint.status != "absent"
+            or checkpoint.locator is not None
+            or history.status != "absent"
+            or history.admission.status != "supported"
+            or not history.admission.inventory_complete
+            or history.admission.inventory != preparation.current_inventory
+        ):
+            return "association_or_history_changed"
+        directory = Path(preparation.payload_directory).absolute()
+        if (
+            directory.name != "incoming"
+            or directory.parent.parent != Path(tempfile.gettempdir())
+            or not directory.parent.name.startswith("brz2obsidian-update-")
+            or operations.observe_reviewed_source(directory, preparation.review)
+            != preparation.source_binding
+        ):
+            return "source_payload_changed"
+    elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
+        return "association_or_history_changed"
+    return None
 
 
 def _slice_comparison_versions(versions, byte_offset, remaining, unread, *, _owner):

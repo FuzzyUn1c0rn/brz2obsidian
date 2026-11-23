@@ -155,6 +155,74 @@ def _scalar_replacements(
     return replacements
 
 
+def _category_provider(value, memberships):
+    matches = {
+        entry.target_id
+        for membership in memberships
+        if membership.kind == "category"
+        for entry in membership.entries
+        if value in entry.target.representations
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _field_bytes(document, field):
+    return document.content.data[field.value_span.start : field.value_span.end]
+
+
+def _remapped_appearance(comparison, documents, fields, memberships):
+    original, current, _ = documents
+    old, local, source = fields
+    former_provider = _category_provider(local.value, current.memberships)
+    if former_provider is None or any(
+        former_provider == entry.target_id
+        for membership in memberships.values()
+        if membership.kind == "category"
+        for entry in membership.entries
+    ):
+        return None
+    if _field_bytes(original, old) != _field_bytes(current, local):
+        raise ValueError("structure_conflict")
+    replacement = _category_provider(source.value, memberships.values())
+    prior, planned = used_mappings(comparison)
+    original_reasons = {
+        row.classification_id
+        for row in prior
+        if row.kind == "category" and row.target_id == former_provider
+    }
+    if not original_reasons or (
+        source.value not in (None, "")
+        and (
+            replacement is None
+            or not any(
+                row.kind == "category"
+                and row.classification_id in original_reasons
+                and row.target_id == replacement
+                for row in planned
+            )
+        )
+    ):
+        raise ValueError("structure_conflict")
+    return source
+
+
+def _combined_fields(comparison, documents, fields, memberships):
+    replacements = _scalar_replacements(documents, *fields, memberships)
+    if replacements is None:
+        raise ValueError("structure_conflict")
+    appearance = documents[1].appearance_field
+    if comparison.classification_mode == "remap" and appearance is not None:
+        replacement = _remapped_appearance(
+            comparison,
+            documents,
+            tuple(version[appearance] for version in fields),
+            memberships,
+        )
+        if replacement is not None:
+            replacements[appearance] = replacement
+    return replacements
+
+
 def _build_combined_text(
     current, incoming, candidate_body, replacements, membership_replacements
 ):
@@ -206,20 +274,21 @@ def _combine_structure(comparison, documents, output_format):
         current_fields
     ):
         return _structure_unresolved("structure_conflict")
+    if len({d.appearance_field for d in documents}) != 1:
+        return _structure_unresolved("structure_conflict")
     try:
         membership_replacements, memberships = combine_memberships(
             documents, comparison
         )
         validate_section_combination(comparison)
+        replacements = _combined_fields(
+            comparison,
+            documents,
+            (old_fields, current_fields, source_fields),
+            memberships,
+        )
     except ValueError as error:
         return _structure_unresolved(str(error))
-    if len({d.appearance_field for d in documents}) != 1:
-        return _structure_unresolved("structure_conflict")
-    replacements = _scalar_replacements(
-        documents, old_fields, current_fields, source_fields, memberships
-    )
-    if replacements is None:
-        return _structure_unresolved("structure_conflict")
     source_body = incoming.content.data[incoming.body.start : incoming.body.end]
     old_body = original.content.data[original.body.start : original.body.end]
     local_body = current.content.data[current.body.start : current.body.end]

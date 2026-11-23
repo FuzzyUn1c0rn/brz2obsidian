@@ -214,7 +214,32 @@ state. Conversion is a one-time fresh-vault operation, not synchronization.
 """
 
 
+def _import_guide(plan):
+    location = plan.import_location
+    home = next(
+        t.relative_path
+        for t in plan.item_targets
+        if t.item_key == plan.analysis.entry_key
+    )
+    return (
+        "# Imported collection guide\n\n"
+        f"Open [[{home}|Home]] to browse this import under `{location}/`. "
+        "[[Categories.md|Categories]] lists its imported categories. "
+        "[[MIGRATION REPORT.md|Migration report]] explains preserved source material and warnings.\n\n"
+        "The import uses the vault’s existing Obsidian settings. It includes "
+        "native Bases and templates under the import folder. Use the Bases "
+        "embedded in category notes to browse members. "
+        "Open [[Templates/New note.md|the general template]] or a category template "
+        "to see its properties.\n\n"
+        "Keep source_collection_id and source_item_id together on imported notes "
+        "when moving or renaming them. Maintain user-authored links when moving files. "
+        "The scoped migration record describes the generated source version.\n"
+    )
+
+
 def vault_guide(plan):
+    if plan.import_location is not None:
+        return _import_guide(plan)
     definitions = {
         i.key for i in plan.analysis.snapshot.items if i.role == "definition"
     }

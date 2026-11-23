@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from hashlib import sha256
 
 from brz2obsidian.contracts import Issue, MigrationRefused, TagMembership, TagTarget
 
@@ -89,4 +90,82 @@ def assign_tags(snapshot, item_targets):
         ),
         memberships,
         listing_path,
+    )
+
+
+def scoped_tags(snapshot, targets, existing, reuse, remembered=()):
+    choices = dict(reuse)
+    retained = {source: token for source, token, _ in remembered} | choices
+    available = set(existing)
+    identities = {target.original_identity for target in targets}
+    if (
+        len(choices) != len(reuse)
+        or choices.keys() - identities
+        or any(token not in available for token in choices.values())
+        or any(not _valid_vault_tag(token) for token in retained.values())
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="import_tag_reuse_unavailable",
+                    phase="planning",
+                    message="An existing vault tag choice no longer matches the source or vault.",
+                    guidance="Review the tag mapping with the current vault.",
+                ),
+            )
+        )
+    prefix = _import_tag_prefix(snapshot, available, remembered)
+    occupied = {_tag_key(token) for token in available | set(retained.values())}
+    result = []
+    for target in targets:
+        token = retained.get(target.original_identity)
+        if token is None:
+            base = f"{prefix}/{target.token}"
+            token = base
+            seed = sha256(target.original_identity.encode()).hexdigest()[:8]
+            collision = 0
+            while _tag_key(token) in occupied:
+                collision += 1
+                suffix = f"-{seed}" if collision == 1 else f"-{seed}-{collision}"
+                token = f"{prefix}/{target.token[: 120 - len(suffix)]}{suffix}"
+            occupied.add(_tag_key(token))
+        result.append(target.model_copy(update={"token": token}))
+    return tuple(result)
+
+
+def _tag_key(token):
+    return unicodedata.normalize("NFC", token).casefold()
+
+
+def _import_tag_prefix(snapshot, existing, remembered):
+    prior = next(
+        (
+            token.partition("/")[0]
+            for _, token, mode in remembered
+            if mode == "new" and "/" in token
+        ),
+        None,
+    )
+    if prior is not None:
+        return prior
+    occupied = {_tag_key(token.partition("/")[0]) for token in existing} | {
+        "categories"
+    }
+    base = _token(snapshot.collection_title)[:100].rstrip("-")
+    prefix = base
+    identity = snapshot.identity
+    seed = sha256((identity.module_id + "\0" + identity.source_id).encode()).hexdigest()
+    collision = 0
+    while _tag_key(prefix) in occupied:
+        collision += 1
+        suffix = f"-{seed[:8]}" if collision == 1 else f"-{seed[:8]}-{collision}"
+        prefix = base + suffix
+    return prefix
+
+
+def _valid_vault_tag(value):
+    return (
+        re.fullmatch(r"[\w/-]+", value) is not None
+        and all(value.split("/"))
+        and not value.replace("/", "").isnumeric()
     )

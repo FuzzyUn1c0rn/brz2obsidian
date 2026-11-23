@@ -424,6 +424,37 @@ class SupportArtifact(Contract):
     ]
 
 
+class ImportLinkConnection(Contract):
+    document_path: str
+    occurrence_id: str
+    document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_path: str
+    target_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ImportCategoryCandidate(Contract):
+    destination_path: str
+    destination_sha256: str
+    destination_identity: tuple[str, str, str] | None = None
+    link_members_view: Literal["linked_members", "compatible_view_available"]
+
+
+class ImportClassificationReview(Contract):
+    source_categories: tuple[tuple[str, str], ...]
+    source_tags: tuple[tuple[str, str], ...]
+    vault_categories: tuple[ImportCategoryCandidate, ...]
+    vault_tags: tuple[str, ...]
+    category_suggestions: tuple[tuple[str, str], ...]
+
+
+class ImportCategoryChoice(Contract):
+    source_identity: str = Field(min_length=1)
+    destination_path: str | None = None
+    destination_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    destination_identity: tuple[str, str, str] | None = None
+    compatible_view: bool = False
+
+
 class MigrationPlan(Contract):
     analysis: Analysis
     source_identity: SourceIdentity
@@ -432,6 +463,16 @@ class MigrationPlan(Contract):
     output_format: Literal[8, 9] = 8
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
+    import_location: str | None = None
+    reserved_import_names: tuple[str, ...] = ()
+    import_link_connections: tuple[ImportLinkConnection, ...] = ()
+    import_support_paths: dict[str, str] = Field(default_factory=dict)
+    existing_vault_tags: tuple[str, ...] = ()
+    tag_reuse: tuple[tuple[str, str], ...] = ()
+    remembered_tags: tuple[tuple[str, str, Literal["new", "reuse"]], ...] = ()
+    remembered_item_paths: tuple[tuple[str, str], ...] = ()
+    known_nonmember_paths: tuple[str, ...] = ()
+    category_choices: tuple[ImportCategoryChoice, ...] = ()
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()
     tag_memberships_path: str | None = None
@@ -983,6 +1024,15 @@ class SupportedFormatBaseline(ReconciliationContract):
         return self
 
 
+ReviewedOperationKind = Literal[
+    "source_update",
+    "onboarding",
+    "format_transition",
+    "attachment_cleanup",
+    "collection_import",
+]
+
+
 class FormatOperation(ReconciliationContract):
     """Normalized generation capability and source-version facts from outer validation.
 
@@ -993,9 +1043,7 @@ class FormatOperation(ReconciliationContract):
     automatic_merge: bool = Field(default=False, exclude_if=lambda value: not value)
     schema_id: Literal["brz2obsidian.format-operation"]
     schema_version: Literal[1]
-    kind: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ]
+    kind: ReviewedOperationKind
     recorded_generation: Literal["supported", "unavailable", "unknown"]
     baseline_source_version: str | None = Field(min_length=1)
     target_source_version: str | None = Field(min_length=1)
@@ -1092,6 +1140,9 @@ class ReferenceTarget(ReconciliationContract):
     representations: tuple[str, ...]
     validation_fingerprint: str = Field(min_length=1)
     status: Literal["safe", "unsafe", "unknown"]
+    category_anchor: Literal["observed_path", "scoped_identity"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class MembershipEntry(ReconciliationContract):
@@ -1229,6 +1280,9 @@ class StructureComparison(ReconciliationContract):
     source_edits: tuple[StructureByteEdit, ...]
     prior_mappings: tuple[ClassificationMapping, ...]
     incoming_mappings: tuple[ClassificationMapping, ...]
+    classification_mode: Literal["retained", "remap"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     section_bases: tuple[GeneratedSectionBasis, ...]
 
 
@@ -1319,8 +1373,12 @@ class OperationReversalTarget(ReconciliationContract):
                 or len(self.owned_targets) != 1
                 or target.kind != "note"
                 or target.identity is not None
+                and self.direction != "restore"
+                and self.operation_kind != "undo"
             ):
-                raise ValueError("A byte reversal requires one identityless document")
+                raise ValueError(
+                    "A byte reversal requires one identityless document or imported note operation"
+                )
         return self
 
 
@@ -1366,6 +1424,9 @@ class ReconciliationSubject(ReconciliationContract):
     )
     automatic_result: ReviewedTextCandidate | None = Field(
         default=None, exclude_if=lambda value: value is None
+    )
+    classification_view_retirement: bool = Field(
+        default=False, exclude_if=lambda value: not value
     )
     operation_reversal: OperationReversalTarget | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -1503,6 +1564,7 @@ class ChangeProvenance(ReconciliationContract):
     rule: Literal[
         "unknown_original",
         "source_absent",
+        "classification_view_retired",
         "local_absent",
         "source_unchanged",
         "unsupported_interpretation",
@@ -1616,7 +1678,7 @@ class ProposedChange(ReconciliationContract):
                     "Suppressed local deletion retains absence without selecting bytes"
                 )
         elif self.disposition == "compatible":
-            if self.result is None:
+            if self.result is None and not self._retired_view():
                 raise ValueError("Compatible results require exact selected bytes")
         elif (
             self.requires_decision
@@ -1627,6 +1689,18 @@ class ProposedChange(ReconciliationContract):
             raise ValueError(
                 "Preservation/no-change results must keep exact current bytes"
             )
+
+    def _retired_view(self):
+        return (
+            self.provenance.rule == "classification_view_retired"
+            and not self.requires_decision
+            and self.incoming is None
+            and self.original is not None
+            and self.current is not None
+            and same_content(self.original, self.current)
+            and self.path == self.target_path
+            and self.item_id == "support:" + self.path
+        )
 
 
 class ReconciliationFinding(ReconciliationContract):
@@ -1667,9 +1741,7 @@ class UpdateProposal(ReconciliationContract):
     proposal_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     changes: tuple[ProposedChange, ...]
-    operation: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
-    ]
+    operation: ReviewedOperationKind
     findings: tuple[ReconciliationFinding, ...]
     readiness: Literal["ready", "review_required", "refused"]
     ready: bool
@@ -2227,6 +2299,34 @@ class LinkMeaning(ReconciliationContract):
     candidates: tuple[str, ...]
 
 
+class ImportLinkObservation(ReconciliationContract):
+    document_path: str
+    occurrence_id: str
+    query: LinkQuery | None
+    before: LinkMeaning
+    after: LinkMeaning
+    kind: Literal[
+        "preserved",
+        "preexisting_warning",
+        "intentional_absence",
+        "known_source_gap",
+        "changed_meaning",
+        "approved_connection",
+        "connection_required",
+    ]
+    connection: ImportLinkConnection | None = None
+
+
+class ImportLinkImpact(ReconciliationContract):
+    observations: tuple[ImportLinkObservation, ...] = ()
+    warnings: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+    @property
+    def safe(self):
+        return not self.blockers
+
+
 class LinkOccurrence(ReconciliationContract):
     occurrence_id: str = Field(min_length=1)
     syntax: Literal["wiki", "markdown"]
@@ -2282,6 +2382,26 @@ class LinkContext(ReconciliationContract):
     incoming_target_facts: tuple[LinkTargetFacts, ...]
     current_documents: tuple[LinkDocument, ...]
     incoming_documents: tuple[LinkDocument, ...]
+    import_link_connections: tuple[ImportLinkConnection, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
+    import_unrelated_documents: tuple[tuple[str, str], ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
+    import_classification_remap: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
+    import_classification_approval: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
+    import_passive_targets: tuple[tuple[str, str], ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    import_finished_outputs: tuple[tuple[str, str], ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class LinkValidationBaseline(ReconciliationContract):

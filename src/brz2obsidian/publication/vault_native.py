@@ -2,6 +2,7 @@
 
 import ctypes
 import hashlib
+import io
 import os
 import stat
 from contextlib import closing, contextmanager
@@ -420,3 +421,24 @@ def observe_file(
                 raise OSError("Incomplete captured file bytes")
             if len(prefix) < prefix_limit:
                 prefix += block[: prefix_limit - len(prefix)]
+
+
+def read_observed_payload(root, rows):
+    if sum(row.size for row in rows) > available_memory() // 4:
+        raise ValueError("comparison_resources_unavailable")
+    result = {}
+    for row in rows:
+        sink = io.BytesIO()
+        info, digest, _, physical_identity = observe_file(
+            root, Path(root) / row.path, prefix_limit=0, sink=sink
+        )
+        if (info.st_size, digest) != (row.size, row.sha256):
+            raise ValueError("observed_payload_changed")
+        mode = "100755" if os.name != "nt" and info.st_mode & stat.S_IXUSR else "100644"
+        if (
+            getattr(row, "mode", mode) != mode
+            or getattr(row, "identity", physical_identity) != physical_identity
+        ):
+            raise ValueError("observed_identity_changed")
+        result[row.path] = sink.getvalue()
+    return result

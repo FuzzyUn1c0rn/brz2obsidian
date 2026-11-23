@@ -51,11 +51,15 @@ def _prospective_paths(facts, subject):
     return prospective
 
 
-def attachment_review(facts, subject, subject_id, *, _links=None):
+def attachment_review(
+    facts, subject, subject_id, *, reversal_fingerprint=None, _links=None
+):
     if subject.attachment is None:
         return None, ()
     if subject.operation_reversal is not None:
-        return _operation_attachment_review(facts, subject, subject_id, _links=_links)
+        return _operation_attachment_review(
+            facts, subject, subject_id, reversal_fingerprint, _links=_links
+        )
     if facts.format_operation.kind == "attachment_cleanup":
         return _cleanup_attachment_review(facts, subject, subject_id, _links=_links)
     association = subject.attachment.current_target_id
@@ -302,17 +306,30 @@ def _cleanup_attachment_review(facts, subject, subject_id, *, _links=None):
     ), assumptions
 
 
-def _operation_attachment_review(facts, subject, subject_id, *, _links=None):
-    """Offer the proved complete present outputs; omission never implies removal."""
+def operation_attachment_review_required(subject):
     from .reversals import content_bytes
 
     proof = subject.operation_reversal
-    if not any(
-        row.target is not None
-        and content_bytes(row.target) != content_bytes(row.current.content)
-        for row in proof.outputs
-    ):
+    return (
+        subject.attachment is not None
+        and proof is not None
+        and any(
+            row.target is not None
+            and content_bytes(row.target) != content_bytes(row.current.content)
+            for row in proof.outputs
+        )
+    )
+
+
+def _operation_attachment_review(
+    facts, subject, subject_id, fingerprint, *, _links=None
+):
+    """Offer the proved complete present outputs; omission never implies removal."""
+    if not operation_attachment_review_required(subject):
         return None, ()
+    if fingerprint is None:
+        raise ValueError("Missing operation attachment fingerprint")
+    proof = subject.operation_reversal
     alternatives = []
     for choice in ("current", "incoming"):
         present = {}
@@ -351,9 +368,7 @@ def _operation_attachment_review(facts, subject, subject_id, *, _links=None):
     assumption = ProposalAssumption(
         key=f"attachment:{subject_id}",
         kind="attachment",
-        fingerprint=sha256(
-            json.dumps(proof.model_dump(mode="json"), sort_keys=True).encode()
-        ).hexdigest(),
+        fingerprint=fingerprint,
         depends_on=(
             f"{subject_id}:reversal",
             f"{subject_id}:current",

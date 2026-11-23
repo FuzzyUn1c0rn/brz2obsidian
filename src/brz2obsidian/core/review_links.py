@@ -11,6 +11,7 @@ from brz2obsidian.contracts import (
     ProposalAssumption,
 )
 
+from .formats import retained_import_output
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import (
     _query_matches_target,
@@ -308,10 +309,55 @@ def known_result_document(facts, change):
     )
 
 
+def collection_asset_effect(facts, change):
+    """Bind a first-import binary to its absent path and its exact incoming value."""
+    context = facts.link_context
+    if (
+        facts.format_operation.kind != "collection_import"
+        or context is None
+        or context.inventory != "complete"
+        or change.facet != "asset"
+        or change.original is not None
+        or change.current is not None
+        or change.incoming is None
+        or not same_content(change.result, change.incoming)
+        or change.path != change.target_path
+    ):
+        return None
+    current = tuple(
+        t for t in context.current_targets if t.canonical_path == change.path
+    )
+    incoming = tuple(
+        t for t in context.incoming_targets if t.canonical_path == change.path
+    )
+    if len(current) != 1 or current != incoming:
+        return None
+    (target,) = current
+    if target.kind != "resource" or target.status != "safe" or target.target is None:
+        return None
+    old = tuple(
+        row for row in context.current_target_facts if row.target_id == target.target_id
+    )
+    new = tuple(
+        row
+        for row in context.incoming_target_facts
+        if row.target_id == target.target_id
+    )
+    if (
+        len(old) == len(new) == 1
+        and old[0].existence == "missing"
+        and old[0].content is None
+        and new[0].existence == "present"
+        and same_content(new[0].content, change.incoming)
+    ):
+        return target, new[0]
+    return None
+
+
 def compatible_result_eligible(facts, change):
-    return (
-        facts.link_context is not None
-        and known_result_document(facts, change) is not None
+    return facts.link_context is not None and (
+        known_result_document(facts, change) is not None
+        or collection_asset_effect(facts, change) is not None
     )
 
 
@@ -340,11 +386,33 @@ def _observed_documents_bound(context, identity_inventory):
     return True
 
 
-def _observed_target_bound(target, states, identity_inventory):
+def passive_import_target(context, target):
+    path = target.canonical_path
+    return (
+        target.kind in ("note", "resource")
+        and target.identity is None
+        and path is not None
+        and target.target_id == f"physical:{path}"
+        and target.representations == (path,)
+        and any(path == candidate for candidate, _ in context.import_passive_targets)
+    )
+
+
+def _observed_target_bound(target, states, facts):
     entries = tuple(
-        e for e in identity_inventory if e.current.path == target.canonical_path
+        e for e in facts.identity_inventory if e.current.path == target.canonical_path
     )
     matching = tuple(s for s in states if s.target_id == target.target_id)
+    if (
+        not matching
+        and not entries
+        and passive_import_target(facts.link_context, target)
+        and (
+            facts.format_operation.kind == "collection_import"
+            or any(subject.operation_reversal is not None for subject in facts.subjects)
+        )
+    ):
+        return True
     if len(matching) != 1:
         return False
     (state,) = matching
@@ -403,9 +471,7 @@ def current_observation_problem(facts):
         context.inventory,
     )
     for target in targets:
-        if target.kind != "tag" and not _observed_target_bound(
-            target, states, facts.identity_inventory
-        ):
+        if target.kind != "tag" and not _observed_target_bound(target, states, facts):
             return "current_link_context_unbound"
     return None
 
@@ -743,15 +809,42 @@ def current_lookup_coverage(facts):
     return True
 
 
+def _completed_import_resource(facts, subject, target):
+    if (
+        subject.facet != "asset"
+        or subject.baseline.content is not None
+        or not retained_import_output(facts, subject)
+    ):
+        return False
+    context = facts.link_context
+    incoming = tuple(
+        row for row in context.incoming_targets if row.canonical_path == subject.path
+    )
+    states = tuple(
+        row
+        for row in context.incoming_target_facts
+        if row.target_id == target.target_id
+    )
+    return (
+        incoming == (target,)
+        and len(states) == 1
+        and states[0].existence == "present"
+        and canonical_equal(states[0].content, subject.incoming)
+    )
+
+
 def bound_resource_record(facts, entry, target, state):
     from .reversals import reversal_resource_record
 
     if reversal_resource_record(facts, entry, target, state):
         return True
     associated = any(
-        sub.attachment is not None
-        and sub.attachment.current_target_id == target.target_id
-        and entry.identity_state == "valid"
+        entry.identity_state == "valid"
+        and (
+            sub.attachment is not None
+            and sub.attachment.current_target_id == target.target_id
+            or _completed_import_resource(facts, sub, target)
+        )
         and sub.facet == entry.facet
         and entry.identity is not None
         and sub.item_id == entry.identity.item_id

@@ -11,6 +11,7 @@ import yaml
 from brz2obsidian.contracts import (
     REVIEWABLE_OUTPUT_FORMATS,
     FileRoleFacts,
+    InlineExactContent,
     MembershipDeclarationFacts,
     ReferenceDeclarationFacts,
     SourceIdentity,
@@ -41,9 +42,45 @@ def canonical_player_ranges(text):
     return [(match.start(), match.end()) for match in _CANONICAL_PLAYER.finditer(text)]
 
 
-def migration_record_data(text, source_path, *, record_format=8):
+def is_migration_record_path(path):
+    return path.rsplit("/", 1)[-1] == "migration-record.json"
+
+
+def read_migration_record(raw):
+    value = json.loads(raw.data if isinstance(raw, InlineExactContent) else raw)
+    if value.get("schema") != "brz2obsidian.migration":
+        raise ValueError("association_record_invalid")
+    return value
+
+
+def classification_view_paths(value):
+    return {
+        path
+        for row in value.get("category_mappings", ())
+        for path in row.get("view_paths", ())
+    }
+
+
+def _matches_record_location(value, source_path, owned_record_path):
+    location, separator, _ = source_path.rpartition("/")
+    if not separator:
+        return "collection_location" not in value
+    recorded_location = value.get(
+        "collection_location",
+        location if owned_record_path == source_path else None,
+    )
+    return (
+        recorded_location == location
+        and "\\" not in location
+        and all(part not in ("", ".", "..") for part in location.split("/"))
+    )
+
+
+def migration_record_data(
+    text, source_path, *, record_format=8, owned_record_path=None
+):
     """Recognize a supported data envelope, without validating its authority."""
-    if source_path != "migration-record.json":
+    if not is_migration_record_path(source_path):
         return False
 
     def unique_members(pairs):
@@ -78,6 +115,8 @@ def migration_record_data(text, source_path, *, record_format=8):
                 for key in ("item_targets", "asset_targets")
             )
         ):
+            return False
+        if not _matches_record_location(value, source_path, owned_record_path):
             return False
         SourceIdentity.model_validate(value["source_identity"])
     except ValueError, KeyError, TypeError:
@@ -126,10 +165,20 @@ def frontmatter(text):
     raise ValueError("Frontmatter has no closing delimiter")
 
 
-def category(properties, artifact):
+def category(properties, artifact, *, scoped=False):
     parts = artifact.split("/")
     return (
-        parts[0] == "Categories"
+        (
+            parts[0] == "Categories"
+            or scoped
+            and (
+                "Categories" in parts[:-1]
+                or all(
+                    isinstance(properties.get(key), str) and properties[key]
+                    for key in ("source_collection_id", "source_item_id")
+                )
+            )
+        )
         and not any(part in {"Templates", "Attachments"} for part in parts[:-1])
         and isinstance(properties.get("tags"), list)
         and "categories" in properties["tags"]
@@ -162,7 +211,17 @@ def native_properties(content):
         return None
 
 
-def file_roles(content, *, path, existence, reference_query):
+def _matches_category_target(properties, category_target):
+    if category_target is None:
+        return False
+    identity = category_target.identity
+    return identity is None or (
+        properties.get("source_collection_id") == identity.collection_id
+        and properties.get("source_item_id") == identity.item_id
+    )
+
+
+def file_roles(content, *, path, existence, reference_query, category_target=None):
     note = path.lower().endswith(".md")
     properties = native_properties(content) if existence == "present" and note else {}
 
@@ -199,7 +258,13 @@ def file_roles(content, *, path, existence, reference_query):
     return FileRoleFacts(
         path=path,
         content_sha256=None if content is None else sha256(content.data).hexdigest(),
-        category=note and existence == "present" and category(properties or {}, path),
+        category=note
+        and existence == "present"
+        and category(
+            properties or {},
+            path,
+            scoped=_matches_category_target(properties or {}, category_target),
+        ),
         image_path=image_path(path),
         category_memberships=MembershipDeclarationFacts(status=status, queries=queries),
         provider=declaration("appearance_category"),

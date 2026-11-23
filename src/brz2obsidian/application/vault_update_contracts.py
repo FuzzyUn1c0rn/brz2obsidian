@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointFile
-from brz2obsidian.contracts import ReconciliationContract
+from brz2obsidian.contracts import ReconciliationContract, ReviewedOperationKind
 
 
 class VaultOperationLock(ReconciliationContract):
@@ -14,6 +14,21 @@ class VaultOperationLock(ReconciliationContract):
     operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     vault_anchor: str
     git_anchor: str
+    collection_saved_checkpoint: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+    collection_undo_receipt: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def undo_parent_is_bound(self):
+        if (
+            self.collection_undo_receipt is not None
+            and self.collection_saved_checkpoint is None
+        ):
+            raise ValueError("Scoped Undo marker requires the exact parent checkpoint")
+        return self
 
 
 class VaultPathMetadata(ReconciliationContract):
@@ -174,12 +189,9 @@ class VaultApplyResult(ReconciliationContract):
     code: str
     operation_id: str | None
     kind: Literal["apply", "undo"]
-    origin_role: (
-        Literal[
-            "source_update", "onboarding", "format_transition", "attachment_cleanup"
-        ]
-        | None
-    ) = Field(default=None, exclude_if=lambda value: value is None)
+    origin_role: ReviewedOperationKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     direction: Literal["finish", "restore"] | None = None
     review_generation: int | None = Field(default=None, ge=1)
     generation: int | None = Field(ge=1)

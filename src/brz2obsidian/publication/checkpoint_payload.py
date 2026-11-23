@@ -11,7 +11,11 @@ from brz2obsidian.application.checkpoint_payload_contracts import (
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.git_read import OUTPUT_BUDGET
 from brz2obsidian.publication.vault_admission import _safe_relative
-from brz2obsidian.publication.vault_history import _Git, inspect_history
+from brz2obsidian.publication.vault_history import (
+    _Git,
+    collection_baselines,
+    inspect_history,
+)
 from brz2obsidian.publication.vault_native import (
     available_memory,
     observe_file,
@@ -41,7 +45,14 @@ class _Page:
 
 
 def read_checkpoint_payload(
-    vault, *, locator, requests, byte_limit, role="source", git_executable=None
+    vault,
+    *,
+    locator,
+    requests,
+    byte_limit,
+    role="source",
+    git_executable=None,
+    collection=None,
 ):
     """Return finite pages only after an independent current history inspection."""
     return _read_checkpoint_payload(
@@ -50,12 +61,19 @@ def read_checkpoint_payload(
         requests=requests,
         byte_limit=byte_limit,
         role=role,
+        collection=collection,
         git_executable=git_executable,
         _read_history=lambda: inspect_history(vault, git_executable=git_executable),
     )
 
 
-def _select_pages(manifest, role, requests):
+def _select_pages(checkpoint, role, requests, collection):
+    manifest = checkpoint.manifest
+    if collection is not None:
+        baseline = collection_baselines(checkpoint).get(collection)
+        if baseline is None:
+            return "collection_not_active", ()
+        _, manifest = baseline
     rows = {row.path: row for row in getattr(manifest, role)}
     selected = []
     for request in requests:
@@ -112,6 +130,7 @@ def _read_checkpoint_payload(
     byte_limit,
     role="source",
     git_executable=None,
+    collection=None,
     _read_history,
     _guard=None,
 ):
@@ -131,6 +150,13 @@ def _read_checkpoint_payload(
             or not 0 <= byte_limit <= (1 << 63) - 1
             or type(requests) is not tuple
             or not 0 < len(requests) <= OUTPUT_BUDGET // 128
+            or collection is not None
+            and (
+                role != "source"
+                or type(collection) is not tuple
+                or len(collection) != 2
+                or any(type(value) is not str or not value for value in collection)
+            )
         ):
             return _payload_result(role, "invalid_request")
         locator = CheckpointLocator.model_validate(locator)
@@ -157,7 +183,7 @@ def _read_checkpoint_payload(
             return _payload_result(role, "history_unavailable")
         if checkpoint.locator != locator:
             return _payload_result(role, "stale_locator")
-        refusal, selected = _select_pages(checkpoint.manifest, role, requests)
+        refusal, selected = _select_pages(checkpoint, role, requests, collection)
         if refusal is not None:
             return _payload_result(role, refusal)
         git = _Git(root, git_executable)

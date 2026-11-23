@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
 from typing import NamedTuple
+from uuid import uuid4
 
 from brz2obsidian.application.checkpoint_contracts import (
     CheckpointFile,
@@ -207,6 +208,9 @@ def _semantic(
     undo_of_receipt_commit=None,
     observed_source=None,
     reviewed_source=None,
+    collection_record_path=None,
+    collection_baseline_commit=None,
+    collection_preparation_owner=None,
 ):
     return _semantic_meaning(
         association,
@@ -226,6 +230,9 @@ def _semantic(
         undo_of_receipt_commit,
         observed_source,
         reviewed_source,
+        collection_record_path=collection_record_path,
+        collection_baseline_commit=collection_baseline_commit,
+        collection_preparation_owner=collection_preparation_owner,
     )
 
 
@@ -247,6 +254,11 @@ def _semantic_meaning(
     undo_of_receipt_commit=None,
     observed_source=None,
     reviewed_source=None,
+    discarded_review=None,
+    collection_record_path=None,
+    collection_baseline_commit=None,
+    collection_preparation_owner=None,
+    abandoned_collection_preparation=None,
 ):
     parts = (
         association.model_dump(mode="json"),
@@ -270,6 +282,16 @@ def _semantic_meaning(
             if reviewed_source is not None
             else None,
         )
+    if discarded_review is not None:
+        parts += ("discarded-review", discarded_review)
+    if collection_record_path is not None:
+        parts += ("collection-record", collection_record_path)
+    if collection_baseline_commit is not None:
+        parts += ("collection-baseline", collection_baseline_commit)
+    if collection_preparation_owner is not None:
+        parts += ("collection-preparation-owner", collection_preparation_owner)
+    if abandoned_collection_preparation is not None:
+        parts += ("abandoned-collection-preparation", abandoned_collection_preparation)
     if undo_of_receipt_commit is not None:
         return digest((*parts, "undo-prepared", undo_of_receipt_commit))
     if recovery_origin_intent_commit is not None:
@@ -1137,7 +1159,7 @@ def _checkpoint_review_metadata(manifest, review, references):
         _review_parent_fingerprint(review),
         _review_source_signature(review.saved),
         review.saved.plan.facts.baseline_identity,
-        _onboarding_absence_review(review),
+        _initial_absence_review(review),
         review_ownership_claims(review.saved.plan, review.historical_effects),
         _review_queries(review),
         review.saved.plan.facts.format_operation.kind,
@@ -1389,6 +1411,11 @@ class _CheckpointRole(NamedTuple):
     review_baseline_identity: OutputIdentity | None = None
     baseline_source: tuple | None = None
     reviewed_payload: str | None = None
+    collection_baseline_commit: str | None = None
+    discarded_review: str | None = None
+    saved_proposal_id: str | None = None
+    collection_preparation_owner: str | None = None
+    abandoned_collection_preparation: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1409,11 +1436,11 @@ def _review_context_fingerprint(association, manifest):
     )
 
 
-def _onboarding_absence_review(review):
+def _initial_absence_review(review):
     plan = review.saved.plan
     preflight = plan.preflight
     return (
-        plan.facts.format_operation.kind == "onboarding"
+        plan.facts.format_operation.kind in ("onboarding", "collection_import")
         and preflight.operation_status == "idle"
         and preflight.state_status == "absent"
         and preflight.state_schema is None
@@ -1428,7 +1455,7 @@ def _review_parent_fingerprint(review):
         and preflight.state_status == "supported"
         and preflight.state_schema == "brz2obsidian.checkpoint-manifest"
         and preflight.state_version == 1
-    ) or _onboarding_absence_review(review):
+    ) or _initial_absence_review(review):
         return preflight.state_fingerprint
     return None
 
@@ -1511,6 +1538,8 @@ class _MetadataCheckpoint:
     metadata: object
     status: str = "valid"
     review: object = None
+    discarded_manifest: CheckpointManifest | None = None
+    collection_baselines: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -1634,7 +1663,11 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
         )
     _, _, raw, _ = observe_file(root, locator_path, prefix_limit=OUTPUT_BUDGET + 1)
     locator = CheckpointLocator.model_validate_json(raw)
-    association = locator.association
+    _validate_locator_association(root, locator.association, trusted_association)
+    return _locator_at_owned_tip(root, git, locator, trusted_association)
+
+
+def _validate_locator_association(root, association, trusted_association=None):
     if trusted_association is None:
         if association.vault_anchor != verify_directory(
             root
@@ -1642,13 +1675,6 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
             raise OSError("Association physical context does not match")
     elif association != trusted_association:
         raise OSError("Copied association differs from the target-owned association")
-    if set(os.listdir(root / ".brz2obsidian")) != {"locator.json"}:
-        raise OSError("Unknown converter operation metadata")
-    if (
-        git.call("rev-parse", "--verify", association.ref).decode().strip()
-        != locator.commit
-    ):
-        raise OSError("Owned checkpoint root is missing or changed")
     expected_id = digest(
         (
             association.vault_id,
@@ -1660,7 +1686,30 @@ def _bound_checkpoint_locator(root, git, targets, trusted_association):
     expected_ref = "refs/brz2obsidian/imports/" + expected_id + "/checkpoints"
     if association.association_id != expected_id or association.ref != expected_ref:
         raise OSError("Invalid stable checkpoint association")
-    return locator
+
+
+def _locator_at_owned_tip(root, git, locator, trusted_association):
+    names = set(os.listdir(root / ".brz2obsidian"))
+    tip = git.call("rev-parse", "--verify", locator.association.ref).decode().strip()
+    if tip == locator.commit and names == {"locator.json"}:
+        return locator
+    if trusted_association is None:
+        from .collection_result_locator import locator_after_scoped_result
+        from .collection_undo_publication import locator_after_scoped_undo_preparation
+        from .unpublished_collection import locator_after_unpublished_preparation
+
+        advanced = locator_after_unpublished_preparation(root, git, locator, tip, names)
+        if advanced is not None:
+            return advanced
+        undo_locator = locator_after_scoped_undo_preparation(
+            root, git, locator, tip, names
+        )
+        if undo_locator is not None:
+            return undo_locator
+        result_locator = locator_after_scoped_result(root, git, locator, tip, names)
+        if result_locator is not None:
+            return result_locator
+    raise OSError("Owned checkpoint root or locator metadata changed")
 
 
 class _CheckpointChain(NamedTuple):
@@ -1671,6 +1720,9 @@ class _CheckpointChain(NamedTuple):
     pending: tuple
     ownership_demands: list
     ownership_roles: list
+    discarded_review: object
+    discarded_manifest: CheckpointManifest | None
+    collection_baselines: dict
 
 
 def _check_checkpoint_edges(
@@ -1680,7 +1732,8 @@ def _check_checkpoint_edges(
         actual_association != association
         or manifest.association_id != association.association_id
         or manifest.generation != generation
-        or (manifest.identity.collection_id, manifest.identity.module_id)
+        or manifest.collection_record_path is None
+        and (manifest.identity.collection_id, manifest.identity.module_id)
         != (association.collection_id, association.module_id)
     ):
         raise OSError(
@@ -1788,6 +1841,14 @@ def _accumulate_checkpoint_claims(
 
 
 def _check_checkpoint_meaning(association, manifest, review_metadata, meaning):
+    if (
+        manifest.collection_record_path is not None
+        and manifest.boundary == "local"
+        and not manifest.source
+        and manifest.discarded_review is None
+        and (review_metadata is None or review_metadata[10] != "collection_import")
+    ):
+        raise OSError("Empty collection baseline lacks a retained import review")
     if manifest.reviewed_source is not None and (
         manifest.review_object is None
         or review_metadata[5] != _binding_signature(manifest.reviewed_source)
@@ -1822,6 +1883,11 @@ def _check_checkpoint_meaning(association, manifest, review_metadata, meaning):
             manifest.undo_of_receipt_commit,
             manifest.observed_source,
             manifest.reviewed_source,
+            manifest.discarded_review,
+            manifest.collection_record_path,
+            manifest.collection_baseline_commit,
+            manifest.collection_preparation_owner,
+            manifest.abandoned_collection_preparation,
         )
         != manifest.semantic_fingerprint
     ):
@@ -1919,9 +1985,91 @@ def _accumulate_checkpoint_role(
             )
             if pending_format or format_review and manifest.boundary == "local"
             else None,
+            collection_baseline_commit=manifest.collection_baseline_commit,
+            discarded_review=manifest.discarded_review,
+            saved_proposal_id=(
+                manifest.reviewed_source.proposal_id
+                if manifest.boundary == "local" and manifest.reviewed_source is not None
+                else None
+            ),
+            collection_preparation_owner=manifest.collection_preparation_owner,
+            abandoned_collection_preparation=manifest.abandoned_collection_preparation,
         )
     )
     return memo_roles, format_roles
+
+
+class _CollectionLineage:
+    def __init__(self):
+        self.baselines = {}
+        self.demands = {}
+        self.discard = None
+        self.discarded_review = self.discarded_manifest = None
+        self.restored = None
+        self.restored_parent = None
+
+    def check_discard(self, manifest):
+        if self.discard is not None and (
+            manifest.boundary != "local"
+            or manifest.reviewed_source is None
+            or manifest.identity != self.discard.identity
+            or manifest.source != self.discard.source
+            or manifest.vault != self.discard.vault
+            or manifest.recovery_gaps != self.discard.recovery_gaps
+        ):
+            raise OSError("Discarded review lacks its exact saved checkpoint")
+        self.discard = manifest if manifest.discarded_review is not None else None
+
+    def check_restoration(self, current, manifest):
+        if self.restored_parent is not None:
+            from .unpublished_collection import restored_roles_match
+
+            if current != self.restored_parent or not restored_roles_match(
+                self.restored, manifest, current
+            ):
+                raise OSError("Restored collection review changed its saved authority")
+            self.restored = self.restored_parent = None
+        elif self.restored is not None:
+            if (
+                manifest.collection_preparation_owner is None
+                or manifest.previous is None
+            ):
+                raise OSError("Abandoned collection preparation lacks its owner")
+            self.restored_parent = manifest.previous
+        if manifest.abandoned_collection_preparation is not None:
+            if self.restored is not None:
+                raise OSError("Overlapping collection preparation restoration")
+            self.restored = manifest
+
+    def observe(self, current, manifest, tip_manifest, review_metadata, review):
+        if manifest.boundary != "prepared":
+            key = (manifest.identity.module_id, manifest.identity.collection_id)
+            demanded = self.demands.pop(key, None)
+            if demanded is not None and (
+                demanded.collection_baseline_commit != current
+                or demanded.identity != manifest.identity
+                or demanded.collection_record_path != manifest.collection_record_path
+                or demanded.source != manifest.source
+            ):
+                raise OSError(
+                    "Collection selection changed its retained source baseline"
+                )
+            if manifest.collection_baseline_commit is not None:
+                self.demands[key] = manifest
+            pending_onboarding = (
+                manifest.boundary == "local"
+                and review_metadata is not None
+                and review_metadata[7]
+            )
+            self.baselines.setdefault(
+                key,
+                (current, manifest)
+                if manifest.source and not pending_onboarding
+                else None,
+            )
+        if tip_manifest is not None and current == tip_manifest.discarded_review:
+            self.discarded_review = review
+            self.discarded_manifest = manifest
 
 
 def _read_checkpoint_chain(
@@ -1932,6 +2080,7 @@ def _read_checkpoint_chain(
     review_memo = CheckpointReviewMemo()
     current, generation = locator.commit, locator.generation
     tip_manifest = tip_review = tip_metadata = None
+    collections = _CollectionLineage()
     memo_roles = format_roles = False
     target_records = {}
     ownership_demands, ownership_roles = [], []
@@ -1946,6 +2095,8 @@ def _read_checkpoint_chain(
         _check_checkpoint_edges(
             association, generation, parents, entries, manifest, actual_association
         )
+        collections.check_discard(manifest)
+        collections.check_restoration(current, manifest)
         for role in (
             "source",
             "vault",
@@ -1962,10 +2113,16 @@ def _read_checkpoint_chain(
             entries,
             current,
             (not _metadata_only or _owners is not None)
-            and (tip_manifest is None or (targets is not None and current in targets)),
+            and (
+                tip_manifest is None
+                or not _metadata_only
+                and current == tip_manifest.discarded_review
+                or (targets is not None and current in targets)
+            ),
             _owners,
         )
         meaning = review_metadata[2] if manifest.review_object is not None else None
+        collections.observe(current, manifest, tip_manifest, review_metadata, review)
         _accumulate_checkpoint_claims(
             manifest,
             current,
@@ -2003,7 +2160,7 @@ def _read_checkpoint_chain(
             target_records[current] = manifest, review
         controls = {}
         current, generation = manifest.previous, generation - 1
-    if generation != 0:
+    if generation != 0 or collections.demands or collections.restored is not None:
         raise OSError("Retained checkpoint chain is incomplete")
     return _CheckpointChain(
         tip_manifest,
@@ -2013,6 +2170,9 @@ def _read_checkpoint_chain(
         tuple(row for oid, row in blobs.items() if oid not in verified),
         ownership_demands,
         ownership_roles,
+        collections.discarded_review,
+        collections.discarded_manifest,
+        collections.baselines,
     )
 
 
@@ -2153,6 +2313,8 @@ def _checkpoint_read_result(locator, chain, targets, _metadata_only, _owners):
             chain.manifest,
             chain.metadata,
             review=chain.review if _owners is not None else None,
+            discarded_manifest=chain.discarded_manifest,
+            collection_baselines=chain.collection_baselines,
         )
         if targets is not None:
             if set(chain.target_records) != set(targets):
@@ -2172,6 +2334,8 @@ def _checkpoint_read_result(locator, chain, targets, _metadata_only, _owners):
         message="Complete owned local checkpoint graph validated.",
     )
     _retain_review_effects(result.review, chain.review)
+    result._discarded_review = chain.discarded_review
+    result._collection_baselines = chain.collection_baselines
     if targets is not None:
         if set(chain.target_records) != set(targets):
             raise OSError("Operation checkpoint is outside the retained owned chain")
@@ -2245,6 +2409,8 @@ def _history_result(*, status, admission, checkpoint):
     )
     if checkpoint is not None:
         _retain_review_effects(result.checkpoint.review, checkpoint.review)
+        result.checkpoint._discarded_review = checkpoint._discarded_review
+        result.checkpoint._collection_baselines = checkpoint._collection_baselines
     return result
 
 
@@ -2726,6 +2892,8 @@ class _CaptureRequest(NamedTuple):
     observation: object
     owned_export: object
     owners: object
+    collection_record_path: str | None
+    import_link_connections: tuple
 
 
 class _CaptureBase(NamedTuple):
@@ -2738,6 +2906,9 @@ class _CaptureBase(NamedTuple):
     prior: object
     format_parent: object
     captured_inspections: object
+    collection_record_path: str | None
+    selected_baseline: CheckpointManifest | None
+    selected_baseline_commit: str | None
 
 
 class _CaptureLineage(NamedTuple):
@@ -3005,8 +3176,10 @@ def _capture_base(request, subjects, writes):
     prior = observed_history.checkpoint
     if observed_history.status == "unavailable" or prior is None:
         raise _CaptureDecision(result("refused", "current_history_unavailable"))
-    if prior.status == "valid" and prior.locator.association != association:
-        raise _CaptureDecision(result("refused", "association_mismatch"))
+    association, record_path, selected_baseline, selected_baseline_commit = (
+        _capture_collection_scope(request, prior, association, identity)
+    )
+    writes.ref = association.ref
     format_parent = (
         captured_inspections[0]._format_prepared_parent()
         if new_operation is not None and captured_inspections
@@ -3018,10 +3191,94 @@ def _capture_base(request, subjects, writes):
         identity,
         git,
         association,
-        association_id,
+        association.association_id,
         prior,
         format_parent,
         captured_inspections,
+        record_path,
+        selected_baseline,
+        selected_baseline_commit,
+    )
+
+
+def _capture_collection_scope(request, prior, association, identity):
+    record_path = request.collection_record_path
+    if record_path is None:
+        return _current_capture_scope(request, prior, association, identity)
+    initial = _first_collection_review(request)
+    if prior.status != "valid":
+        if initial:
+            return association, record_path, None, None
+        raise _CaptureDecision(result("refused", "collection_not_active"))
+    current = _retained_vault_association(request, prior)
+    key = (identity.module_id, identity.collection_id)
+    baseline = collection_baselines(prior).get(key)
+    if initial:
+        if baseline is not None:
+            raise _CaptureDecision(result("refused", "collection_already_active"))
+        return current, record_path, None, None
+    selection = (
+        request.boundary == "local"
+        and request.review is not None
+        and request.review.facts.format_operation.kind == "source_update"
+        and request.review_source is not None
+    )
+    if not selection:
+        raise _CaptureDecision(result("refused", "collection_update_review_required"))
+    if baseline is None:
+        raise _CaptureDecision(result("refused", "collection_not_active"))
+    commit, manifest = baseline
+    if record_path != (manifest.collection_record_path or "migration-record.json"):
+        raise _CaptureDecision(result("refused", "collection_scope_changed"))
+    return current, manifest.collection_record_path, manifest, commit
+
+
+def _retained_vault_association(request, prior):
+    current = prior.locator.association
+    if (current.vault_id, current.import_id) != (request.vault_id, request.import_id):
+        raise _CaptureDecision(result("refused", "association_mismatch"))
+    return current
+
+
+def _current_capture_scope(request, prior, association, identity):
+    if prior.status != "valid":
+        return association, None, None, None
+    retained = _retained_vault_association(request, prior)
+    previous = prior.manifest.identity
+    key = identity.module_id, identity.collection_id
+    if (previous.module_id, previous.collection_id) != key:
+        target = collection_baselines(prior).get(key)
+        if request.undo_of_receipt_commit is not None and target is not None:
+            _, manifest = target
+            return retained, manifest.collection_record_path, None, None
+        raise _CaptureDecision(result("refused", "association_mismatch"))
+    scope = prior.manifest.collection_record_path
+    if scope is not None:
+        if request.boundary == "local":
+            raise _CaptureDecision(
+                result("refused", "collection_update_review_required")
+            )
+        return retained, scope, None, None
+    if retained != association:
+        raise _CaptureDecision(result("refused", "association_mismatch"))
+    return retained, None, None, None
+
+
+def collection_baselines(checkpoint):
+    if isinstance(checkpoint, _MetadataCheckpoint):
+        return checkpoint.collection_baselines or {}
+    return checkpoint._collection_baselines
+
+
+def _first_collection_review(request):
+    return (
+        request.boundary == "local"
+        and request.collection_record_path is not None
+        and request.review is not None
+        and request.review.facts.format_operation.kind == "collection_import"
+        and request.review.facts.format_operation.baseline_source_version is None
+        and request.review.facts.format_operation.established_baseline is None
+        and request.review_source is not None
     )
 
 
@@ -3160,6 +3417,42 @@ def _capture_lineage(request, base):
     )
 
 
+def _require_current_saved_review(request, base):
+    prior = base.prior
+    if (
+        prior.status != "valid"
+        or prior.manifest.boundary != "local"
+        or prior.manifest.reviewed_source is None
+    ):
+        return
+    if prior.review is not None:
+        plan = prior.review.saved.plan
+        pending_id = plan.proposal.proposal_id
+        onboarding = (
+            plan.facts.format_operation.kind == "onboarding"
+            and _initial_absence_review(prior.review)
+        )
+    elif isinstance(prior, _MetadataCheckpoint):
+        pending_id = prior.metadata[5][0]
+        onboarding = prior.metadata[7] and prior.metadata[10] == "onboarding"
+    else:
+        raise _CaptureDecision(result("refused", "current_history_unavailable"))
+    incoming = (
+        request.review.facts.incoming_identity if request.review is not None else None
+    )
+    pending = prior.manifest.reviewed_source.incoming_identity
+    if incoming is not None and (
+        request.review.proposal.proposal_id == pending_id
+        and (incoming.module_id, incoming.collection_id)
+        == (pending.module_id, pending.collection_id)
+        or onboarding
+        and request.review.facts.format_operation.kind == "format_transition"
+        and request.review.facts.baseline_identity == prior.manifest.identity
+    ):
+        return
+    raise _CaptureDecision(result("refused", "saved_review_pending"))
+
+
 def _capture_saved_review(request, base, lineage):
     saved_result = base.saved_result
     saved = None
@@ -3286,12 +3579,17 @@ def _capture_local_source(request, base, saved):
         ):
             raise _CaptureDecision(result("refused", "local_review_source_required"))
         if (
-            base.prior.status != "valid"
-            or request.review.facts.baseline_identity
-            != (
-                base.format_parent.identity
-                if base.format_parent
-                else base.prior.manifest.identity
+            not _first_collection_review(request)
+            and (
+                base.prior.status != "valid"
+                or request.review.facts.baseline_identity
+                != (
+                    base.selected_baseline.identity
+                    if base.selected_baseline is not None
+                    else base.format_parent.identity
+                    if base.format_parent
+                    else base.prior.manifest.identity
+                )
             )
             or request.review.preflight != base.current.preflight
         ):
@@ -3624,10 +3922,52 @@ def _capture_spool_capacity(request, base, saved, included_paths):
     return proposed, temp_base
 
 
+def _qualify_local_collection_import(request, base, review_source):
+    from .collection_placement import (
+        collection_write_refusal,
+        scoped_update_classification_refusal,
+    )
+
+    if _first_collection_review(request):
+        refusal = collection_write_refusal(
+            base.current,
+            base.prior,
+            review_source,
+            base.collection_record_path,
+            request.review,
+            choices=request.import_link_connections,
+            git=base.git,
+        )
+    elif (
+        request.boundary == "local"
+        and base.collection_record_path
+        and request.review is not None
+        and request.review.facts.format_operation.kind == "source_update"
+    ):
+        refusal = (
+            scoped_update_classification_refusal(
+                base.current,
+                base.prior,
+                review_source,
+                base.collection_record_path,
+                request.review,
+                git=base.git,
+            )
+            if review_source is not None
+            else "local_review_source_required"
+        )
+    else:
+        refusal = None
+    if refusal is not None:
+        raise _CaptureDecision(result("refused", refusal))
+
+
 def _prepare_checkpoint_capture(request, writes):
     _validate_capture_export(request)
     subjects = _capture_subjects(request)
     base = _capture_base(request, subjects, writes)
+    if request.boundary == "local":
+        _require_current_saved_review(request, base)
     retry_format = request.boundary == "prepared" and base.format_parent is not None
     lineage = _capture_lineage(request, base)
     saved = _capture_saved_review(request, base, lineage)
@@ -3635,6 +3975,7 @@ def _prepare_checkpoint_capture(request, writes):
     review_source, reviewed_source, review_source_rows = _capture_local_source(
         request, base, saved
     )
+    _qualify_local_collection_import(request, base, review_source)
     retaining_prepared = request.boundary == "result"
     saved = _retain_prepared_review(request, base, saved, retaining_prepared)
     retained_recovery_incoming = _capture_recovery_inputs(lineage, saved)
@@ -3675,7 +4016,11 @@ def _spool_capture_source(request, base, lineage, plan, directory):
     ) != tuple(
         (row.path, row.mode, row.size, row.sha256)
         for row in (
-            base.format_parent.baseline_source
+            ()
+            if _first_collection_review(request)
+            else base.selected_baseline.source
+            if base.selected_baseline is not None
+            else base.format_parent.baseline_source
             if base.format_parent is not None
             else base.prior.manifest.source
         )
@@ -3929,6 +4274,9 @@ def _describe_capture(request, base, lineage, plan, spooled, directory, writes):
         reviewed_source
         if request.boundary != "result"
         else base.prior.manifest.reviewed_source,
+        collection_record_path=base.collection_record_path,
+        collection_baseline_commit=base.selected_baseline_commit,
+        collection_preparation_owner=_collection_preparation_owner(request, base),
     )
     # Duplicate meaning omits proof identities. An owned prepared
     # export must retain the complete plan its result capture checks.
@@ -4146,6 +4494,9 @@ def _capture_manifest(
         generation=generation,
         boundary=request.boundary,
         identity=base.identity,
+        collection_record_path=base.collection_record_path,
+        collection_baseline_commit=base.selected_baseline_commit,
+        collection_preparation_owner=_collection_preparation_owner(request, base),
         observed_source=plan.observed_source,
         reviewed_source=described.reviewed_source
         if request.boundary != "result"
@@ -4172,6 +4523,23 @@ def _capture_manifest(
         policy_continuity_fingerprint=base.current.policy_continuity_fingerprint,
     )
     return manifest
+
+
+def _collection_preparation_owner(request, base):
+    if (
+        request.boundary == "prepared"
+        and request.undo_of_receipt_commit is None
+        and request.recovery_direction is None
+        and base.prior.status == "valid"
+        and base.prior.manifest.boundary == "local"
+        and base.prior.manifest.reviewed_source is not None
+        and (
+            base.prior.manifest.collection_record_path is not None
+            or base.prior.manifest.collection_baseline_commit is not None
+        )
+    ):
+        return request.active_operation
+    return None
 
 
 def _write_capture_metadata(git, association, manifest, review_oid, writes):
@@ -4245,10 +4613,14 @@ def _write_capture_commit(
                 False,
             )
             roots.append((role, "040000", role_tree))
+    _commit_checkpoint_tree(base.git, manifest, [*metadata, *roots], writes)
+
+
+def _commit_checkpoint_tree(git, manifest, entries, writes):
     writes.control_write_pending = True
     writes.object_storage = "possible"
-    tree = base.git.tree([*metadata, *roots])
-    _control_objects(base.git, {tree: "tree"}, {})
+    tree = git.tree(entries)
+    _control_objects(git, {tree: "tree"}, {})
     writes.objects, writes.object_storage, writes.control_write_pending = (
         True,
         "verified",
@@ -4257,7 +4629,7 @@ def _write_capture_commit(
     writes.control_write_pending = True
     writes.object_storage = "possible"
     writes.commit = (
-        base.git.call(
+        git.call(
             "commit-tree",
             tree,
             *(["-p", manifest.previous] if manifest.previous else []),
@@ -4266,7 +4638,7 @@ def _write_capture_commit(
         .decode()
         .strip()
     )
-    _control_objects(base.git, {writes.commit: "commit"}, {})
+    _control_objects(git, {writes.commit: "commit"}, {})
     writes.objects, writes.object_storage, writes.control_write_pending = (
         True,
         "verified",
@@ -4274,31 +4646,54 @@ def _write_capture_commit(
     )
 
 
-def _publish_capture_locator(request, base, manifest, writes):
+def _publish_locator(root, git, association, manifest, writes):
     previous = manifest.previous
     generation = manifest.generation
-    base.git.call("update-ref", writes.ref, writes.commit, previous or "0" * 40)
-    if (
-        base.git.call("rev-parse", "--verify", writes.ref).decode().strip()
-        != writes.commit
-    ):
+    git.call("update-ref", writes.ref, writes.commit, previous or "0" * 40)
+    if git.call("rev-parse", "--verify", writes.ref).decode().strip() != writes.commit:
         raise OSError("Owned checkpoint ref did not retain its commit")
     writes.retained = True
-    metadata_dir = request.root / ".brz2obsidian"
-    metadata_dir.mkdir(exist_ok=True)
     locator = CheckpointLocator(
         schema_id="brz2obsidian.checkpoint-locator",
         schema_version=1,
-        association=base.association,
+        association=association,
         generation=generation,
         commit=writes.commit,
     )
+    _persist_checkpoint_locator(root, locator)
+    return locator
+
+
+def _persist_checkpoint_locator(root, locator, *, replace_pending=False):
+    metadata_dir = root / ".brz2obsidian"
+    metadata_dir.mkdir(exist_ok=True)
     temporary = metadata_dir / "locator.pending"
+    if replace_pending and os.path.lexists(temporary):
+        observe_file(root, temporary, prefix_limit=0)
+        temporary.unlink()
     with temporary.open("xb") as output:
         output.write(locator.model_dump_json().encode())
         output.flush()
         os.fsync(output.fileno())
     os.replace(temporary, metadata_dir / "locator.json")
+
+
+def _publish_capture_locator(request, base, manifest, writes):
+    if request.boundary == "local":
+        from .collection_publication import publish_local_capture
+
+        locator = publish_local_capture(
+            request.root,
+            base.git,
+            base.association,
+            manifest,
+            writes,
+            scoped=request.collection_record_path is not None,
+        )
+    else:
+        locator = _publish_locator(
+            request.root, base.git, base.association, manifest, writes
+        )
     if type(request.owners) is _ApplyReviewOwners:
         request.owners._retain_prepared_export(
             base.git, writes.commit, manifest, request.owned_export
@@ -4377,6 +4772,137 @@ def _failed_capture(writes):
     )
 
 
+def discard_saved_review(vault, *, expected_commit):
+    """Append a local discard while retaining the prior review as history."""
+    from brz2obsidian.publication.vault_apply import _acquire, _park, _release
+
+    root = Path(vault).absolute()
+    history = inspect_history(root)
+    if history.status != "intact" or history.admission.status != "supported":
+        return result("refused", "current_history_unavailable")
+    writes = _CaptureWrites()
+    if _scoped_saved_checkpoint(history.checkpoint.manifest):
+        try:
+            return _discard_checkpoint(root, None, expected_commit, writes, scoped=True)
+        except OSError, ValueError, TypeError, UnicodeError:
+            return _failed_capture(writes)
+    operation = uuid4().hex
+    try:
+        _acquire(root, operation)
+    except OSError, ValueError, TypeError:
+        return result("refused", "operation_lease_unavailable")
+    try:
+        discarded = _discard_checkpoint(root, operation, expected_commit, writes)
+    except OSError, ValueError, TypeError, UnicodeError:
+        discarded = _failed_capture(writes)
+    finally:
+        try:
+            _release(root, operation)
+        except OSError, ValueError, TypeError:
+            _park(root, operation)
+            discarded = result(
+                "failed",
+                "owned_cleanup_failed",
+                commit=writes.commit,
+                ref=writes.ref,
+                retained=writes.retained,
+                objects=writes.objects,
+                object_storage=writes.object_storage,
+            )
+    return discarded
+
+
+def _scoped_saved_checkpoint(manifest):
+    return bool(manifest.collection_record_path or manifest.collection_baseline_commit)
+
+
+def _discard_checkpoint(root, operation, expected_commit, writes, *, scoped=False):
+    history = inspect_history(root, active_operation=operation)
+    if history.status != "intact" or history.admission.status != "supported":
+        return result("refused", "current_history_unavailable")
+    checkpoint = history.checkpoint
+    locator, prior = checkpoint.locator, checkpoint.manifest
+    if locator.commit != expected_commit:
+        return result("refused", "saved_review_changed")
+    if (
+        prior.boundary != "local"
+        or prior.reviewed_source is None
+        or checkpoint.review is None
+    ):
+        return result("refused", "saved_review_unavailable")
+    if checkpoint.review.saved.plan.facts.format_operation.kind == "onboarding":
+        return result("refused", "onboarding_has_no_established_baseline")
+    association = locator.association
+    git = writes.git = _Git(root)
+    writes.ref = association.ref
+    semantic = _semantic_meaning(
+        association,
+        prior.identity,
+        prior.source,
+        prior.vault,
+        prior.vault,
+        (),
+        prior.recovery_gaps,
+        "local",
+        prior.policy_fingerprint,
+        None,
+        discarded_review=locator.commit,
+        collection_record_path=prior.collection_record_path,
+    )
+    manifest = CheckpointManifest.model_validate(
+        prior.model_dump()
+        | {
+            "generation": locator.generation + 1,
+            "previous": locator.commit,
+            "discarded_review": locator.commit,
+            "collection_baseline_commit": None,
+            "abandoned_collection_preparation": None,
+            "preimage": prior.vault,
+            "proposed": (),
+            "observed_source": None,
+            "reviewed_source": None,
+            "review_object": None,
+            "review_size": None,
+            "review_sha256": None,
+            "review_content": (),
+            "semantic_fingerprint": semantic,
+        }
+    )
+    _parents, entries, _prior, _association = _checkpoint_graph(
+        git, locator.commit, {}, None
+    )
+    with tempfile.TemporaryDirectory(prefix="brz2obsidian-discard-") as directory:
+        git.suppress_hooks(Path(directory))
+        metadata = _write_capture_metadata(git, association, manifest, None, writes)
+        roots = [
+            (role, "040000", entries[previous][2])
+            for role, previous in (
+                ("source", "source"),
+                ("vault", "vault"),
+                ("preimage", "vault"),
+                ("proposed", "proposed"),
+            )
+        ]
+        _commit_checkpoint_tree(git, manifest, [*metadata, *roots], writes)
+        if scoped:
+            from .collection_publication import publish_local_capture
+
+            published = publish_local_capture(
+                root, git, association, manifest, writes, scoped=True
+            )
+        else:
+            published = _publish_locator(root, git, association, manifest, writes)
+    return result(
+        "captured",
+        "saved_review_discarded",
+        commit=writes.commit,
+        locator=published,
+        ref=writes.ref,
+        retained=True,
+        objects=writes.objects,
+    )
+
+
 def capture_checkpoint(
     vault,
     source,
@@ -4402,6 +4928,8 @@ def capture_checkpoint(
     _observation=None,
     _owned_export=None,
     _owners=None,
+    collection_record_path=None,
+    import_link_connections=(),
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     request = _CaptureRequest(
@@ -4428,6 +4956,8 @@ def capture_checkpoint(
         _observation,
         _owned_export,
         _owners,
+        collection_record_path,
+        import_link_connections,
     )
     writes = _CaptureWrites()
     try:

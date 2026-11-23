@@ -7,7 +7,7 @@ from brz2obsidian.content_values import content_key, same_content
 from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
 
 from .identity import _paths_collide, _target_safe
-from .review_links import known_result_document
+from .review_links import collection_asset_effect, known_result_document
 
 
 class ReviewOwnedOutputs(NamedTuple):
@@ -50,6 +50,46 @@ def cleanup_removal_continuation(facts, subject):
     ):
         return None
     return fact
+
+
+def undo_removal_continuation(facts, subject):
+    proof = subject.operation_reversal
+    if (
+        subject.attachment is None
+        or proof is None
+        or proof.operation_kind != "undo"
+        or len(proof.outputs) != 1
+        or facts.inventory != "complete"
+        or subject.current.existence != "absent"
+    ):
+        return None, {}
+    row = proof.outputs[0]
+    if (
+        row.path != subject.path
+        or row.path != subject.current.path
+        or row.target_id != subject.attachment.current_target_id
+        or row.current.existence != "absent"
+        or (row.target if proof.direction == "finish" else row.produced) is not None
+        or not reversal_safe(facts, subject, row.path)
+    ):
+        return None, {}
+    documents = {}
+    for peer in facts.subjects:
+        evidence = peer.operation_reversal
+        if (
+            peer.attachment is not None
+            or evidence is None
+            or evidence.operation_kind != "undo"
+            or evidence.operation_id != proof.operation_id
+            or evidence.history_fingerprint != proof.history_fingerprint
+            or evidence.direction != proof.direction
+        ):
+            continue
+        for output in evidence.outputs:
+            before = output.produced if proof.direction == "finish" else output.target
+            if before is not None and same_content(before, output.current.content):
+                documents[output.target_id, output.path] = before
+    return row, documents
 
 
 def content_bytes(content):
@@ -476,6 +516,58 @@ def _owned_targets_by_path(plan, change, targets, paths):
     return tuple(selected.values())
 
 
+def _retired_view_owner(plan, change, decision_id, selected_effects):
+    effects = selected_effects()
+    context = plan.producer_facts.link_context
+    if (
+        decision_id is not None
+        or effects.status != "selected"
+        or change.path not in effects.remove_paths
+        or context is None
+    ):
+        raise ValueError("Retired view lacks its exact selected removal")
+    return _owned_targets_by_path(plan, change, context.current_targets, {change.path})
+
+
+def _require_automatic_owner(change, effects, paths, known, asset):
+    if (
+        effects.status != "selected"
+        or paths != {change.target_path}
+        or any(
+            f.path == change.target_path
+            and not same_content(
+                f.content, asset[1].content if asset is not None else known[0].content
+            )
+            for f in effects.files
+        )
+    ):
+        raise ValueError("Automatic origin lacks its exact selected output")
+
+
+def _automatic_ownership(plan, change, subject, decision_id):
+    known = (
+        known_result_document(plan.producer_facts, change)
+        if decision_id is None
+        else None
+    )
+    asset = (
+        collection_asset_effect(plan.producer_facts, change)
+        if decision_id is None
+        else None
+    )
+    automatic = (
+        decision_id is None
+        and plan.producer_facts.format_operation.automatic_merge
+        and change.disposition == "compatible"
+        and not change.requires_decision
+        and subject.attachment is None
+        and not any(a.change_id == change.change_id for a in plan.approvals)
+        and not any(a.change_id == change.change_id for a in plan.actions)
+        and (known is not None or asset is not None)
+    )
+    return known, asset, automatic
+
+
 def _owned_targets(plan, change_id, decision_id, selected_effects):
     approval = next(
         (
@@ -489,21 +581,9 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
     if change is None:
         raise ValueError("Origin decision does not own this change")
     subject = reversal_subject(plan.producer_facts, change)
-    known = (
-        known_result_document(plan.producer_facts, change)
-        if decision_id is None
-        else None
-    )
-    automatic = (
-        decision_id is None
-        and plan.producer_facts.format_operation.automatic_merge
-        and change.disposition == "compatible"
-        and not change.requires_decision
-        and subject.attachment is None
-        and not any(a.change_id == change_id for a in plan.approvals)
-        and not any(a.change_id == change_id for a in plan.actions)
-        and known is not None
-    )
+    if change.provenance.rule == "classification_view_retired":
+        return _retired_view_owner(plan, change, decision_id, selected_effects)
+    known, asset, automatic = _automatic_ownership(plan, change, subject, decision_id)
     if approval is None and not automatic:
         raise ValueError("Origin decision does not own this change")
     if subject.operation_reversal is not None:
@@ -524,20 +604,13 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
     candidate = None if automatic else action.candidate
     if candidate is not None:
         targets = candidate.link_targets + targets
-    if automatic:
-        targets = known[1] + targets
+    targets = (known[1] if automatic and known is not None else ()) + targets
     effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
-    if automatic and (
-        effects.status != "selected"
-        or paths != {change.target_path}
-        or any(
-            f.path == change.target_path
-            and not same_content(f.content, known[0].content)
-            for f in effects.files
-        )
-    ):
-        raise ValueError("Automatic origin lacks its exact selected output")
+    if automatic:
+        _require_automatic_owner(change, effects, paths, known, asset)
+    if automatic and asset is not None:
+        return (asset[0],)
     if (
         change.rename_review is not None
         and change.rename_review.status == "accepted"

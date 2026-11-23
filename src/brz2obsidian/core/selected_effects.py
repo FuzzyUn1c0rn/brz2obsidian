@@ -152,6 +152,9 @@ def _project_selected_file(
     add,
     removals,
 ):
+    if change.provenance.rule == "classification_view_retired":
+        removals.add(change.path)
+        return
     content = change.result if approval is None else approval.result
     composed = automatic_composed_document(facts, change, approval, composed_documents)
     if composed is not None:

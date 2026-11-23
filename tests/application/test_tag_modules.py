@@ -101,3 +101,218 @@ def test_exhausted_seeds_suffix_natural_tag_contender_and_refuse_indistinguishab
     with pytest.raises(MigrationRefused) as error:
         plan(analyze(ambiguous, POLICY))
     assert "distinct stable naming seeds" in error.value.issues[0].guidance
+
+
+def test_scoped_tags_keep_a_distinct_brain_prefix_and_explicit_existing_reuse():
+    import json
+
+    facts = snapshot(
+        (tag("urgent", "Urgent"), tag("later", "Later")),
+        (
+            edge("urgent-entry", "urgent", "entry", "tag"),
+            edge("later-entry", "later", "entry", "tag"),
+        ),
+    ).model_copy(update={"collection_title": "Atlas Brain"})
+    migration = plan(
+        analyze(facts, POLICY),
+        output_format=9,
+        import_location="Imports/Atlas",
+        existing_vault_tags=("focus/urgent",),
+        tag_reuse=(("urgent", "focus/urgent"),),
+    )
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+    rendered = render(migration, meta)
+    home = generated(rendered, "Imports/Atlas/Home — Entry.md")
+    assert 'tags:\n  - "Atlas-Brain/Later"\n  - "focus/urgent"\n' in home
+    record = json.loads(generated(rendered, "Imports/Atlas/migration-record.json"))
+    assert {
+        row["source_identity"]: row["vault_tag"] for row in record["vault_tag_mappings"]
+    } == {
+        "later": "Atlas-Brain/Later",
+        "urgent": "focus/urgent",
+    }
+    collision = plan(
+        analyze(facts, POLICY),
+        output_format=9,
+        import_location="Imports/Atlas",
+        existing_vault_tags=("atlas-brain/Other", "focus/urgent"),
+        tag_reuse=(("urgent", "focus/urgent"),),
+    )
+    tokens = {row.original_identity: row.token for row in collision.tag_targets}
+    assert tokens["later"].startswith("Atlas-Brain-") and tokens["later"].endswith(
+        "/Later"
+    )
+    assert tokens["urgent"] == "focus/urgent"
+    with pytest.raises(MigrationRefused) as error:
+        plan(
+            analyze(facts, POLICY),
+            import_location="Imports/Atlas",
+            tag_reuse=(("urgent", "missing"),),
+        )
+    assert error.value.issues[0].code == "import_tag_reuse_unavailable"
+
+
+def test_scoped_tag_mappings_keep_source_identity_when_labels_change():
+    facts = snapshot((tag("a", "Renamed"), tag("b", "New topic"))).model_copy(
+        update={"collection_title": "Renamed Brain"}
+    )
+    scoped = plan(
+        analyze(facts, POLICY),
+        output_format=9,
+        import_location="Imports/Atlas",
+        existing_vault_tags=("Atlas/Original",),
+        remembered_tags=(("a", "Atlas/Original", "new"),),
+    )
+    assert {row.original_identity: row.token for row in scoped.tag_targets} == {
+        "a": "Atlas/Original",
+        "b": "Atlas/New-topic",
+    }
+
+
+def test_new_default_tag_stays_distinct_through_scoped_update_qualification():
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import collection_placement as placement
+
+    original_token = "Atlas/Original"
+    late_token = "atlas/new-topic"
+    existing = (original_token, "Atlas/Another-note")
+    facts = snapshot((tag("a", "Renamed"), tag("b", "New topic")))
+    analysis = analyze(facts, POLICY)
+    remembered = (("a", original_token, "new"),)
+
+    def planned(tags):
+        return plan(
+            analysis,
+            output_format=9,
+            import_location="Imports/Atlas",
+            existing_vault_tags=tags,
+            remembered_tags=remembered,
+        ).tag_targets
+
+    _, proposed = planned(existing)
+    _, allocated = planned(existing + (late_token,))
+    assert proposed.token == "Atlas/New-topic"
+    assert allocated.token.startswith("Atlas/New-topic-")
+    assert allocated.token.casefold() != late_token
+    original = {
+        "item_targets": [{"original_identity": "a"}],
+        "vault_tag_mappings": [
+            {"source_identity": "a", "vault_tag": original_token, "mode": "new"}
+        ],
+    }
+    incoming = {
+        "item_targets": [{"original_identity": "a"}, {"original_identity": "b"}],
+        "vault_tag_mappings": [
+            *original["vault_tag_mappings"],
+            {"source_identity": "b", "vault_tag": proposed.token, "mode": "new"},
+        ],
+    }
+    approval = placement.classification_approval(incoming)
+
+    def qualify(tokens, *, sources=None, possible_collisions=()):
+        text = (
+            "---\ntags: ["
+            + ", ".join(f'"{token}"' for token in tokens)
+            + "]\n---\n# Authored\n"
+        ).encode()
+        inventory = SimpleNamespace(
+            inventory=(SimpleNamespace(path="Author.md", excluded=False),)
+        )
+        return placement.classification_transition_refusal(
+            inventory,
+            None,
+            original,
+            incoming,
+            approval,
+            remap=False,
+            sources=sources,
+            existing={"Author.md": text},
+            possible_collisions=possible_collisions,
+        )
+
+    assert qualify(existing) is None
+    assert qualify(existing + (late_token,)) == "import_tag_namespace_changed"
+    assert qualify(existing + (late_token,), sources={("tag", "a")}) is None
+    assert (
+        qualify(existing, possible_collisions=(late_token,))
+        == "import_tag_namespace_changed"
+    )
+
+
+def test_reviewed_remap_preserves_second_source_reason_and_manual_membership():
+    from brz2obsidian.application.update_facts import assemble_facts
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.application.test_graph_modules import item
+    from tests.reconciliation.test_resolution import preflight
+
+    facts = snapshot(
+        (tag("a", "First"), tag("b", "Second"), item("solo", "Solo")),
+        (
+            edge("nav", "entry", "solo"),
+            edge("entry-a", "a", "entry", "tag"),
+            edge("entry-b", "b", "entry", "tag"),
+            edge("solo-a", "a", "solo", "tag"),
+        ),
+    )
+    analysis = analyze(facts, POLICY)
+    options = {
+        "output_format": 9,
+        "import_location": "Imports/Atlas",
+        "existing_vault_tags": ("focus/old", "focus/new"),
+    }
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+
+    def payload(a_tag):
+        migration = plan(
+            analysis, **options, tag_reuse=(("a", a_tag), ("b", "focus/old"))
+        )
+        return {
+            row.relative_path: row.content
+            for row in render(migration, meta).generated_files
+        }
+
+    original = payload("focus/old")
+    incoming = payload("focus/new")
+    home = "Imports/Atlas/Home — Entry.md"
+    solo = "Imports/Atlas/Notes/Solo.md"
+    manual = b'  - "personal/keep"\n'
+    current = original | {
+        home: original[home].replace(
+            b'  - "focus/old"\n', b'  - "focus/old"\n' + manual
+        ),
+        solo: original[solo].replace(b"# Solo\n", b"# Solo\n\nAuthored prose.\n"),
+    }
+    plan_inputs = assemble_facts(
+        original,
+        incoming,
+        current,
+        proposal_id="classified-remap",
+        generation=1,
+        record_path="Imports/Atlas/migration-record.json",
+        classification_remap=True,
+    )
+    review = prepare_review(plan_inputs, preflight=preflight())
+    selected = select_review_effects(review)
+    assert selected.status == "selected", (review.blockers, review.requirements)
+    files = {row.path: row.content.data for row in selected.files}
+    assert b'tags:\n  - "focus/old"\n' + manual + b'  - "focus/new"\n' in files[home]
+    assert b'tags:\n  - "focus/new"\n' in files[solo]
+    assert b"Authored prose.\n" in files[solo]
+
+    current[solo] = current[solo].replace(b'tags:\n  - "focus/old"\n', b"tags: []\n")
+    conflict = prepare_review(
+        assemble_facts(
+            original,
+            incoming,
+            current,
+            proposal_id="classified-remap",
+            generation=2,
+            record_path="Imports/Atlas/migration-record.json",
+            classification_remap=True,
+        ),
+        preflight=preflight(),
+    )
+    disputed = next(row for row in conflict.proposal.changes if row.path == solo)
+    assert disputed.requires_decision
+    assert not conflict.ready

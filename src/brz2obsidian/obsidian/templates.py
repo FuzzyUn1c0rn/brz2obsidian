@@ -1,11 +1,13 @@
 """Full native templates for new objects, with no imported source identity."""
 
+from brz2obsidian.core.import_categories import shared_destinations
 from brz2obsidian.core.support import category_template_path
 
 from ._frontmatter import frontmatter
 from .bases import CATEGORY_VIEWS, MEMBERS
 from .guide import vault_guide
 
+TEMPLATE_DATE_VARIABLE = "{{date:YYYY-MM-DD}}"
 TEMPLATE_CONFIGURATION = {"folder": "Templates", "dateFormat": "YYYY-MM-DD"}
 PROPERTY_TYPES = {
     "categories": "multitext",
@@ -25,8 +27,8 @@ def new_object_template(category=None, tags=()):
         "categories": [category] if category else [],
         "appearance_category": category,
         "icon": None,
-        "created": "{{date:YYYY-MM-DD}}",
-        "updated": "{{date:YYYY-MM-DD}}",
+        "created": TEMPLATE_DATE_VARIABLE,
+        "updated": TEMPLATE_DATE_VARIABLE,
         "tags": list(tags),
         "aliases": [],
     }
@@ -37,10 +39,13 @@ def category_template_files(plan):
     definitions = {
         i.key for i in plan.analysis.snapshot.items if i.role == "definition"
     }
+    shared = shared_destinations(plan)
     return tuple(
         (
             category_template_path(t),
-            new_object_template("[[" + t.relative_path + "]]"),
+            new_object_template(
+                "[[" + shared.get(t.original_identity, t.relative_path) + "]]"
+            ),
         )
         for t in plan.item_targets
         if t.item_key in definitions

@@ -278,6 +278,8 @@ def literal_cleanup_case(
                     )
                     for p, raw in sorted(retained.items())
                 ),
+                discarded_review=None,
+                collection_baseline_commit=None,
                 reviewed_source=None,
             ),
         ),

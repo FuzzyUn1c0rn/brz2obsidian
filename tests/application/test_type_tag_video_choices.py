@@ -338,6 +338,30 @@ def test_migration_record_data_dialect_keeps_note_and_legacy_guards():
     )
     assert parsed.status == "supported" and not parsed.occurrences
     assert parsed.content.data == raw
+    scoped_path = "Library/Imported/migration-record.json"
+    scoped_record = {
+        **record,
+        "schema_version": 9,
+        "collection_location": "Library/Imported",
+    }
+    scoped_raw = json.dumps(scoped_record).encode()
+    for path, data, output_format, owned_path, status in (
+        (scoped_path, scoped_raw, 9, None, "supported"),
+        ("migration-record.json", scoped_raw, 9, None, "unsupported"),
+        ("Library/Other/migration-record.json", scoped_raw, 9, None, "unsupported"),
+        (scoped_path, raw, 8, scoped_path, "supported"),
+        ("Library/Other/migration-record.json", raw, 8, scoped_path, "unsupported"),
+    ):
+        nested = interpret_links(
+            ExactContent(data=data),
+            source_path=path,
+            output_format=output_format,
+            owned_record_path=owned_path,
+            **options,
+        )
+        assert nested.status == status, path
+        if status == "supported":
+            assert nested.content.data == data and not nested.occurrences
     legacy = interpret_links(
         ExactContent(data=raw), source_path="migration-record.json", **options
     )

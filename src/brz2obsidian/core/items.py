@@ -4,6 +4,7 @@ import unicodedata
 
 from brz2obsidian.contracts import Issue, ItemTarget, MigrationRefused
 
+from .import_placement import qualify_import_path
 from .naming import collision_keys, extended_seed_width, readable_filename
 from .support import SUPPORTING_NAMES
 
@@ -80,8 +81,12 @@ def _cover_relationships(snapshot, output_format, reasons):
             reasons[chosen] = ("hierarchy",)
 
 
-def _allocate_stems(items, entry_key):
-    readable = {item.key: _readable(item.title) for item in items}
+def _allocate_stems(items, entry_key, reserved, source_references):
+    readable = {
+        item.key: _readable(item.title)
+        + (" — source reference" if item.original_identity in source_references else "")
+        for item in items
+    }
     widths = {item.key: 0 for item in items}
     seeds = {item.key: item.naming_seed for item in items}
     while True:
@@ -95,7 +100,7 @@ def _allocate_stems(items, entry_key):
             )
             for item in items
         }
-        collisions = collision_keys(stems, widths, seeds, SUPPORTING_NAMES)
+        collisions = collision_keys(stems, widths, seeds, SUPPORTING_NAMES | reserved)
         if not collisions:
             break
         for item in items:
@@ -117,7 +122,15 @@ def _allocate_stems(items, entry_key):
     return stems
 
 
-def assign_item_targets(analysis, resource_owners, *, output_format):
+def assign_item_targets(
+    analysis,
+    resource_owners,
+    *,
+    output_format,
+    import_location=None,
+    reserved_names=frozenset(),
+    source_references=frozenset(),
+):
     snapshot = analysis.snapshot
     items = sorted(
         (i for i in snapshot.items if i.live and i.role != "system"),
@@ -125,21 +138,28 @@ def assign_item_targets(analysis, resource_owners, *, output_format):
     )
     reasons = _creation_reasons(analysis, items, resource_owners)
     _cover_relationships(snapshot, output_format, reasons)
-    stems = _allocate_stems(items, analysis.entry_key)
+    stems = _allocate_stems(
+        items, analysis.entry_key, reserved_names, source_references
+    )
     return tuple(
         ItemTarget(
             item_key=i.key,
             original_identity=i.original_identity,
             original_title=i.title,
-            relative_path=(
-                ""
-                if i.key == analysis.entry_key
-                else "Categories/"
-                if i.role == "definition"
-                else "Notes/"
-            )
-            + stems[i.key]
-            + ".md",
+            relative_path=qualify_import_path(
+                import_location,
+                (
+                    ""
+                    if i.key == analysis.entry_key
+                    else "References/"
+                    if i.original_identity in source_references
+                    else "Categories/"
+                    if i.role == "definition"
+                    else "Notes/"
+                )
+                + stems[i.key]
+                + ".md",
+            ),
             created=i.key in reasons,
             creation_reasons=reasons.get(i.key, ()),
         )

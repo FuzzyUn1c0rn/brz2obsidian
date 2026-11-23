@@ -2,13 +2,17 @@
 
 from collections import defaultdict
 
+from brz2obsidian.core.import_categories import shared_destinations
+
 from ._frontmatter import frontmatter
 
 
 def property_memberships(plan, targets):
     categories = defaultdict(list)
+    shared = shared_destinations(plan)
     for assignment in plan.analysis.snapshot.classification_assignments:
-        path = targets[assignment.definition_key].relative_path
+        definition = targets[assignment.definition_key]
+        path = shared.get(definition.original_identity, definition.relative_path)
         categories[assignment.item_key].append("[[" + path + "]]")
     tokens = {t.tag_key: t.token for t in plan.tag_targets}
     tags = defaultdict(set)
@@ -16,7 +20,7 @@ def property_memberships(plan, targets):
         if membership.native:
             tags[membership.item_key].add(tokens[membership.tag_key])
     for item in plan.analysis.snapshot.items:
-        if item.role == "definition":
+        if item.role == "definition" and item.original_identity not in shared:
             tags[item.key].add("categories")
 
     def total_tag_order(token):

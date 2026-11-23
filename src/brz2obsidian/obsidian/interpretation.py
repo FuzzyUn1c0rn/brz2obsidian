@@ -298,6 +298,7 @@ def align_structure(
     *,
     prior_mappings=(),
     incoming_mappings=(),
+    classification_mode=None,
     section_bases=(),
 ):
     """Supply explicit body alignment facts without deciding a merged result."""
@@ -330,5 +331,6 @@ def align_structure(
         source_edits=source_edits,
         prior_mappings=prior_mappings,
         incoming_mappings=incoming_mappings,
+        classification_mode=classification_mode,
         section_bases=section_bases,
     )

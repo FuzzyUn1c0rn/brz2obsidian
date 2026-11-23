@@ -989,3 +989,66 @@ def test_unsafe_incoming_only_target_refuses_combination_but_allows_safe_exact_k
         section_facts.model_copy(update={"source_version_memory": (section_memory,)})
     )
     assert kept_section.ready and kept_section.changes[0].result.data == local_section
+
+
+def test_remap_updates_only_the_unchanged_provider_of_a_removed_membership():
+    from brz2obsidian.contracts import ClassificationMapping
+
+    original = (
+        b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[A]]"\n---\nOriginal.\n'
+    )
+    incoming = (
+        b'---\ncategories:\n  - "[[B]]"\nappearance_category: "[[B]]"\n---\nOriginal.\n'
+    )
+    current = original.replace(b'  - "[[A]]"\n', b'  - "[[C]]"\n  - "[[A]]"\n', 1)
+    current = current.replace(b"Original.\n", b"Authored prose.\n")
+    prior = ClassificationMapping(
+        schema_id="brz2obsidian.classification-mapping",
+        schema_version=1,
+        classification_id="category:source",
+        target_id="a",
+        kind="category",
+        source_label="Category",
+    )
+    targets = (
+        target("a", "category", "[[A]]", "[[A|Manual label]]"),
+        target("b", "category", "[[B]]"),
+        target("c", "category", "[[C]]"),
+    )
+
+    def remap(raw):
+        facts = membership_request(
+            original,
+            raw,
+            incoming,
+            targets=targets,
+            prior_mappings=(prior,),
+            incoming_mappings=(prior.model_copy(update={"target_id": "b"}),),
+            classification_mode="remap",
+        )
+        return reconcile(facts).changes[0]
+
+    owned = remap(current)
+    assert owned.disposition == "compatible"
+    assert owned.result.data == (
+        b'---\ncategories:\n  - "[[C]]"\n  - "[[B]]"\nappearance_category: "[[B]]"\n---\nAuthored prose.\n'
+    )
+
+    manual = remap(
+        current.replace(
+            b'appearance_category: "[[A]]"', b'appearance_category: "[[C]]"'
+        )
+    )
+    assert manual.disposition == "compatible"
+    assert manual.result.data == owned.result.data.replace(
+        b'appearance_category: "[[B]]"', b'appearance_category: "[[C]]"'
+    )
+
+    disputed = remap(
+        current.replace(
+            b'appearance_category: "[[A]]"',
+            b'appearance_category: "[[A|Manual label]]"',
+        )
+    )
+    assert disputed.disposition == "unresolved"
+    assert disputed.current.data.endswith(b"Authored prose.\n")

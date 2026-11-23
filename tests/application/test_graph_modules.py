@@ -2,6 +2,7 @@ import hashlib
 
 import pytest
 
+from brz2obsidian.application.update_facts import assemble_facts
 from brz2obsidian.contracts import (
     Asset,
     Document,
@@ -14,9 +15,10 @@ from brz2obsidian.contracts import (
     SourcePolicy,
     SourceSnapshot,
 )
-from brz2obsidian.core import analyze, plan
-from brz2obsidian.obsidian import render
+from brz2obsidian.core import analyze, plan, prepare_review, select_review_effects
+from brz2obsidian.obsidian import interpret_link_target, render
 from tests.application.test_module_seams import METADATA
+from tests.reconciliation.test_resolution import preflight
 from tests.support.notes import note_body
 
 POLICY = SourcePolicy(
@@ -304,6 +306,80 @@ def test_decorative_assets_labels_and_empty_placeholders_alone_leave_targets_unc
     assert {t.item_key for t in migration.item_targets if t.created} == {"entry"}
 
 
+def test_scoped_render_uses_one_planned_namespace_for_outputs_and_links():
+    import json
+
+    evidence = b"\x00\xff\x80 exact attachment"
+    attachment = Asset(
+        asset_id="proof",
+        owner="a",
+        naming_seed="00112233",
+        original_name="Proof.pdf",
+        role="file",
+        availability="present",
+        actual_length=len(evidence),
+        actual_sha256=hashlib.sha256(evidence).hexdigest(),
+    )
+    facts = snapshot(
+        (item("a", "Twin", "abcdef012345", resource_ids=("proof",)),),
+        (edge("home-a", "entry", "a"),),
+        assets=(attachment,),
+    )
+    analysis = analyze(facts, POLICY)
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+    scoped = plan(
+        analysis,
+        output_format=9,
+        import_location="Imports/Second Brain",
+        reserved_names=("twin", "Categories"),
+    )
+    artifacts = render(scoped, meta)
+    location = "Imports/Second Brain"
+    home = location + "/Home — Entry.md"
+    note = location + "/Notes/Twin — abcdef01.md"
+    asset = location + "/Attachments/abcdef01/Proof.pdf"
+    overview = location + "/Categories — Import.md"
+    assert {row.relative_path for row in artifacts.copies} == {asset}
+    assert all(path.startswith(location + "/") for path in artifacts.manifest)
+    assert not any("/.obsidian/" in path for path in artifacts.manifest)
+    assert f"[[{note}|Twin]]" in generated(artifacts, home)
+    assert f"[[{overview}|Browse categories]]" in generated(artifacts, home)
+    assert f"[[{asset}|Proof.pdf]]" in generated(artifacts, note)
+    record = json.loads(generated(artifacts, location + "/migration-record.json"))
+    assert record["source_identity"]["source_id"] == "collection"
+    assert record["collection_location"] == location
+    assert {row["relative_path"] for row in record["item_targets"]} == {home, note}
+    assert record["asset_targets"][0]["relative_path"] == asset
+    incoming = {row.relative_path: row.content for row in artifacts.generated_files}
+    incoming[asset] = evidence
+    observed = assemble_facts(
+        None,
+        incoming,
+        {"Manual.md": b"[[Twin]]\n", "Old/Twin.md": b"# Existing twin\n"},
+        proposal_id="scoped-render",
+        generation=1,
+        record_path=location + "/migration-record.json",
+    )
+    reviewed = prepare_review(observed, preflight=preflight())
+    assert reviewed.ready, (reviewed.blockers, reviewed.requirements)
+    assert {effect.path for effect in select_review_effects(reviewed).files} == set(
+        artifacts.manifest
+    )
+    from brz2obsidian.core.reversals import review_owned_targets
+
+    change = next(row for row in reviewed.proposal.changes if row.path == asset)
+    (binary,) = review_owned_targets(reviewed, change.change_id, None)
+    assert (binary.canonical_path, binary.kind, binary.identity) == (
+        asset,
+        "resource",
+        None,
+    )
+    usual = render(plan(analysis, output_format=9), meta)
+    assert {".obsidian/app.json", "Categories.md", "Notes/Twin.md"} <= set(
+        usual.manifest
+    )
+
+
 def test_rendering_preserves_authored_body_and_uses_exact_qualified_dotted_targets():
     body = "Authored.\r\n\r\n"
     original = Asset(
@@ -396,3 +472,294 @@ def test_analysis_refuses_conflicting_identity_and_content_ownership(defect):
     with pytest.raises(MigrationRefused) as error:
         analyze(altered, POLICY)
     assert error.value.issues[0].code == expected
+
+
+def test_scoped_category_render_preserves_original_and_separately_approved_view():
+    from brz2obsidian.contracts import ClassificationAssignment, OriginalEvidence
+    from brz2obsidian.obsidian_dialect import mapping
+
+    body = "Keep the source category guidance.\r\n"
+    asset_data = {"projects-body": body.encode(), "projects-guide": b"%PDF sample"}
+    assets = tuple(
+        Asset(
+            asset_id=key,
+            owner="projects",
+            naming_seed=key.encode().hex(),
+            original_name=name,
+            role=role,
+            availability="present",
+            actual_length=len(asset_data[key]),
+            actual_sha256=hashlib.sha256(asset_data[key]).hexdigest(),
+        )
+        for key, name, role in (
+            ("projects-body", "Notes.md", "note_original"),
+            ("projects-guide", "Projects guide.pdf", "file"),
+        )
+    )
+    document = Document(
+        key="projects-body",
+        owner="projects",
+        text=body,
+        text_digest=assets[0].actual_sha256,
+        original_asset_id="projects-body",
+    )
+    facts = snapshot(
+        (
+            item(
+                "projects", "Projects", role="definition", document_ids=(document.key,)
+            ),
+            item("topics", "Topics", role="definition"),
+            item("unused", "Unused", role="definition"),
+            item("a", "Alpha"),
+            item("b", "Beta"),
+        ),
+        (
+            edge("project-a", "projects", "a", "classification"),
+            edge("topic-b", "topics", "b", "classification"),
+        ),
+        (document,),
+        assets,
+    ).model_copy(
+        update={
+            "collection_title": "Atlas",
+            "classification_assignments": (
+                ClassificationAssignment(
+                    relationship_key="project-a",
+                    definition_key="projects",
+                    item_key="a",
+                    evidence=("assignment",),
+                ),
+                ClassificationAssignment(
+                    relationship_key="topic-b",
+                    definition_key="topics",
+                    item_key="b",
+                    evidence=("assignment",),
+                ),
+            ),
+            "original_evidence": (
+                OriginalEvidence(key="assignment", kind="records", original_json="[]"),
+            ),
+        }
+    )
+    analysis = analyze(facts, POLICY)
+    meta = METADATA.model_copy(update={"renderer_version": "9"})
+    location = "Imports/Atlas"
+    shared = "Categories/Existing Projects.md"
+    choice = {
+        "source_identity": "projects",
+        "destination_path": shared,
+        "destination_sha256": "a" * 64,
+    }
+    separate_view = location + "/Views/Projects — linked members.md"
+    reference = location + "/References/Projects — source reference.md"
+    overview = location + "/Categories.md"
+
+    def proposed(approved, destination=choice):
+        return render(
+            plan(
+                analysis,
+                output_format=9,
+                import_location=location,
+                category_choices=(destination | {"compatible_view": approved},),
+                known_nonmember_paths=("Templates/Existing category.md",),
+            ),
+            meta,
+        )
+
+    declined = proposed(False)
+    assert separate_view not in declined.manifest
+    assert "Linked members — compatible view" not in generated(declined, reference)
+    approved = proposed(True)
+    assert shared not in approved.manifest
+    assert f'  - "[[{shared}]]"' in generated(approved, location + "/Notes/Alpha.md")
+    overview_text = generated(approved, overview)
+    assert f"[[{shared}|Projects (shared)]]" in overview_text
+    assert f"[[{location}/Categories/Topics.md|Topics (separate)]]" in overview_text
+    assert "Unused" not in overview_text
+    assert f"[[{reference}|Original Projects content and attachments]]" in overview_text
+    reference_text = generated(approved, reference)
+    assert f"[[{shared}|Existing Projects category]]" in reference_text
+    assert body in reference_text
+    copies = {entry.asset_id: entry.relative_path for entry in approved.copies}
+    assert copies["projects-body"].endswith("/Notes.md.original")
+    assert f"[[{copies['projects-guide']}|Projects guide.pdf]]" in reference_text
+    for navigation in (overview_text, reference_text):
+        assert f"[[{separate_view}|Linked members — compatible view]]" in navigation
+    view = generated(approved, location + "/Views/Projects — linked members.base")
+    filters = mapping(view)["filters"]["and"]
+    assert filters[0] == 'file.ext == "md"'
+    assert filters[-1] == f'list(categories).contains(link("{shared}"))'
+    assert 'file.path != "Templates/Existing category.md"' in filters
+    assert f'file.path != "{location}/Templates/New note.md"' in filters
+    assert all("Projects/Attachments/Member.md" not in row for row in filters)
+    assert "note.categories" in view
+
+    later_facts = facts.model_copy(
+        update={
+            "identity": facts.identity.model_copy(update={"source_id": "later-brain"}),
+            "collection_title": "Boreal",
+        }
+    )
+    later = render(
+        plan(
+            analyze(later_facts, POLICY),
+            output_format=9,
+            import_location="Imports/Boreal",
+            category_choices=(choice,),
+        ),
+        meta,
+    )
+    assert not set(approved.manifest).intersection(later.manifest)
+    later_template = next(
+        path
+        for path in later.manifest
+        if path.startswith("Imports/Boreal/Templates/Projects") and path.endswith(".md")
+    )
+    later_member = "Imports/Boreal/Notes/Alpha.md"
+    template = mapping(generated(later, later_template).split("---", 2)[1])
+    member = mapping(generated(later, later_member).split("---", 2)[1])
+    assert template["categories"] == member["categories"] == [f"[[{shared}]]"]
+    assert template["created"] == template["updated"] == "{{date:YYYY-MM-DD}}"
+    assert member["created"] != template["created"]
+    assert member["updated"] != template["updated"]
+    assert all(later_template not in row for row in filters)
+    exclude_template = '!(note.created == "{{date:YYYY-MM-DD}}" && note.updated == "{{date:YYYY-MM-DD}}")'
+    assert exclude_template in filters
+    assert all(
+        row == exclude_template or row.startswith('file.path != "')
+        for row in filters[1:-1]
+    )
+
+    original = {row.relative_path: row.content for row in approved.generated_files}
+    incoming = {row.relative_path: row.content for row in declined.generated_files}
+    assert {entry.asset_id: entry.relative_path for entry in declined.copies} == copies
+    outputs = {path: asset_data[key] for key, path in copies.items()}
+    original.update(outputs)
+    incoming.update(outputs)
+    external = b'---\ntags: ["categories"]\n---\n# Existing Projects\n'
+    later_payload = {
+        row.relative_path: row.content for row in later.generated_files
+    } | {row.relative_path: asset_data[row.asset_id] for row in later.copies}
+    second_import = assemble_facts(
+        None,
+        later_payload,
+        original | {shared: external},
+        proposal_id="second-classified-brain",
+        generation=1,
+        record_path="Imports/Boreal/migration-record.json",
+    )
+    lookup = {
+        target.canonical_path: target
+        for target in second_import.link_context.current_targets
+        if target.kind == "category"
+    }
+    previous_category = lookup[location + "/Categories/Topics.md"]
+    assert previous_category.identity is not None
+    assert previous_category.identity.collection_id == facts.identity.source_id
+    assert previous_category.identity.item_id == "topics"
+    assert previous_category.category_anchor == "scoped_identity"
+    prior_state = next(
+        state
+        for state in second_import.link_context.current_target_facts
+        if state.target_id == previous_category.target_id
+    )
+    assert prior_state.file_roles.category
+    moved_path = "Refiled/Topics.md"
+    moved = previous_category.model_copy(
+        update={
+            "canonical_path": moved_path,
+            "target": previous_category.target.model_copy(
+                update={"normalized_path": moved_path.casefold()}
+            ),
+        }
+    )
+    content = prior_state.content
+    mismatched = type(content)(
+        data=content.data.replace(
+            facts.identity.source_id.encode(), b"another-collection"
+        )
+    )
+    for observed, expected_role in ((content, True), (mismatched, False)):
+        moved_state = interpret_link_target(
+            observed,
+            target_id=moved.target_id,
+            existence="present",
+            memberships=(),
+            membership_targets=(moved,),
+            source_path=moved_path,
+            output_format=9,
+        )
+        assert moved_state.file_roles.category is expected_role
+    assert lookup[shared].category_anchor == "observed_path"
+    assert lookup[shared].identity is None
+    review_second = prepare_review(second_import, preflight=preflight())
+    assert select_review_effects(review_second).status == "selected", (
+        review_second.blockers
+    )
+
+    facts = assemble_facts(
+        original,
+        incoming,
+        original | {shared: external},
+        proposal_id="withdraw-view",
+        generation=1,
+        record_path=location + "/migration-record.json",
+        classification_remap=True,
+    )
+    review = prepare_review(facts, preflight=preflight())
+    retired = select_review_effects(review)
+    assert retired.status == "selected", (review.blockers, review.requirements)
+    assert set(retired.remove_paths) == {separate_view, separate_view[:-3] + ".base"}
+
+    alternate = "Categories/Alternate.md"
+    manual = "Categories/Manual.md"
+    remapped = proposed(
+        True,
+        choice | {"destination_path": alternate, "destination_sha256": "b" * 64},
+    )
+    generated_paths = {
+        row.relative_path: row.content for row in remapped.generated_files
+    }
+    member = location + "/Notes/Alpha.md"
+    prose = b"\r\nExact authored text.\r\n"
+    edit = (
+        original[member].replace(
+            f'  - "[[{shared}]]"\n'.encode(),
+            f'  - "[[{shared}]]"\n  - "[[{manual}]]"\n'.encode(),
+        )
+        + prose
+    )
+    replacement = prepare_review(
+        assemble_facts(
+            original,
+            generated_paths | outputs,
+            original | {member: edit, manual: external, alternate: external},
+            proposal_id="remap-missing-shared-category",
+            generation=1,
+            record_path=location + "/migration-record.json",
+            classification_remap=True,
+        ),
+        preflight=preflight(),
+    )
+    selected = select_review_effects(replacement)
+    assert selected.status == "selected", (
+        replacement.blockers,
+        replacement.requirements,
+    )
+    result = next(row.content.data for row in selected.files if row.path == member)
+    assert f'appearance_category: "[[{alternate}]]"'.encode() in result
+    assert f'  - "[[{manual}]]"'.encode() in result
+    assert shared.encode() not in result
+    assert result.endswith(prose)
+    link_context = replacement.producer_facts.link_context
+    retired = next(
+        r for r in link_context.current_targets if r.canonical_path == shared
+    )
+    assert (
+        next(
+            r
+            for r in link_context.current_target_facts
+            if r.target_id == retired.target_id
+        ).existence
+        == "missing"
+    )

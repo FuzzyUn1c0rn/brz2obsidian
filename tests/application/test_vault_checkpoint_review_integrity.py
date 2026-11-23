@@ -405,6 +405,75 @@ def test_compact_review_duplicate_interpretation_key_refuses(compact_checkpoint)
         _assert_refused_without_repair(case)
 
 
+def test_saved_review_requires_explicit_discard_before_replacement():
+    vault, baseline = fixture_case()
+    incoming = baseline.parent / "incoming"
+    for directory, raw in (
+        (vault, _CURRENT),
+        (baseline, _BASELINE),
+        (incoming, _INCOMING),
+    ):
+        (directory / "Notes").mkdir(parents=True)
+        (directory / "Notes/Opening.md").write_bytes(raw)
+    _git(vault, "init", "-q")
+    _git(vault, "config", "core.autocrlf", "false")
+    _git(vault, "add", ".")
+    _git(vault, "commit", "-qm", "User baseline")
+    operations = Operations()
+    facts = with_review_links(
+        request(original=_BASELINE, current=_CURRENT, incoming=_INCOMING)
+    )
+
+    def capture(plan=None):
+        admission = operations.inspect_history(vault).admission
+        return operations.capture_checkpoint(
+            vault,
+            baseline,
+            vault_id="saved-vault",
+            import_id="saved-import",
+            identity=facts.baseline_identity,
+            admission=admission,
+            review=plan,
+            review_source=incoming if plan is not None else None,
+            source_binding=operations.observe_reviewed_source(incoming, plan)
+            if plan is not None
+            else None,
+        )
+
+    established = capture()
+    assert established.status == "captured", established.code
+    current = operations.inspect_history(vault)
+    original = prepare_review(facts, preflight=current.admission.preflight)
+    saved = capture(original)
+    assert saved.status == "captured", saved.code
+    saved_raw = _git(vault, "show", saved.commit + ":review.json")
+    current = operations.inspect_history(vault)
+    replacement_facts = facts.model_copy(update={"proposal_id": "review:replacement"})
+    replacement = prepare_review(
+        replacement_facts, preflight=current.admission.preflight
+    )
+    refused = capture(replacement)
+    assert (refused.status, refused.code) == ("refused", "saved_review_pending")
+    assert operations.read_checkpoint(vault).locator.commit == saved.commit
+    stale = operations.discard_saved_review(vault, expected_commit=established.commit)
+    assert (stale.status, stale.code) == ("refused", "saved_review_changed")
+    discarded = operations.discard_saved_review(vault, expected_commit=saved.commit)
+    assert (discarded.status, discarded.code) == ("captured", "saved_review_discarded")
+    current = operations.inspect_history(vault)
+    assert current.checkpoint.review is None
+    assert (
+        current.checkpoint.manifest.source[0].sha256
+        == hashlib.sha256(_BASELINE).hexdigest()
+    )
+    assert (vault / "Notes/Opening.md").read_bytes() == _CURRENT
+    assert _git(vault, "show", saved.commit + ":review.json") == saved_raw
+    replacement = prepare_review(
+        replacement_facts, preflight=current.admission.preflight
+    )
+    accepted = capture(replacement)
+    assert accepted.status == "captured", accepted.code
+
+
 def test_deep_compact_malformed_shape_returns_typed_refusal(compact_checkpoint):
     case = compact_checkpoint
     with _restored(case):

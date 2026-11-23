@@ -294,6 +294,14 @@ def _terminal_result_in_history(git, checkpoint, intent, receipt):
             return False
         current = manifest.previous
         generation -= 1
+        if manifest.abandoned_collection_preparation is not None:
+            prepared = CheckpointManifest.model_validate_json(
+                git.call("show", f"{current}:manifest.json")
+            )
+            if prepared.collection_preparation_owner is None:
+                return False
+            current = prepared.previous
+            generation -= 1
         if current is None or generation <= receipt.generation:
             return False
     result = CheckpointManifest.model_validate_json(
@@ -1497,6 +1505,11 @@ class _OperationObservation(NamedTuple):
 
 def _inspect_update_observation(vault, *, _owners=None):
     """Return fresh status and validated graph facts for this one public call."""
+    from .collection_publication import local_publication_status
+
+    pending = local_publication_status(Path(vault).absolute())
+    if pending is not None:
+        return pending, None
     observations = []
     status = _inspect_update_status(vault, observations=observations, _owners=_owners)
     observation = observations[0] if observations else None
@@ -1701,7 +1714,7 @@ def _validate_operation_preparations(
 
 def _validate_operation_result(graph, owned):
     candidate, terminal = graph.intent, graph.receipt
-    _prepared, _saved = owned[candidate.prepared_commit]
+    prepared, _saved = owned[candidate.prepared_commit]
     if terminal is not None:
         result, _ = owned[terminal.result_commit]
         if not (
@@ -1713,6 +1726,13 @@ def _validate_operation_result(graph, owned):
             and result.preimage == candidate.before
             and result.proposed == candidate.proposed
             and result.vault == candidate.proposed
+            and (
+                result.collection_record_path is None
+                and prepared.collection_record_path is None
+                or result.collection_record_path == prepared.collection_record_path
+                and result.identity == prepared.identity
+                and result.source == prepared.source
+            )
         ):
             raise OSError("Terminal receipt lacks its exact result checkpoint")
 
@@ -1845,6 +1865,13 @@ def _observe_operation_checkpoint(
     return None
 
 
+def _terminal_cleanup_matches(root, git, commit, intent):
+    from .collection_publication import scoped_terminal_marker
+
+    scoped = scoped_terminal_marker(root, git, commit, intent.operation_id)
+    return _terminal_files_match(root, intent) if scoped is None else scoped
+
+
 def _terminal_operation_status(
     root, git, checkpoint, intent, receipt, commit, start, review_generation
 ):
@@ -1876,7 +1903,7 @@ def _terminal_operation_status(
     if (
         complete_history
         and _lock_path(root).exists()
-        and _terminal_files_match(root, intent)
+        and _terminal_cleanup_matches(root, git, commit, intent)
     ):
         return _outcome(
             "content_complete",
@@ -2019,36 +2046,52 @@ def _unfinished_operation_status(
     )
 
 
+def _inspect_without_operations(root, git, *, trusted_association, owners, start):
+    from .unpublished_collection import unpublished_outcome
+
+    linked_intents = []
+    checkpoint = _read(
+        root,
+        git,
+        linked_intents=linked_intents,
+        trusted_association=trusted_association,
+        ownership_demands_out=[],
+        _owners=owners,
+    )
+    if linked_intents:
+        return _outcome(
+            "unknown",
+            "operation_record_missing",
+            start=start,
+            publication="unknown",
+            history="unknown",
+            changed=None,
+            recovery=True,
+        )
+    return unpublished_outcome(git, checkpoint, start) or _outcome(
+        "refused", "operation_absent", start=start
+    )
+
+
 def _inspect_update_status(
     vault, *, observations, trusted_association=None, _owners=None
 ):
     """Discover the latest owned intent independently of the current locator."""
     start = time.monotonic()
     root = Path(vault).absolute()
+    from .unpublished_collection import unpublished_outcome
+
     try:
         git = _Git(root)
         operations = _operation_refs(git)
         if not operations:
-            linked_intents = []
-            _read(
+            return _inspect_without_operations(
                 root,
                 git,
-                linked_intents=linked_intents,
                 trusted_association=trusted_association,
-                ownership_demands_out=[],
-                _owners=_owners,
+                owners=_owners,
+                start=start,
             )
-            if linked_intents:
-                return _outcome(
-                    "unknown",
-                    "operation_record_missing",
-                    start=start,
-                    publication="unknown",
-                    history="unknown",
-                    changed=None,
-                    recovery=True,
-                )
-            return _outcome("refused", "operation_absent", start=start)
         records, graphs = _ordered_operation_graphs(git, operations)
         targets, origins = _operation_checkpoints(git, graphs, records)
         linked_intents = []
@@ -2112,6 +2155,9 @@ def _inspect_update_status(
                     demands=demands,
                     observation=observation,
                 )
+        orphan = unpublished_outcome(git, checkpoint, start, previous=active_graph)
+        if orphan is not None:
+            return orphan
         observations.append(observation)
         review_generation = (
             intent.review_generation
@@ -2141,7 +2187,7 @@ def _inspect_update_status(
             return _terminal_operation_status(
                 root, git, checkpoint, intent, receipt, commit, start, review_generation
             )
-        return _unfinished_operation_status(
+        observed = _unfinished_operation_status(
             root,
             intent,
             active_graph.intent_commit,
@@ -2151,6 +2197,9 @@ def _inspect_update_status(
             start,
             review_generation,
         )
+        from .collection_result_locator import with_result_locator_status
+
+        return with_result_locator_status(root, checkpoint, observed, retained_result)
     except OSError, ValueError, TypeError, UnicodeError, IndexError:
         return _outcome(
             "unknown",
@@ -2495,6 +2544,7 @@ class _OwnedCleanupFailure(Exception):
 
 @dataclass
 class _ApplyProgress:
+    scoped: bool = False
     """Track transitions that determine failure reporting and lease cleanup."""
 
     phase: str = "admission"
@@ -2632,6 +2682,17 @@ def _apply_admission_refusal(
         return "current_review_required"
     if first.status != "intact" or first.admission.status != "supported":
         return "scoped_admission_required"
+    pending = first.checkpoint.manifest
+    if (
+        pending.boundary == "local"
+        and pending.reviewed_source is not None
+        and pending.reviewed_source.proposal_id != review.proposal.proposal_id
+        and (
+            pending.collection_record_path is not None
+            or pending.collection_baseline_commit is not None
+        )
+    ):
+        return "saved_review_pending"
     baseline_identity = (
         format_parent.identity
         if format_parent is not None
@@ -2850,6 +2911,8 @@ def _retain_apply_preparation(publication, observed, proposed_root, state):
     if prepared.status != "captured" and not (
         reused_undo_prepared or reused_format_prepared
     ):
+        if state.scoped and prepared.history_retained:
+            state.prepared_commit = prepared.commit
         return publication.outcome(
             "refused" if prepared.status == "refused" else "failed",
             "prepare_" + prepared.code,
@@ -2859,6 +2922,7 @@ def _retain_apply_preparation(publication, observed, proposed_root, state):
             phase=state.phase,
             history="prepared" if prepared.history_retained else "none",
             checkpoint=prepared.commit,
+            recovery=state.scoped and prepared.history_retained,
         )
     state.prepared_commit = prepared.commit
     if reused_undo_prepared or reused_format_prepared:
@@ -3247,6 +3311,7 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
         )
     if (
         state.phase == "intent"
+        and not state.scoped
         and state.intent_commit is None
         and state.prepared_commit is not None
         and state.published == 0
@@ -3271,6 +3336,27 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
                 "Git could not record the operation ref. The review was retained. "
                 "Check write access and path length for Git, then resume the review."
             ),
+        )
+    if (
+        state.scoped
+        and state.prepared_commit is not None
+        and state.intent_commit is None
+        and state.phase == "prepared"
+    ):
+        return outcome(
+            "incomplete",
+            "scoped_preparation_retained",
+            start=start,
+            operation_id=operation_id,
+            generation=state.operation_generation,
+            phase="prepared",
+            publication="not_published",
+            history="prepared",
+            planned=state.planned,
+            published=0,
+            changed=False,
+            checkpoint=state.prepared_commit,
+            recovery=True,
         )
     authority_unknown = state.phase == "intent" and state.intent_commit is None
     cleanup_pending = not state.acquired and _lock_path(root).exists()
@@ -3319,12 +3405,18 @@ def _report_apply_failure(root, operation_id, state, outcome, start):
 
 
 def _release_apply_lease(root, operation_id, state, outcome, start):
-    if state.acquired and state.intent_commit is not None:
+    from .collection_publication import release_native_operation
+
+    if state.acquired and (
+        state.intent_commit is not None
+        or state.scoped
+        and state.prepared_commit is not None
+    ):
         _park(root, operation_id)
-    if state.acquired and state.intent_commit is None:
+    elif state.acquired:
         pending_exception = sys.exc_info()[0]
         try:
-            _release(root, operation_id)
+            release_native_operation(root, operation_id)
         except OSError, ValueError, TypeError:
             if pending_exception is None or issubclass(
                 pending_exception, (OSError, ValueError, TypeError)
@@ -3430,9 +3522,20 @@ def _execute_staged_apply(name, publication, paths, observed, state):
         publication.owners,
     )
     if tip is None:
+        from .collection_undo_publication import SCOPED_UNDO_PENDING
+
+        code = (
+            (
+                SCOPED_UNDO_PENDING
+                if publication.undo_target is not None
+                else "unpublished_collection_prepared"
+            )
+            if state.scoped
+            else "cancelled_before_intent"
+        )
         return publication.outcome(
             "cancelled",
-            "cancelled_before_intent",
+            code,
             start=publication.start,
             operation_id=publication.operation_id,
             generation=state.operation_generation,
@@ -3441,7 +3544,7 @@ def _execute_staged_apply(name, publication, paths, observed, state):
             history="prepared",
             planned=len(changed),
             checkpoint=state.prepared_commit,
-            recovery=False,
+            recovery=state.scoped,
             message="Cancellation retained preparation without publishing files.",
         )
     manifest = tip.checkpoint.manifest
@@ -3478,7 +3581,9 @@ def _execute_staged_apply(name, publication, paths, observed, state):
 
 
 def _completed_apply(root, operation_id, state, outcome, start, undo_target, changed):
-    _release(root, operation_id)
+    from .collection_publication import release_native_operation
+
+    release_native_operation(root, operation_id)
     state.acquired = False
     return outcome(
         "undone" if undo_target else "applied" if changed else "no_content_change",
@@ -3518,6 +3623,80 @@ def _publish_staged_apply(publication, paths, observed, state):
         )
     with _proposed_directory(root.parent) as name:
         return _execute_staged_apply(name, publication, paths, observed, state)
+
+
+def _acquire_reviewed_apply(root, operation_id, checkpoint, undo_target):
+    from .collection_publication import acquire_collection_apply, scoped_undo_target
+    from .vault_history import _scoped_saved_checkpoint
+
+    scoped = (
+        _scoped_saved_checkpoint(checkpoint.manifest)
+        if undo_target is None
+        else scoped_undo_target(undo_target)
+    )
+    if scoped:
+        acquire_collection_apply(
+            root,
+            operation_id,
+            checkpoint.locator,
+            undo_receipt=undo_target.receipt_commit
+            if undo_target is not None
+            else None,
+        )
+    else:
+        _acquire(root, operation_id)
+    return scoped
+
+
+def _qualify_collection_apply(source, review, selected, observed):
+    from .collection_placement import (
+        collection_write_refusal,
+        reviewed_connections,
+        scoped_update_classification_refusal,
+    )
+
+    checkpoint = observed.checkpoint
+    if review.facts.format_operation.kind == "source_update":
+        return scoped_update_classification_refusal(
+            observed.admission,
+            checkpoint,
+            source,
+            checkpoint.manifest.collection_record_path,
+            review,
+        )
+    if review.facts.format_operation.kind != "collection_import":
+        return None
+    retained = checkpoint.review
+    if retained is None or checkpoint.manifest.boundary != "local":
+        return "current_review_required"
+    return collection_write_refusal(
+        observed.admission,
+        checkpoint,
+        source,
+        checkpoint.manifest.collection_record_path,
+        review,
+        choices=reviewed_connections(retained.saved.plan),
+        selected=selected,
+    )
+
+
+def _held_apply_refusal(first, observed, source, review, selected, *, undo_target):
+    if (
+        observed.status != "intact"
+        or observed.admission.status != "supported"
+        or observed.admission.inventory != first.admission.inventory
+        or observed.admission.policy_fingerprint != first.admission.policy_fingerprint
+        or observed.checkpoint.locator.commit != first.checkpoint.locator.commit
+    ):
+        return "current_admission_required"
+    if undo_target is not None:
+        if (
+            observed.checkpoint.locator.commit
+            != undo_target.observation.checkpoint.locator.commit
+        ):
+            return "undo_review_stale"
+        return None
+    return _qualify_collection_apply(source, review, selected, observed)
 
 
 def _apply_reviewed_update(
@@ -3597,7 +3776,9 @@ def _apply_reviewed_update(
         )
         if refusal is not None:
             return outcome("refused", refusal, start=start)
-        _acquire(root, operation_id)
+        state.scoped = _acquire_reviewed_apply(
+            root, operation_id, first.checkpoint, undo_target
+        )
         state.acquired = True
         observed = _observe_apply_under_lease(
             root,
@@ -3608,15 +3789,11 @@ def _apply_reviewed_update(
             _owned_export,
             _owners,
         )
-        if (
-            observed.status != "intact"
-            or observed.admission.status != "supported"
-            or observed.admission.inventory != first.admission.inventory
-            or observed.admission.policy_fingerprint
-            != first.admission.policy_fingerprint
-            or observed.checkpoint.locator.commit != first.checkpoint.locator.commit
-        ):
-            return outcome("refused", "current_admission_required", start=start)
+        refusal = _held_apply_refusal(
+            first, observed, source, review, selected, undo_target=undo_target
+        )
+        if refusal is not None:
+            return outcome("refused", refusal, start=start)
         state.operation_generation = observed.checkpoint.manifest.generation + 1
         paths = _apply_path_plan(
             observed, review, selected, subjects, undo_target, outcome, start

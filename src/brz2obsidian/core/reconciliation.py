@@ -23,7 +23,7 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core.identity import bind_identity
 
-from .attachments import attachment_review
+from .attachments import attachment_review, operation_attachment_review_required
 from .formats import (
     _new_source_output,
     configuration_memory_allowed,
@@ -31,6 +31,7 @@ from .formats import (
     format_findings,
     format_proposal,
     output_semantics,
+    retained_import_output,
     review_facts,
 )
 from .link_meanings import _OccurrenceMeanings, validate_current_link_context
@@ -166,6 +167,22 @@ def _findings(facts, subject, subject_id, safety):
     return problems
 
 
+def _view_retirement(subject):
+    if (
+        not subject.classification_view_retirement
+        or subject.incoming is not None
+        or subject.baseline.status != "known"
+        or subject.current.path != subject.path
+        or subject.item_id != "support:" + subject.path
+    ):
+        return None
+    if subject.current.existence == "absent":
+        return "local_deleted", None, "local_deleted", False
+    if _bytes(subject.current.content) == _bytes(subject.baseline.content):
+        return "compatible", None, "classification_view_retired", False
+    return None
+
+
 def _proposal(subject, *, automatic=False):
     original = _bytes(subject.baseline.content)
     current = _bytes(subject.current.content)
@@ -266,7 +283,13 @@ def _comparison_safety(
 
 
 def _reconcile_subject(
-    facts, subject, applicability, *, reversal_fingerprint=None, _links=None
+    facts,
+    subject,
+    applicability,
+    *,
+    reversal_fingerprint=None,
+    attachment_reversal_fingerprint=None,
+    _links=None,
 ):
     changes, findings, local_changes, memory = [], [], [], []
     subject_id = reconciliation_subject_id(
@@ -302,7 +325,11 @@ def _reconcile_subject(
 
     policy = preservation_policy(facts, subject, subject_id, policy_allowed)
     binary_review, binary_assumptions = attachment_review(
-        facts, subject, subject_id, _links=_links
+        facts,
+        subject,
+        subject_id,
+        reversal_fingerprint=attachment_reversal_fingerprint,
+        _links=_links,
     )
     safety = tuple(
         sorted(
@@ -357,6 +384,12 @@ def _reconcile_subject(
             and _new_source_output(facts, subject)
             else None
         )
+        or (
+            ("no_change", subject.current.content, "already_current", False)
+            if retained_import_output(facts, subject)
+            else None
+        )
+        or _view_retirement(subject)
         or (policy.proposal if policy_allowed else None)
         or format_choice
         or _proposal(subject, automatic=facts.format_operation.automatic_merge)
@@ -535,13 +568,25 @@ class ReconcileWork:
     local_changes: tuple = ()
     memory: tuple = ()
     pending: object = None
+    reversal_fingerprint: str | None = None
     _links: object = field(default=None, compare=False, repr=False)
 
 
+def _request_reversal_fingerprint(work, subject, dialect, purpose, context):
+    request = fingerprint_request(
+        subject.operation_reversal,
+        dialect=dialect,
+        scope=("reconciliation", work.facts.proposal_id, work.index, purpose),
+        epoch=0 if context is None else context.epoch,
+        context=context,
+    )
+    return PendingFingerprint(request, replace(work, pending=request))
+
+
 def advance_reconciliation(work, returned=None, *, context=None):
-    reversal_fingerprint = None
+    fingerprint = None
     if work.pending is not None:
-        reversal_fingerprint = consume_fingerprint(work.pending, returned)
+        fingerprint = consume_fingerprint(work.pending, returned)
     elif returned is not None:
         raise ValueError("Unexpected reconciliation child result")
     if work.index == -1:
@@ -567,20 +612,29 @@ def advance_reconciliation(work, returned=None, *, context=None):
             )
         )
     subject = work.facts.subjects[work.index]
-    if subject.operation_reversal is not None and work.pending is None:
-        request = fingerprint_request(
-            subject.operation_reversal,
-            dialect="Jc",
-            scope=("reconciliation", work.facts.proposal_id, work.index, "reversal"),
-            epoch=0 if context is None else context.epoch,
-            context=context,
-        )
-        return PendingFingerprint(request, replace(work, pending=request))
+    if subject.operation_reversal is not None:
+        if work.pending is None:
+            return _request_reversal_fingerprint(
+                work, subject, "Jc", "reversal", context
+            )
+        if work.reversal_fingerprint is None and operation_attachment_review_required(
+            subject
+        ):
+            return _request_reversal_fingerprint(
+                replace(work, reversal_fingerprint=fingerprint),
+                subject,
+                "Js",
+                "attachment-reversal",
+                context,
+            )
     change, problems, local, remembered = _reconcile_subject(
         work.facts,
         subject,
         work.applicability,
-        reversal_fingerprint=reversal_fingerprint,
+        reversal_fingerprint=work.reversal_fingerprint or fingerprint,
+        attachment_reversal_fingerprint=fingerprint
+        if work.reversal_fingerprint
+        else None,
         _links=work._links,
     )
     return replace(
@@ -591,6 +645,7 @@ def advance_reconciliation(work, returned=None, *, context=None):
         local_changes=work.local_changes + local,
         memory=work.memory + remembered,
         pending=None,
+        reversal_fingerprint=None,
     )
 
 

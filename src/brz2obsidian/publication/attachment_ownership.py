@@ -20,6 +20,7 @@ from brz2obsidian.publication.vault_native import available_memory
 
 class _Claim(NamedTuple):
     kind: str
+    collection: tuple[str, str]
     item_id: str
     facet: str
     path: str
@@ -260,6 +261,10 @@ def review_ownership_claims(plan, effects=None):
         dict.fromkeys(
             _Claim(
                 facts.format_operation.kind,
+                (
+                    facts.incoming_identity.collection_id,
+                    facts.incoming_identity.module_id,
+                ),
                 subject.item_id,
                 subject.facet,
                 subject.path,
@@ -324,8 +329,7 @@ def _bound_claims(*, association, roles, claims, missing, cutoff, origin_claims)
                 proof.facet,
             )
             != (
-                association.collection_id,
-                association.module_id,
+                *claim.collection,
                 claim.item_id,
                 claim.facet,
             )
@@ -620,11 +624,8 @@ def _manifest(git, association, role):
     return manifest
 
 
-def _mapping(git, manifest):
-    row = next(
-        (row for row in manifest.source if row.path == "migration-record.json"), None
-    )
-    if row is None or row.size > available_memory() // 4:
+def _mapping(git, manifest, row):
+    if row.size > available_memory() // 4:
         raise OSError("Historical attachment mapping is unavailable")
     sink = io.BytesIO()
     verify_blobs(
@@ -640,7 +641,7 @@ def _mapping(git, manifest):
         for asset in assets
         if asset.relative_path is not None
     }
-    return row, source, mappings
+    return source, mappings
 
 
 def _owner(association, role, source, mapping, item, row):
@@ -722,7 +723,7 @@ def _published_origins(
         graph.receipt.direction != "finish"
         or graph.intent.kind != "apply"
         or plan.facts.format_operation.kind
-        not in ("source_update", "onboarding", "format_transition")
+        not in ("source_update", "onboarding", "format_transition", "collection_import")
     ):
         return ()
     onboarding = plan.facts.format_operation.kind == "onboarding"
@@ -784,6 +785,22 @@ def _published_origins(
     return tuple(qualified)
 
 
+def _empty_collection_source(manifest):
+    if manifest.collection_record_path is None or manifest.source:
+        return False
+    if manifest.boundary == "local":
+        return (
+            manifest.reviewed_source is not None
+            or manifest.discarded_review is not None
+        )
+    if manifest.boundary == "prepared":
+        return (
+            manifest.recovery_direction == "restore"
+            or manifest.undo_of_receipt_commit is not None
+        )
+    return manifest.operation_intent_commit is not None
+
+
 def _ownership_mapping(git, manifest, paths, mappings):
     if (
         manifest.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
@@ -791,22 +808,23 @@ def _ownership_mapping(git, manifest, paths, mappings):
     ):
         # An unqualified old format cannot establish an origin. It also
         # cannot hide a later independently qualified current publication.
-        mapping, source, entries = None, None, {}
-    else:
-        mapping = next(
-            (row for row in manifest.source if row.path == "migration-record.json"),
-            None,
+        return None, None, {}
+    if _empty_collection_source(manifest):
+        return None, None, {}
+    record_path = manifest.collection_record_path or "migration-record.json"
+    mapping = next((row for row in manifest.source if row.path == record_path), None)
+    if mapping is None:
+        raise OSError("Historical attachment mapping is unavailable")
+    key = mapping, manifest.identity
+    if key not in mappings:
+        source, entries = _mapping(git, manifest, mapping)
+        # Retain only normalized requested association facts, never
+        # the record bytes or full parsed historical asset inventory.
+        mappings[key] = (
+            source,
+            {path: item for path, item in entries.items() if path in paths},
         )
-        key = mapping, manifest.identity
-        if key not in mappings:
-            mapping, source, entries = _mapping(git, manifest)
-            # Retain only normalized requested association facts, never
-            # the record bytes or full parsed historical asset inventory.
-            mappings[key] = (
-                source,
-                {path: item for path, item in entries.items() if path in paths},
-            )
-        source, entries = mappings[key]
+    source, entries = mappings[key]
     return mapping, source, entries
 
 
@@ -937,9 +955,12 @@ def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None
                     roles,
                     observation,
                 ):
-                    if (
-                        row.path not in owners
-                        or owners[row.path].identity.item_id != entries[row.path]
+                    if row.path not in owners or owners[
+                        row.path
+                    ].identity != ImportedItemIdentity(
+                        collection_id=source.source_id,
+                        module_id=source.module_id,
+                        item_id=entries[row.path],
                     ):
                         owners[row.path] = _owner(
                             association, role, source, mapping, entries[row.path], row

@@ -210,6 +210,8 @@ def refresh_case(
                         boundary="local",
                         identity=output_identity(record(before)),
                         source=case.baseline_rows,
+                        discarded_review=None,
+                        collection_baseline_commit=None,
                         reviewed_source=case.binding,
                         observed_source=observed,
                     ),

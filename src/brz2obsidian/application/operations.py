@@ -52,6 +52,16 @@ from brz2obsidian.publication.filesystem import (
 )
 
 
+def _collection_preparation(value):
+    from .update_contracts import UpdatePreparation
+
+    try:
+        preparation = UpdatePreparation.model_validate(value)
+    except ValueError, TypeError:
+        return None
+    return preparation if preparation.collection_record_path is not None else None
+
+
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
@@ -68,6 +78,114 @@ class Operations:
         from .update_lifecycle import prepare_update
 
         return prepare_update(self, vault, source)
+
+    def prepare_collection_import(
+        self,
+        vault,
+        source,
+        *,
+        record_path,
+        connections=(),
+        category_choices=(),
+        tag_reuse=(),
+    ):
+        """Review an exact rendered collection with vault-relative output paths."""
+        from .collection_import import prepare_collection_import
+
+        return prepare_collection_import(
+            self,
+            vault,
+            source,
+            record_path=record_path,
+            connections=connections,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+        )
+
+    def prepare_collection_import_from_source(
+        self,
+        vault,
+        source,
+        *,
+        staging,
+        import_location=None,
+        connections=(),
+        preview_connections=False,
+        category_choices=(),
+        tag_reuse=(),
+        preview_classifications=False,
+    ):
+        """Render a source into fresh staging and review placement in a Git vault."""
+        from .collection_placement import prepare_collection_import_from_source
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_collection_import_from_source(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            import_location=import_location,
+            connections=connections,
+            preview_connections=preview_connections,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+            preview_classifications=preview_classifications,
+        )
+
+    def prepare_collection_update(self, vault, source, *, record_path):
+        """Review a rendered update against the selected collection's baseline."""
+        from .collection_import import prepare_collection_import
+
+        return prepare_collection_import(
+            self, vault, source, record_path=record_path, update=True
+        )
+
+    def prepare_collection_update_from_source(
+        self, vault, source, *, staging, record_path, category_choices=(), tag_reuse=()
+    ):
+        """Render a source update using the selected collection's remembered mappings."""
+        from .collection_classification import prepare_scoped_classification_update
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_scoped_classification_update(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            record_path=record_path,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+        )
+
+    def prepare_collection_remap_from_source(
+        self,
+        vault,
+        source,
+        *,
+        staging,
+        record_path,
+        category_choices=(),
+        tag_reuse=(),
+        separate_tags=(),
+    ):
+        """Review a mapping change for the already-retained source version."""
+        from .collection_classification import prepare_scoped_classification_update
+
+        workflow, source_ref = self._selected_workflow(source_selection(source))
+        return prepare_scoped_classification_update(
+            self,
+            workflow,
+            vault,
+            source_ref,
+            staging=staging,
+            record_path=record_path,
+            category_choices=category_choices,
+            tag_reuse=tag_reuse,
+            remap=True,
+            separate_tags=separate_tags,
+        )
 
     def _new_owned_preparation(self):
         from .owned_preparation import _OwnedPreparation
@@ -100,6 +218,13 @@ class Operations:
 
     def apply_update(self, preparation, *, cancel=None, progress=None):
         """Reobserve and apply exactly one complete current source review."""
+        collection = _collection_preparation(preparation)
+        if collection is not None:
+            from .collection_import import save_collection_review
+
+            return save_collection_review(
+                self, collection, cancel=cancel, progress=progress, apply=True
+            )
         from .update_lifecycle import apply_update
 
         return apply_update(self, preparation, cancel=cancel, progress=progress)
@@ -173,6 +298,13 @@ class Operations:
 
     def save_update(self, preparation, *, cancel=None, progress=None):
         """Retain a current unresolved or complete review in owned Git history."""
+        collection = _collection_preparation(preparation)
+        if collection is not None:
+            from .collection_import import save_collection_review
+
+            return save_collection_review(
+                self, collection, cancel=cancel, progress=progress
+            )
         from .update_lifecycle import save_update
 
         return save_update(self, preparation, cancel=cancel, progress=progress)
@@ -182,6 +314,12 @@ class Operations:
         from .update_lifecycle import load_update
 
         return load_update(self, vault)
+
+    def discard_saved_review(self, vault, *, expected_commit):
+        """Discard the exact saved review selected by the caller."""
+        from brz2obsidian.publication.vault_history import discard_saved_review
+
+        return discard_saved_review(vault, expected_commit=expected_commit)
 
     def resume_update(self, vault):
         """Materialize saved inputs and revalidate against fresh physical facts."""

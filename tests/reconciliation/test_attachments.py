@@ -2115,6 +2115,175 @@ def test_affected_document_target_safety_is_checked_before_preservation_or_link_
     assert not validate_attachment_candidate(facts, selection, candidate).valid
 
 
+def test_interrupted_undo_requires_exact_owned_documents_referencing_absent_asset():
+    from brz2obsidian.application.review_choices import (
+        requirement_digest,
+        review_plan_attachment_references,
+        review_plan_choice_action,
+    )
+    from brz2obsidian.contracts import (
+        ExactContent,
+        OperationReversalOutput,
+        OperationReversalTarget,
+    )
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        prepare_review,
+        resolve_review,
+        select_review_effects,
+    )
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_resolution import preflight
+
+    raw = b"[[Assets/data.bin|Retained link]]"
+    facts = linked_attachment_request(raw=raw)
+    (asset,) = facts.subjects
+    asset_entry, note_entry = facts.identity_inventory
+    context = facts.link_context
+    asset_target, note_target = context.current_targets
+    absent = asset.current.model_copy(update={"existence": "absent", "content": None})
+    states = (
+        interpret_link_target(
+            None, target_id=asset_target.target_id, existence="missing", memberships=()
+        ),
+        context.current_target_facts[1],
+    )
+    doc = interpret_links(
+        ExactContent(data=raw),
+        document_id=note_target.target_id,
+        source_path=note_target.canonical_path,
+        path_mode="vault",
+        targets=context.current_targets,
+        target_facts=states,
+        inventory="complete",
+    )
+    assert doc.occurrences[0].meaning.status == "missing"
+    context = context.model_copy(
+        update={"current_target_facts": states, "current_documents": (doc,)}
+    )
+
+    def proof(target, current, before, direction, operation="paused-undo"):
+        finish = direction == "finish"
+        return OperationReversalTarget(
+            schema_id="brz2obsidian.operation-reversal-target",
+            schema_version=1,
+            operation_id=operation,
+            operation_kind="undo",
+            direction=direction,
+            operation_generation=2,
+            history_fingerprint="exact-undo-intent",
+            origin_change_id=target.target_id,
+            owned_targets=(target,),
+            outputs=(
+                OperationReversalOutput(
+                    path=current.path,
+                    target_id=target.target_id,
+                    produced_existence="present" if finish else "absent",
+                    produced=before if finish else None,
+                    current=current,
+                    target_existence="absent" if finish else "present",
+                    target=None if finish else before,
+                ),
+            ),
+        )
+
+    def recovery(direction, note_before, operation="paused-undo"):
+        observed = asset.model_copy(
+            update={
+                "current": absent,
+                "operation_reversal": proof(
+                    asset_target, absent, asset.incoming, direction
+                ),
+            }
+        )
+        note = asset.model_copy(
+            update={
+                "facet": "content",
+                "path": note_entry.current.path,
+                "source_target": note_target.target,
+                "output_role": "note",
+                "current": note_entry.current,
+                "attachment": None,
+                "operation_reversal": proof(
+                    note_target, note_entry.current, note_before, direction, operation
+                ),
+            }
+        )
+        return facts.model_copy(
+            update={
+                "subjects": (observed, note),
+                "link_context": context,
+                "identity_inventory": (
+                    asset_entry.model_copy(update={"current": absent}),
+                    note_entry,
+                ),
+                "format_operation": facts.format_operation.model_copy(
+                    update={"established_baseline": None}
+                ),
+            }
+        )
+
+    def findings(*args):
+        result = reconcile(recovery(*args))
+        return {finding.code for finding in result.findings}
+
+    exact = ExactContent(data=raw)
+    assert "link_current_unsafe" not in findings("restore", exact)
+    assert "link_current_unsafe" not in findings("finish", exact)
+    assert "link_current_unsafe" in findings("restore", exact, "different-undo")
+    assert "link_current_unsafe" in findings(
+        "restore", ExactContent(data=b"Older note.")
+    )
+
+    def choose_restore(request):
+        plan = prepare_review(request, preflight=preflight())
+        change = next(row for row in plan.proposal.changes if row.path == asset.path)
+        assert change.format_review is not None
+        offer = next(
+            row
+            for row in inspect_review_choices(plan)
+            if row.change_id == change.change_id
+        )
+        ((reference_id, _, _),) = review_plan_attachment_references(
+            plan, offer.requirement_id
+        )
+        return resolve_review(
+            plan,
+            review_plan_choice_action(
+                plan,
+                requirement_id=offer.requirement_id,
+                choice="reverse",
+                assumptions_digest=requirement_digest(offer),
+                references=({"reference_id": reference_id, "choice": "use_incoming"},),
+            ),
+        )
+
+    same_format = recovery("restore", exact)
+    restored = choose_restore(same_format)
+    assert restored.status == "accepted", restored.code
+    selected = select_review_effects(restored.plan)
+    assert selected.status == "selected", restored.plan.blockers
+    assert [(row.path, row.content.data) for row in selected.files] == [
+        ("Assets/data.bin", b"abc"),
+        ("Notes/Owner.md", raw),
+    ]
+    assert not selected.remove_paths
+    changed_format = same_format.model_copy(
+        update={
+            "incoming_identity": same_format.incoming_identity.model_copy(
+                update={"profile_version": "different"}
+            ),
+            "format_operation": same_format.format_operation.model_copy(
+                update={
+                    "kind": "format_transition",
+                    "target_source_version": same_format.format_operation.baseline_source_version,
+                }
+            ),
+        }
+    )
+    assert choose_restore(changed_format).code == "attachment_invalid"
+
+
 def test_corrupt_external_cache_cannot_hide_retained_internal_query_from_current_preservation():
     from brz2obsidian.obsidian import interpret_link_target, interpret_links
 

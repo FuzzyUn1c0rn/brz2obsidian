@@ -58,6 +58,7 @@ class CheckpointPayloadRead(ReconciliationContract):
         "insufficient_memory",
         "history_unavailable",
         "stale_locator",
+        "collection_not_active",
         "path_unavailable",
         "invalid_range",
         "payload_unavailable",

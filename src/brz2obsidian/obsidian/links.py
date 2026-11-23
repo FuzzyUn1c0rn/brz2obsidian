@@ -20,6 +20,7 @@ from brz2obsidian.core.link_meanings import resolve_link_meaning
 from brz2obsidian.obsidian_dialect import (
     canonical_player_ranges,
     file_roles,
+    is_migration_record_path,
     migration_record_data,
 )
 
@@ -100,6 +101,7 @@ def interpret_link_target(
     source_path=None,
     output_format=7,
     qualify_roles=False,
+    retained_category_identities=(),
 ):
     from .interpretation import interpret_structure
 
@@ -125,6 +127,22 @@ def interpret_link_target(
             path=source_path,
             existence=existence,
             reference_query=reference_query,
+            category_target=next(
+                (
+                    row
+                    for row in membership_targets
+                    if row.kind == "category"
+                    and row.target_id == target_id
+                    and row.canonical_path == source_path
+                    and row.status == "safe"
+                    and (
+                        row.category_anchor is not None
+                        or row.target_id.startswith("shared-category:")
+                        or row.identity in retained_category_identities
+                    )
+                ),
+                None,
+            ),
         )
         if (output_format in QUALIFIED_OUTPUT_FORMATS or qualify_roles)
         and source_path is not None
@@ -234,8 +252,27 @@ def _relationship_entries(text):
     return entries
 
 
+def _authored_path_mode(target, mode):
+    """Recognize explicit relative paths and native shortest unique paths."""
+    if mode != "vault":
+        return target, mode
+    if target.startswith("/"):
+        return target[1:], "exact"
+    if target.startswith(("./", "../")):
+        return target, "relative"
+    return target, "shortened"
+
+
 def _link_destination(
-    match, wiki, raw_destination, alias, display, source_path, path_mode, output_format
+    match,
+    wiki,
+    raw_destination,
+    alias,
+    display,
+    source_path,
+    path_mode,
+    output_format,
+    authored_links,
 ):
     try:
         angled = (
@@ -289,6 +326,8 @@ def _link_destination(
         external = external or (
             not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
         )
+        if authored_links and not external:
+            target_text, path_mode = _authored_path_mode(target_text, path_mode)
         query = (
             None
             if external
@@ -326,6 +365,8 @@ def interpret_links(
     inventory,
     output_format=7,
     record_format=None,
+    owned_record_path=None,
+    authored_links=False,
 ):
     occurrences, issues = [], []
 
@@ -348,13 +389,17 @@ def interpret_links(
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
-    if (
-        output_format in QUALIFIED_OUTPUT_FORMATS
-        and source_path == "migration-record.json"
+    if output_format in QUALIFIED_OUTPUT_FORMATS and is_migration_record_path(
+        source_path
     ):
         if record_format is None:
             record_format = output_format
-        if not migration_record_data(text, source_path, record_format=record_format):
+        if not migration_record_data(
+            text,
+            source_path,
+            record_format=record_format,
+            owned_record_path=owned_record_path,
+        ):
             issues.append("record_data_unsupported")
         return document()
     masked, code_issues = _code_ranges(text)
@@ -372,6 +417,7 @@ def interpret_links(
         target_facts,
         inventory,
         output_format,
+        authored_links,
     )
     residue = list(text)
     for start, end in masked + consumed:
@@ -402,6 +448,7 @@ def _scan_links(
     target_facts,
     inventory,
     output_format,
+    authored_links,
 ):
     occurrences, consumed = [], []
     relationship_entries = _relationship_entries(text) if output_format == 9 else {}
@@ -428,6 +475,7 @@ def _scan_links(
             source_path,
             path_mode,
             output_format,
+            authored_links,
         )
         if query is None and not external:
             issues.append("path_unsupported")
