@@ -1097,6 +1097,19 @@ def test_first_collection_saved_checkpoint_can_recover_without_old_locator(
         )
     finally:
         journal_path.write_bytes(journal_bytes)
+    if not advanced:
+        foreign_ref = "refs/brz2obsidian/imports/" + "f" * 64 + "/checkpoints"
+        git(vault, "update-ref", foreign_ref, recovery.unpublished_checkpoint)
+        try:
+            invalid = fresh.prepare_recovery(vault)
+            assert (invalid.status, invalid.code) == (
+                "unavailable",
+                "collection_local_publication_invalid",
+            )
+            assert journal_path.read_bytes() == journal_bytes
+            assert not (vault / ".brz2obsidian/locator.json").exists()
+        finally:
+            git(vault, "update-ref", "-d", foreign_ref, recovery.unpublished_checkpoint)
     with collection_publication.collection_publication_guard(vault):
         busy = fresh.execute_recovery(vault, recovery)
         assert busy.recovery_required and journal_path.read_bytes() == journal_bytes

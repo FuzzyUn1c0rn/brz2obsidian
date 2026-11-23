@@ -955,6 +955,7 @@ def test_classified_restore_before_rebinds_peer_memberships_to_current_lookup(
 
 
 def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypatch):
+    from copy import deepcopy
     from types import SimpleNamespace
 
     import pytest
@@ -1010,9 +1011,11 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
     graph = SimpleNamespace(owned={})
     git = object()
 
+    records = {id(manifest): record}
+
     def read_record(actual_git, actual_manifest):
-        assert (actual_git, actual_manifest) == (git, manifest)
-        return record
+        assert actual_git is git
+        return records[id(actual_manifest)]
 
     monkeypatch.setattr(collection_placement, "_retained_record", read_record)
     bindings = vault_recovery._retained_scoped_categories(git, manifest, graph, context)
@@ -1077,8 +1080,19 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
     )
     assert not unqualified.file_roles.category
     manifest.collection_record_path = record_path
+    previous = SimpleNamespace(**vars(manifest))
+    records[id(previous)] = deepcopy(record)
     record["item_targets"][0]["creation_reasons"] = []
     assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+
+    manifest.collection_baseline_commit = "b" * 40
+    graph.owned[manifest.collection_baseline_commit] = (previous,)
+    assert vault_recovery._retained_scoped_categories(
+        git, manifest, graph, context
+    ) == {identity}
+    previous.collection_record_path = "Imports/Another/migration-record.json"
+    assert not vault_recovery._retained_scoped_categories(git, manifest, graph, context)
+
     record["item_targets"] *= 2
     with pytest.raises(OSError, match="ambiguous source identity"):
         vault_recovery._retained_scoped_categories(git, manifest, graph, context)
