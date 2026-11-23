@@ -290,6 +290,8 @@ def classification_transition_refusal(
     remap,
     sources=None,
     existing=None,
+    retained_tags=(),
+    possible_collisions=(),
 ):
     changed = classification_policy_changed(original, incoming)
     if changed and not remap:
@@ -318,7 +320,10 @@ def classification_transition_refusal(
     )
     if refusal is not None:
         return refusal
-    if new_defaults.intersection(_name_key(token) for token in tags):
+    tags = set(tags).union(retained_tags)
+    if new_defaults.intersection(
+        _name_key(token) for token in tags.union(possible_collisions)
+    ):
         return "import_tag_namespace_changed"
     known = set(recorded_classification_choices(original)[1])
     if any(row not in known and row[1] not in tags for row in reused):
@@ -668,6 +673,36 @@ def _new_member_sources(facts, incoming, remaining, before_rows, proposed_rows):
     return _archived_member_sources(incoming, members) if members else ()
 
 
+def _continued_classification_evidence(
+    admission, context, affected, before_rows, proposed_rows, digests
+):
+    existing = existing_files(admission)
+    changed = {
+        path
+        for path in affected
+        if path in existing
+        and (path not in before_rows or digests.get(path) != before_rows[path].sha256)
+    }
+    prior_documents = {
+        row.source_path: row.content for row in context.current_documents
+    }
+    surviving, possible_collisions = set(), set()
+    for path in changed:
+        _, observed = vault_classifications({path: existing[path]})
+        if not observed:
+            continue
+        if path not in proposed_rows or digests.get(path) != proposed_rows[path].sha256:
+            possible_collisions.update(observed)
+        predecessor = prior_documents.get(path)
+        if _record_matches(predecessor, before_rows.get(path)):
+            _, before = vault_classifications({path: predecessor.data})
+            surviving.update(set(before).intersection(observed))
+    unaffected = {
+        path: value for path, value in existing.items() if path not in changed
+    }
+    return unaffected, surviving, possible_collisions
+
+
 def _require_classified_update_finish(
     admission,
     checkpoint,
@@ -712,11 +747,9 @@ def _require_classified_update_finish(
         sources.update(_classifications_for_record(before, incoming))
     if not sources:
         return
-    published = {
-        path
-        for path in origin.affected_paths
-        if path in proposed_rows and digests.get(path) == proposed_rows[path].sha256
-    }
+    existing, retained_tags, uncertain_tags = _continued_classification_evidence(
+        admission, context, origin.affected_paths, before_rows, proposed_rows, digests
+    )
     refusal = classification_transition_refusal(
         admission,
         checkpoint,
@@ -725,11 +758,9 @@ def _require_classified_update_finish(
         context.import_classification_approval,
         remap=context.import_classification_remap,
         sources=sources,
-        existing={
-            path: value
-            for path, value in existing_files(admission).items()
-            if path not in published
-        },
+        existing=existing,
+        retained_tags=retained_tags,
+        possible_collisions=uncertain_tags,
     )
     if refusal is not None:
         raise ImportRecoveryLinkChange("recovery_import_classifications_changed")

@@ -245,9 +245,10 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
         path.relative_to(vault).as_posix()
         for path in (reference_file, overview, view_file.with_suffix(".md"))
     }
+    assert not preparation.review.blockers
     while pending_paths:
         review = preparation.review
-        assert not review.blockers
+        assert set(review.blockers) <= {"selected_link_context_conflict"}
         assert len(review.requirements) == len(pending_paths)
         requirement = review.requirements[0]
         change = next(
@@ -273,6 +274,8 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
         assert resolved.code == "accepted", resolved.code
         preparation = resolved.preparation
         assert preparation is not None
+    assert not preparation.review.blockers
+    assert not preparation.review.requirements
     assert preparation.review.ready
     expected_author = author.read_bytes()
     applied = Operations().apply_update(preparation)
@@ -511,6 +514,7 @@ def test_paused_classified_update_finish_reobserves_selected_shared_target(
             link_context=SimpleNamespace(
                 import_classification_approval=approval,
                 import_classification_remap=True,
+                current_documents=(),
             ),
             subjects=(
                 SimpleNamespace(
@@ -616,7 +620,7 @@ def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absen
     member_path = "Imports/Atlas/Notes/New member.md"
     category_path = "Categories/Shared.md"
     authored_category = b'---\ntags: ["categories"]\n---\n# Shared\n'
-    tag_document = "Existing tag.md"
+    tag_document = "Imports/Atlas/Notes/Existing tag.md"
     authored_tag = b'---\ntags: ["shared/tag"]\n---\n# Authored tag\n'
     live = {category_path: authored_category, tag_document: authored_tag}
     before = {
@@ -711,6 +715,7 @@ def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absen
                     incoming
                 ),
                 import_classification_remap=False,
+                current_documents=(),
             ),
             subjects=(
                 SimpleNamespace(
@@ -723,8 +728,11 @@ def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absen
         ),
     )
 
-    def finish(record_bytes, effects=selected):
-        observed = SimpleNamespace(inventory=(row(record_path, record_bytes),))
+    def finish(record_bytes, effects=selected, *, witness=None):
+        inventory = (row(record_path, record_bytes),)
+        if witness is not None:
+            inventory += (row(tag_document, witness),)
+        observed = SimpleNamespace(inventory=inventory)
         placement.require_collection_finish_links(
             observed,
             None,
@@ -765,3 +773,60 @@ def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absen
             new,
             selected | {member_path: ExactContent(data=b"# Authored alternative\n")},
         )
+
+        live[category_path] = authored_category
+        before_witness = ExactContent(data=authored_tag)
+        published = ExactContent(
+            data=authored_tag.replace(b"# Authored tag", b"# Reviewed new body")
+        )
+        live[tag_document] = published.data
+        selected[tag_document] = published
+        origin.affected_paths += (tag_document,)
+        origin.before += (row(tag_document, before_witness),)
+        origin.proposed += (row(tag_document, published),)
+        context = review.producer_facts.link_context
+        context.current_documents = (
+            SimpleNamespace(source_path=tag_document, content=before_witness),
+        )
+        finish(new, witness=published)
+
+        independent_before = ExactContent(data=b"# Original note without the tag\n")
+        original_rows = origin.before
+        origin.before = (*original_rows[:-1], row(tag_document, independent_before))
+        with pytest.raises(
+            placement.ImportRecoveryLinkChange,
+            match="recovery_import_classifications_changed",
+        ):
+            finish(new, witness=published)
+
+        context.current_documents = (
+            SimpleNamespace(source_path=tag_document, content=independent_before),
+        )
+        with pytest.raises(
+            placement.ImportRecoveryLinkChange,
+            match="recovery_import_classifications_changed",
+        ):
+            finish(new, witness=published)
+
+        edited = ExactContent(
+            data=published.data + b"Later author edited the published note.\n"
+        )
+        live[tag_document] = edited.data
+        with pytest.raises(
+            placement.ImportRecoveryLinkChange,
+            match="recovery_import_classifications_changed",
+        ):
+            finish(new, witness=edited)
+
+        origin.before = original_rows
+        context.current_documents = (
+            SimpleNamespace(source_path=tag_document, content=before_witness),
+        )
+        finish(new, witness=edited)
+        missing_tag = ExactContent(data=b"# Later author removed the shared tag.\n")
+        live[tag_document] = missing_tag.data
+        with pytest.raises(
+            placement.ImportRecoveryLinkChange,
+            match="recovery_import_classifications_changed",
+        ):
+            finish(new, witness=missing_tag)

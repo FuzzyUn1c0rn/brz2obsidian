@@ -210,7 +210,7 @@ def test_new_default_tag_stays_distinct_through_scoped_update_qualification():
     }
     approval = placement.classification_approval(incoming)
 
-    def qualify(tokens, *, sources=None):
+    def qualify(tokens, *, sources=None, possible_collisions=()):
         text = (
             "---\ntags: ["
             + ", ".join(f'"{token}"' for token in tokens)
@@ -228,11 +228,16 @@ def test_new_default_tag_stays_distinct_through_scoped_update_qualification():
             remap=False,
             sources=sources,
             existing={"Author.md": text},
+            possible_collisions=possible_collisions,
         )
 
     assert qualify(existing) is None
     assert qualify(existing + (late_token,)) == "import_tag_namespace_changed"
     assert qualify(existing + (late_token,), sources={("tag", "a")}) is None
+    assert (
+        qualify(existing, possible_collisions=(late_token,))
+        == "import_tag_namespace_changed"
+    )
 
 
 def test_reviewed_remap_preserves_second_source_reason_and_manual_membership():
