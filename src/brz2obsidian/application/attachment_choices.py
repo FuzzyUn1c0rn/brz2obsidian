@@ -1,10 +1,12 @@
 """Compile small offered reference decisions into a local attachment candidate."""
 
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
     AttachmentCandidate,
     ExactContent,
     LinkOccurrenceChoice,
 )
+from brz2obsidian.core.reversals import undo_removal_continuation
 from brz2obsidian.obsidian import (
     interpret_link_target,
     interpret_links,
@@ -148,8 +150,40 @@ def _selected_attachment_links(
     return links, replacements
 
 
+def _retained_restore_record_path(facts, subject):
+    proof = subject.operation_reversal
+    if (
+        proof is None
+        or proof.direction != "restore"
+        or facts.format_operation.kind != "source_update"
+        or facts.baseline_identity != facts.incoming_identity
+        or undo_removal_continuation(facts, subject)[0] is None
+    ):
+        return None
+    data_subjects = {
+        row.path: row.current.content
+        for row in facts.subjects
+        if row.path.endswith("/migration-record.json")
+        and row.item_id == f"support:{row.path}"
+        and row.facet == "content"
+        and row.current.path == row.path
+        and row.current.existence == "present"
+    }
+    rows = tuple(
+        doc.source_path
+        for doc in facts.link_context.current_documents
+        if doc.source_path in data_subjects
+        and doc.document_id == f"subject:support:{doc.source_path}:content"
+        and doc.status == "supported"
+        and doc.inventory == "complete"
+        and not doc.occurrences
+        and same_content(data_subjects[doc.source_path], doc.content)
+    )
+    return rows[0] if len(rows) == 1 else None
+
+
 def _reobserve_attachment_documents(
-    facts, replacements, targets, states, observe_target
+    facts, replacements, targets, states, observe_target, *, owned_record_path=None
 ):
     documents = []
     for document in facts.link_context.current_documents:
@@ -169,6 +203,9 @@ def _reobserve_attachment_documents(
                 inventory=document.inventory,
                 output_format=facts.incoming_identity.output_format,
                 record_format=facts.baseline_identity.output_format,
+                owned_record_path=owned_record_path
+                if document.document_id not in replacements
+                else None,
             )
         )
     for target_id, state in tuple(states.items()):
@@ -211,7 +248,12 @@ def selected_attachment_candidate(
         change, alternative, references, offered_refs, targets, states
     )
     documents = _reobserve_attachment_documents(
-        plan.facts, replacements, targets, states, observe_target
+        plan.facts,
+        replacements,
+        targets,
+        states,
+        observe_target,
+        owned_record_path=_retained_restore_record_path(plan.facts, subject),
     )
     return tuple(links), AttachmentCandidate(
         schema_id="brz2obsidian.attachment-candidate",

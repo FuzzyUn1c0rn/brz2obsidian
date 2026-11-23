@@ -547,6 +547,422 @@ def test_finish_rebinds_already_published_imported_undo_to_active_intent(monkeyp
         vault_recovery._finish_review(None, None)
 
 
+def test_scoped_update_undo_recovers_after_its_asset_was_removed(monkeypatch):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.checkpoint_contracts import CheckpointFile
+    from brz2obsidian.application.review_choices import (
+        requirement_digest,
+        review_plan_attachment_references,
+        review_plan_choice_action,
+    )
+    from brz2obsidian.application.update_lifecycle import text_choice_action
+    from brz2obsidian.application.vault_update_contracts import (
+        VaultOperationIntent,
+        VaultOperationReceipt,
+        VaultPathMetadata,
+    )
+    from brz2obsidian.contracts import (
+        ExactContent,
+        OperationReversalOutput,
+        OperationReversalTarget,
+    )
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        resolve_review,
+        select_review_effects,
+    )
+    from brz2obsidian.core.reversals import review_owned_outputs
+    from brz2obsidian.publication import vault_apply, vault_recovery
+    from tests.application.test_attachment_cleanup_lifecycle import incoming_attachment
+    from tests.reconciliation.test_resolution import action
+
+    note, record_path, before = _incoming_brain()
+    record = json.loads(before[record_path])
+    asset = "Imports/Brain B/Assets/new.bin"
+    binary = b"\x00Imported asset.\xff"
+    record["source_identity"]["snapshot_digest"] = "adds-asset"
+    record["asset_targets"] = [{"asset_id": "icon", "relative_path": asset}]
+    after = before | {
+        asset: binary,
+        note: before[note] + f"\n![[{asset}]]\n".encode(),
+        record_path: json.dumps(record).encode(),
+    }
+
+    def assemble(old, new, current, generation):
+        return assemble_facts(
+            old,
+            new,
+            current,
+            proposal_id="asset-update",
+            generation=generation,
+            record_path=record_path,
+        )
+
+    forward = prepare_review(assemble(before, after, before, 2), preflight=preflight())
+    addition = next(
+        change for change in forward.proposal.changes if change.path == asset
+    )
+    selection, candidate = incoming_attachment(forward, addition)
+    selected_action = action(
+        forward,
+        addition,
+        domain="attachment",
+        choice="incoming",
+        attachment_selection=selection,
+        attachment_candidate=candidate,
+    )
+    accepted = resolve_review(forward, selected_action)
+    assert accepted.status == "accepted", accepted.code
+    forward = accepted.plan
+    changes = {change.path: change for change in forward.proposal.changes}
+    ownership = review_owned_outputs(
+        forward, ((changes[asset].change_id, selected_action.decision_id),)
+    )
+    (owned,) = ownership.target_groups[0]
+    assert owned.kind == "resource" and owned.canonical_path == asset
+
+    facts = assemble(after, before, after, 3)
+    original_asset = next(
+        subject for subject in facts.subjects if subject.path == asset
+    )
+    proof = OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id="a" * 32,
+        operation_kind="apply",
+        direction="restore",
+        operation_generation=2,
+        history_fingerprint="applied-update",
+        origin_change_id=changes[asset].change_id,
+        origin_decision_id=selected_action.decision_id,
+        owned_targets=(owned,),
+        outputs=(
+            OperationReversalOutput(
+                path=asset,
+                target_id=owned.target_id,
+                produced_existence="present",
+                produced=original_asset.current.content,
+                current=original_asset.current,
+                target_existence="absent",
+                target=None,
+            ),
+        ),
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": tuple(
+                subject.model_copy(update={"operation_reversal": proof})
+                if subject.path == asset
+                else subject
+                for subject in facts.subjects
+            )
+        }
+    )
+    undo = prepare_review(facts, preflight=preflight())
+    chosen = resolve_review(
+        undo,
+        action(
+            undo,
+            next(c for c in undo.proposal.changes if c.path == asset),
+            domain="reversal",
+            choice="reverse",
+        ),
+    )
+    assert chosen.status == "accepted", chosen.code
+    undo = chosen.plan
+    selected = select_review_effects(undo)
+    assert selected.status == "selected" and selected.remove_paths == (asset,)
+
+    def files(snapshot):
+        return tuple(
+            CheckpointFile(
+                path=path,
+                mode="100644",
+                size=len(raw),
+                sha256=hashlib.sha256(raw).hexdigest(),
+                object_id=hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest(),
+            )
+            for path, raw in sorted(snapshot.items())
+        )
+
+    def metadata(snapshot):
+        return tuple(
+            VaultPathMetadata(path=path, mode=0o644, attributes=0, security="fixture")
+            for path in sorted(snapshot)
+        )
+
+    target_receipt = "1" * 40
+    intent = VaultOperationIntent(
+        schema_id="brz2obsidian.vault-operation-intent",
+        schema_version=1,
+        operation_id="b" * 32,
+        kind="undo",
+        generation=3,
+        direction="finish",
+        association_id="a" * 64,
+        prepared_commit="2" * 40,
+        before=files(after),
+        proposed=files(before),
+        affected_paths=tuple(sorted(after)),
+        protected_paths=(),
+        before_metadata=metadata(after),
+        result_metadata=metadata(before),
+        created_directories=(),
+        undo_of_receipt_commit=target_receipt,
+    )
+    receipt = VaultOperationReceipt(
+        schema_id="brz2obsidian.vault-operation-receipt",
+        schema_version=1,
+        operation_id=proof.operation_id,
+        kind="apply",
+        generation=2,
+        status="applied",
+        direction="finish",
+        intent_commit="3" * 40,
+        prepared_commit="4" * 40,
+        result_commit="5" * 40,
+        published_paths=tuple(sorted(after)),
+    )
+    scope = {
+        "collection_record_path": record_path,
+        "association_id": intent.association_id,
+        "identity": facts.incoming_identity,
+    }
+    prepared = SimpleNamespace(
+        **scope, source=files(before), undo_of_receipt_commit=target_receipt
+    )
+    applied = SimpleNamespace(**scope, boundary="result", source=files(after))
+    retained = SimpleNamespace(
+        owned={
+            intent.prepared_commit: (
+                prepared,
+                SimpleNamespace(historical_effects=selected),
+            ),
+            receipt.result_commit: (applied, None),
+        },
+        origin_undo_target=SimpleNamespace(
+            receipt_commit=target_receipt, graph=SimpleNamespace(receipt=receipt)
+        ),
+    )
+    paused = {path: raw for path, raw in after.items() if path != asset}
+
+    def reopen(snapshot):
+        fresh = assemble(after, before, snapshot, 4)
+        observed = {row.current.path: row.current for row in fresh.identity_inventory}
+        subjects = vault_recovery._reobserve_recovery_subjects(
+            undo.facts,
+            observed,
+            intent,
+            selected,
+            {row.path: row.content for row in selected.files},
+            fresh.link_context,
+            direction="finish",
+        )
+        refreshed = fresh.model_copy(update={"subjects": subjects})
+        monkeypatch.setattr(
+            vault_recovery,
+            "_review_observation",
+            lambda *args, **kwargs: (
+                undo,
+                intent,
+                "6" * 40,
+                None,
+                refreshed,
+                undo.preflight,
+                observed,
+                retained,
+                frozenset(),
+            ),
+        )
+        return vault_recovery._finish_review(None, None)
+
+    content = {row.object_id: after[row.path] for row in intent.before}
+    content.update({row.object_id: before[row.path] for row in intent.proposed})
+    monkeypatch.setattr(
+        vault_recovery,
+        "_owned_content",
+        lambda _git, row, **_kwargs: (
+            ExactContent(data=content[row.object_id]) if row else None
+        ),
+    )
+
+    finish = reopen(paused)
+    assert "unsafe_assumption" not in finish.blockers
+    assert "link_current_unsafe" not in finish.blockers
+    (requirement,) = finish.requirements
+    change = next(
+        c for c in finish.proposal.changes if c.change_id == requirement.change_id
+    )
+    assert change.path == note
+    retain_link = resolve_review(
+        finish,
+        action(
+            finish,
+            change,
+            domain="reversal",
+            choice="current",
+            decision_id="finish:keep-missing-asset-link",
+        ),
+    )
+    assert retain_link.status == "refused" or not retain_link.plan.ready
+    decision = text_choice_action(
+        finish,
+        action(
+            finish,
+            change,
+            domain="reversal",
+            choice="reverse",
+            decision_id="finish:restore-earlier-note",
+        ),
+    )
+    resolved = resolve_review(finish, decision)
+    assert resolved.status == "accepted" and resolved.plan.ready
+    resumed = select_review_effects(resolved.plan)
+    assert resumed.status == "selected" and not resumed.remove_paths
+    assert {row.path: row.content.data for row in resumed.files} == before
+    assert vault_apply._recovery_prepared_matches(
+        SimpleNamespace(
+            direction="finish",
+            before=files(paused),
+            proposed=files(before),
+            affected_paths=(note, record_path),
+        ),
+        intent,
+        "6" * 40,
+        prepared,
+        SimpleNamespace(
+            saved=SimpleNamespace(plan=resolved.plan), historical_effects=resumed
+        ),
+        prepared,
+        undo,
+    )
+    assert (
+        "link_current_unsafe"
+        in reopen(paused | {note: after[note] + b"\nLater edited bytes.\n"}).blockers
+    )
+
+    def restore(snapshot, *, owned_record=True):
+        observed = assemble(before, after, snapshot, 4)
+        resource = next(
+            subject for subject in observed.subjects if subject.path == asset
+        )
+        asset_proof = OperationReversalTarget(
+            schema_id="brz2obsidian.operation-reversal-target",
+            schema_version=1,
+            operation_id=intent.operation_id,
+            operation_kind="undo",
+            direction="restore",
+            operation_generation=intent.generation,
+            history_fingerprint=vault_apply._operation_history_fingerprint(
+                "6" * 40, intent
+            ),
+            origin_change_id=next(
+                c.change_id for c in undo.proposal.changes if c.path == asset
+            ),
+            origin_decision_id=chosen.plan.approvals[0].decision_id,
+            owned_targets=(owned,),
+            outputs=(
+                OperationReversalOutput(
+                    path=asset,
+                    target_id=owned.target_id,
+                    produced_existence="absent",
+                    produced=None,
+                    current=resource.current,
+                    target_existence="present",
+                    target=ExactContent(data=binary),
+                ),
+            ),
+        )
+        observed = observed.model_copy(
+            update={
+                "subjects": tuple(
+                    subject.model_copy(update={"operation_reversal": asset_proof})
+                    if subject.path == asset
+                    else subject
+                    for subject in observed.subjects
+                )
+            }
+        )
+        evidence = vault_recovery._RestoreEvidence(
+            undo,
+            intent,
+            "6" * 40,
+            None,
+            retained,
+            {row.path: row for row in intent.before},
+            {row.path: row for row in intent.proposed},
+            prepared,
+            {},
+        )
+        facts = vault_recovery._restore_scoped_undo_resource_documents(
+            observed, evidence, _owner=None
+        )
+        if not owned_record:
+            facts = facts.model_copy(
+                update={
+                    "subjects": tuple(
+                        subject
+                        for subject in facts.subjects
+                        if subject.path != record_path
+                    )
+                }
+            )
+        return prepare_review(facts, preflight=preflight())
+
+    def reverse_asset(plan):
+        (offer,) = inspect_review_choices(plan)
+        ((reference_id, _, _),) = review_plan_attachment_references(
+            plan, offer.requirement_id
+        )
+        return resolve_review(
+            plan,
+            review_plan_choice_action(
+                plan,
+                requirement_id=offer.requirement_id,
+                choice="reverse",
+                assumptions_digest=requirement_digest(offer),
+                references=({"reference_id": reference_id, "choice": "use_incoming"},),
+            ),
+        )
+
+    restored = reverse_asset(restore(paused))
+    assert restored.status == "accepted" and restored.plan.ready
+    restored_effect = select_review_effects(restored.plan)
+    assert restored_effect.status == "selected" and not restored_effect.remove_paths
+    assert {
+        row.path: row.content.data
+        for row in restored_effect.files
+        if row.content.data != paused.get(row.path)
+    } == {asset: binary}
+    assert (
+        reverse_asset(restore(paused, owned_record=False)).code == "attachment_invalid"
+    )
+    assert vault_apply._recovery_prepared_matches(
+        SimpleNamespace(
+            direction="restore",
+            before=files(paused),
+            proposed=files(after),
+            affected_paths=(asset,),
+        ),
+        intent,
+        "6" * 40,
+        applied,
+        SimpleNamespace(
+            saved=SimpleNamespace(plan=restored.plan),
+            historical_effects=restored_effect,
+        ),
+        applied,
+        undo,
+    )
+    assert (
+        "link_current_unsafe"
+        in restore(paused | {note: after[note] + b"\nLater edited bytes.\n"}).blockers
+    )
+    retained.origin_undo_target.receipt_commit = "9" * 40
+    assert "unsafe_assumption" in reopen(paused).blockers
+
+
 def test_undo_lease_uses_reviewed_collection_lineage_even_at_vault_root(monkeypatch):
     from pathlib import Path
     from types import SimpleNamespace

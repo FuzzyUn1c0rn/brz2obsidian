@@ -1119,7 +1119,7 @@ def _retained_scoped_categories(git, prepared, retained, context):
     if not candidates:
         return frozenset()
     if not prepared.source:
-        applied = _retained_source_before_deactivation(prepared, retained)
+        applied = _retained_undo_source_applied_result(prepared, retained)
         return (
             frozenset(candidates & _retained_category_record_identities(git, applied))
             if applied is not None
@@ -1142,7 +1142,7 @@ def _retained_scoped_categories(git, prepared, retained, context):
     return frozenset(candidates & confirmed)
 
 
-def _retained_source_before_deactivation(prepared, retained):
+def _retained_undo_source_applied_result(prepared, retained):
     undo_target = retained.origin_undo_target
     if (
         undo_target is None
@@ -1484,10 +1484,11 @@ def _imported_byte_reversal(subject):
     )
 
 
-def _finish_imported_undo_note(subject, evidence, change, decision, owned, *, _owner):
+def _rebind_imported_undo_note(
+    subject, evidence, change, decision, owned, retained_target, *, direction, _owner
+):
     path = subject.path
     selected = evidence.selected.get(path)
-    retained_target = subject.operation_reversal.owned_targets[0]
     previous = _owned_content(evidence.git, evidence.before.get(path), _owner=_owner)
     proposed = _owned_content(evidence.git, evidence.proposed.get(path), _owner=_owner)
     if (
@@ -1501,12 +1502,15 @@ def _finish_imported_undo_note(subject, evidence, change, decision, owned, *, _o
     ):
         raise OSError("Imported Undo note lacks exact selected recovery versions")
     intent = evidence.intent
+    produced, target = (
+        (previous, proposed) if direction == "finish" else (proposed, previous)
+    )
     proof = OperationReversalTarget(
         schema_id="brz2obsidian.operation-reversal-target",
         schema_version=1,
         operation_id=intent.operation_id,
         operation_kind=intent.kind,
-        direction="finish",
+        direction=direction,
         operation_generation=intent.generation,
         history_fingerprint=_operation_history_fingerprint(
             evidence.origin_commit, intent
@@ -1519,20 +1523,18 @@ def _finish_imported_undo_note(subject, evidence, change, decision, owned, *, _o
                 path=path,
                 target_id=retained_target.target_id,
                 produced_existence="present",
-                produced=previous,
+                produced=produced,
                 current=subject.current,
                 target_existence="present",
-                target=proposed,
+                target=target,
             ),
         ),
     )
-    return subject.model_copy(
-        update={"operation_reversal": proof, "incoming": proposed}
-    )
+    return subject.model_copy(update={"operation_reversal": proof, "incoming": target})
 
 
 @dataclass(frozen=True)
-class _UndoFinishEvidence:
+class _UndoRecoveryEvidence:
     git: _Git
     intent: VaultOperationIntent
     origin_commit: str
@@ -1566,7 +1568,7 @@ def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, 
         if _owner is None
         else _owner._history_owned_outputs(original, queries)
     )
-    evidence = _UndoFinishEvidence(
+    evidence = _UndoRecoveryEvidence(
         git,
         intent,
         origin_commit,
@@ -1575,12 +1577,14 @@ def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, 
         {row.path: row for row in intent.proposed},
     )
     rebound = tuple(
-        _finish_imported_undo_note(
+        _rebind_imported_undo_note(
             subject,
             evidence,
             changes[subject.item_id, subject.facet],
             decision,
             targets,
+            subject.operation_reversal.owned_targets[0],
+            direction="finish",
             _owner=_owner,
         )
         for subject, (_, decision), targets in zip(
@@ -1597,15 +1601,119 @@ def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, 
     )
 
 
-def _finish_scoped_undo_removals(facts, original, intent, origin_commit, retained):
+def _finished_undo_resource_removals(subjects, removed):
+    return {
+        subject.attachment.current_target_id: subject.path
+        for subject in subjects
+        if subject.attachment is not None
+        and subject.operation_reversal is not None
+        and len(subject.operation_reversal.outputs) == 1
+        and subject.path in removed
+        and subject.current.existence == "absent"
+        and subject.operation_reversal.outputs[0].target_id
+        == subject.attachment.current_target_id
+        and subject.operation_reversal.outputs[0].path == subject.path
+    }
+
+
+def _pending_undo_resource_documents(facts, evidence, removals):
+    context = facts.link_context
+    if context is None:
+        return {}
+    candidates = {}
+    targets = {target.target_id: target for target in context.current_targets}
+    for document in context.current_documents:
+        path = document.source_path
+        previous = evidence.before.get(path)
+        target = targets.get(document.document_id)
+        if (
+            path not in evidence.selected
+            or path not in evidence.proposed
+            or previous is None
+            or target is None
+            or target.kind != "note"
+            or target.status != "safe"
+            or target.identity is None
+            or target.canonical_path != path
+            or document.status != "supported"
+            or document.inventory != "complete"
+            or previous.size != content_size(document.content)
+            or previous.sha256 != content_sha(document.content)
+        ):
+            continue
+        if any(
+            occurrence.meaning.status == "missing"
+            and occurrence.meaning.target_id in removals
+            and occurrence.meaning.path == removals[occurrence.meaning.target_id]
+            and not occurrence.meaning.candidates
+            for occurrence in document.occurrences
+        ):
+            candidates[path] = target
+    return candidates
+
+
+def _rebind_pending_undo_resource_documents(
+    facts, evidence, removals, original, *, direction, _owner
+):
+    candidates = _pending_undo_resource_documents(facts, evidence, removals)
+    subjects = tuple(
+        subject
+        for subject in facts.subjects
+        if subject.operation_reversal is None and subject.path in candidates
+    )
+    if not subjects:
+        return facts
+    changes = {(row.item_id, row.facet): row for row in original.proposal.changes}
+    approvals = {row.change_id: row.decision_id for row in original.approvals}
+    selected_changes = tuple(
+        changes[subject.item_id, subject.facet] for subject in subjects
+    )
+    queries = tuple(
+        (change.change_id, approvals.get(change.change_id))
+        for change in selected_changes
+    )
+    owned = (
+        review_owned_outputs(original, queries)
+        if _owner is None
+        else _owner._history_owned_outputs(original, queries)
+    )
+    rebound = {
+        subject.path: _rebind_imported_undo_note(
+            subject,
+            evidence,
+            change,
+            decision,
+            targets,
+            candidates[subject.path],
+            direction=direction,
+            _owner=_owner,
+        )
+        for subject, change, (_, decision), targets in zip(
+            subjects, selected_changes, queries, owned.target_groups, strict=True
+        )
+    }
+    return facts.model_copy(
+        update={
+            "subjects": tuple(
+                rebound.get(subject.path, subject) for subject in facts.subjects
+            )
+        }
+    )
+
+
+def _finish_scoped_undo_removals(
+    facts, original, intent, origin_commit, git, retained, *, _owner
+):
     prepared, loaded = retained.owned[intent.prepared_commit]
     if (
         prepared.collection_record_path is None
-        or prepared.source
-        or _retained_source_before_deactivation(prepared, retained) is None
+        or _retained_undo_source_applied_result(prepared, retained) is None
     ):
         return facts
     removed = set(loaded.historical_effects.remove_paths)
+    resources = _finished_undo_resource_removals(facts.subjects, removed)
+    if prepared.source and not resources:
+        return facts
     before = {row.path: row for row in intent.before}
     proposed = {row.path for row in intent.proposed}
     affected = set(intent.affected_paths)
@@ -1661,8 +1769,55 @@ def _finish_scoped_undo_removals(facts, original, intent, origin_commit, retaine
             }
         )
 
-    return facts.model_copy(
+    facts = facts.model_copy(
         update={"subjects": tuple(rebind(subject) for subject in facts.subjects)}
+    )
+    if not prepared.source:
+        return facts
+    evidence = _UndoRecoveryEvidence(
+        git,
+        intent,
+        origin_commit,
+        {row.path: row for row in loaded.historical_effects.files},
+        before,
+        {row.path: row for row in intent.proposed},
+    )
+    return _rebind_pending_undo_resource_documents(
+        facts, evidence, resources, original, direction="finish", _owner=_owner
+    )
+
+
+def _restore_scoped_undo_resource_documents(facts, evidence, *, _owner):
+    intent = evidence.intent
+    prepared = evidence.source_prepared
+    if (
+        intent.kind != "undo"
+        or intent.undo_of_receipt_commit is None
+        or prepared.collection_record_path is None
+        or not prepared.source
+        or _retained_undo_source_applied_result(prepared, evidence.retained) is None
+    ):
+        return facts
+    origin = evidence.retained.owned[intent.prepared_commit][1]
+    selected = origin.historical_effects
+    resources = _finished_undo_resource_removals(facts.subjects, selected.remove_paths)
+    if not resources:
+        return facts
+    versions = _UndoRecoveryEvidence(
+        evidence.git,
+        intent,
+        evidence.origin_commit,
+        {row.path: row for row in selected.files},
+        evidence.before,
+        evidence.produced,
+    )
+    return _rebind_pending_undo_resource_documents(
+        facts,
+        versions,
+        resources,
+        evidence.original,
+        direction="restore",
+        _owner=_owner,
     )
 
 
@@ -1682,7 +1837,7 @@ def _finish_review(root, observed, *, previous=None, authority=None, _owner=None
     )
     if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
         facts = _finish_scoped_undo_removals(
-            facts, original, intent, origin_commit, retained
+            facts, original, intent, origin_commit, git, retained, _owner=_owner
         )
     document_keys = {
         (subject.item_id, subject.facet)
@@ -2837,6 +2992,9 @@ def _restore_review(
             "rename_decisions": (),
             "preservation_decisions": (),
         }
+    )
+    reverse_facts = _restore_scoped_undo_resource_documents(
+        reverse_facts, evidence, _owner=_owner
     )
     preflight = _document_preflight(
         root, retained, original, intent, reverse_facts, _owner=_owner
