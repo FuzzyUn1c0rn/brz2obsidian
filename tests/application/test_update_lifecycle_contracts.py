@@ -209,7 +209,9 @@ def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
             status="valid",
             locator=locator,
             review=None,
-            manifest=SimpleNamespace(boundary="local", identity=identity, source=rows),
+            manifest=SimpleNamespace(
+                boundary="local", identity=identity, source=rows, discarded_review=None
+            ),
         ),
     )
     operations = Operations(workflow=workflow)
@@ -810,7 +812,12 @@ def recorded_history(identity=None, locator=None):
             findings=(),
         ),
         checkpoint=SimpleNamespace(
-            manifest=SimpleNamespace(identity=identity, source=(), boundary="local"),
+            manifest=SimpleNamespace(
+                identity=identity,
+                source=(),
+                boundary="local",
+                collection_baseline_commit=None,
+            ),
             review=None,
             locator=locator or preparation().locator,
         ),

@@ -132,7 +132,12 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
             status="valid",
             locator=locator,
             manifest=SimpleNamespace(
-                identity=identity, source=rows, boundary="local", reviewed_source=None
+                identity=identity,
+                source=rows,
+                boundary="local",
+                reviewed_source=None,
+                discarded_review=None,
+                collection_baseline_commit=None,
             ),
             review=None,
         ),
@@ -191,6 +196,8 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
                 boundary="local",
                 reviewed_source=binding,
                 observed_source=enrolled.preparation.observed_source,
+                discarded_review=None,
+                collection_baseline_commit=None,
             ),
             review=loaded.loaded,
         )

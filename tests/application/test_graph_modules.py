@@ -637,6 +637,33 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     original.update(outputs)
     incoming.update(outputs)
     external = b'---\ntags: ["categories"]\n---\n# Existing Projects\n'
+    later_payload = {
+        row.relative_path: row.content for row in later.generated_files
+    } | {row.relative_path: asset_data[row.asset_id] for row in later.copies}
+    second_import = assemble_facts(
+        None,
+        later_payload,
+        original | {shared: external},
+        proposal_id="second-classified-brain",
+        generation=1,
+        record_path="Imports/Boreal/migration-record.json",
+    )
+    lookup = {
+        target.canonical_path: target
+        for target in second_import.link_context.current_targets
+        if target.kind == "category"
+    }
+    previous_category = lookup[location + "/Categories/Topics.md"]
+    assert previous_category.identity is not None
+    assert previous_category.identity.collection_id == facts.identity.source_id
+    assert previous_category.identity.item_id == "topics"
+    assert lookup[shared].category_anchor == "observed_path"
+    assert lookup[shared].identity is None
+    review_second = prepare_review(second_import, preflight=preflight())
+    assert select_review_effects(review_second).status == "selected", (
+        review_second.blockers
+    )
+
     facts = assemble_facts(
         original,
         incoming,

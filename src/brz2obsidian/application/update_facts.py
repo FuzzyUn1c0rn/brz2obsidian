@@ -235,7 +235,13 @@ def _manual_category_targets(inventory, recorded):
             continue
         properties = native_properties(item.current.content)
         if properties is not None and category(properties, path, scoped=True):
-            yield _shared_membership_target(None, path, ())
+            identity = item.identity if item.identity_state == "valid" else None
+            claim = (
+                (identity.module_id, identity.collection_id, identity.item_id)
+                if identity is not None
+                else None
+            )
+            yield _shared_membership_target(claim, path, inventory)
 
 
 def _tag_membership_targets(tokens, identity, scoped_mappings, inventory):
