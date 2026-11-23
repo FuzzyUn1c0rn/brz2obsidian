@@ -113,6 +113,7 @@ def test_operations_preview_renders_real_scope_from_a_verified_source_session(
     from types import SimpleNamespace
 
     from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.vault_contracts import VaultFile
     from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
     from brz2obsidian.obsidian import ObsidianRenderer
     from brz2obsidian.publication import FilesystemPublisher
@@ -127,11 +128,14 @@ def test_operations_preview_renders_real_scope_from_a_verified_source_session(
     manual.write_bytes(authored)
     info, digest, _, identity = observe_file(vault, manual, prefix_limit=0)
     inventory = (
-        SimpleNamespace(
+        VaultFile(
             path="Authored.md",
             size=info.st_size,
             sha256=digest,
             identity=identity,
+            mode="100644",
+            tracked=False,
+            excluded=False,
             exclusion=None,
         ),
     )
