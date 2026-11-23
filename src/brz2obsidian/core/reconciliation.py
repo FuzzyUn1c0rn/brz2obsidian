@@ -23,7 +23,7 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core.identity import bind_identity
 
-from .attachments import attachment_review
+from .attachments import attachment_review, operation_attachment_review_required
 from .formats import (
     _new_source_output,
     configuration_memory_allowed,
@@ -283,7 +283,13 @@ def _comparison_safety(
 
 
 def _reconcile_subject(
-    facts, subject, applicability, *, reversal_fingerprint=None, _links=None
+    facts,
+    subject,
+    applicability,
+    *,
+    reversal_fingerprint=None,
+    attachment_reversal_fingerprint=None,
+    _links=None,
 ):
     changes, findings, local_changes, memory = [], [], [], []
     subject_id = reconciliation_subject_id(
@@ -319,7 +325,11 @@ def _reconcile_subject(
 
     policy = preservation_policy(facts, subject, subject_id, policy_allowed)
     binary_review, binary_assumptions = attachment_review(
-        facts, subject, subject_id, _links=_links
+        facts,
+        subject,
+        subject_id,
+        reversal_fingerprint=attachment_reversal_fingerprint,
+        _links=_links,
     )
     safety = tuple(
         sorted(
@@ -558,13 +568,25 @@ class ReconcileWork:
     local_changes: tuple = ()
     memory: tuple = ()
     pending: object = None
+    reversal_fingerprint: str | None = None
     _links: object = field(default=None, compare=False, repr=False)
 
 
+def _request_reversal_fingerprint(work, subject, dialect, purpose, context):
+    request = fingerprint_request(
+        subject.operation_reversal,
+        dialect=dialect,
+        scope=("reconciliation", work.facts.proposal_id, work.index, purpose),
+        epoch=0 if context is None else context.epoch,
+        context=context,
+    )
+    return PendingFingerprint(request, replace(work, pending=request))
+
+
 def advance_reconciliation(work, returned=None, *, context=None):
-    reversal_fingerprint = None
+    fingerprint = None
     if work.pending is not None:
-        reversal_fingerprint = consume_fingerprint(work.pending, returned)
+        fingerprint = consume_fingerprint(work.pending, returned)
     elif returned is not None:
         raise ValueError("Unexpected reconciliation child result")
     if work.index == -1:
@@ -590,20 +612,29 @@ def advance_reconciliation(work, returned=None, *, context=None):
             )
         )
     subject = work.facts.subjects[work.index]
-    if subject.operation_reversal is not None and work.pending is None:
-        request = fingerprint_request(
-            subject.operation_reversal,
-            dialect="Jc",
-            scope=("reconciliation", work.facts.proposal_id, work.index, "reversal"),
-            epoch=0 if context is None else context.epoch,
-            context=context,
-        )
-        return PendingFingerprint(request, replace(work, pending=request))
+    if subject.operation_reversal is not None:
+        if work.pending is None:
+            return _request_reversal_fingerprint(
+                work, subject, "Jc", "reversal", context
+            )
+        if work.reversal_fingerprint is None and operation_attachment_review_required(
+            subject
+        ):
+            return _request_reversal_fingerprint(
+                replace(work, reversal_fingerprint=fingerprint),
+                subject,
+                "Js",
+                "attachment-reversal",
+                context,
+            )
     change, problems, local, remembered = _reconcile_subject(
         work.facts,
         subject,
         work.applicability,
-        reversal_fingerprint=reversal_fingerprint,
+        reversal_fingerprint=work.reversal_fingerprint or fingerprint,
+        attachment_reversal_fingerprint=fingerprint
+        if work.reversal_fingerprint
+        else None,
         _links=work._links,
     )
     return replace(
@@ -614,6 +645,7 @@ def advance_reconciliation(work, returned=None, *, context=None):
         local_changes=work.local_changes + local,
         memory=work.memory + remembered,
         pending=None,
+        reversal_fingerprint=None,
     )
 
 

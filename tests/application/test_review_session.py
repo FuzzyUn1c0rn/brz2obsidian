@@ -19,6 +19,104 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/saved_reviews/memory-
 OWNER = "ba1c4d1118161042cdba372561029f4e57204cdca8aa4a8645dc8d2e382b39cd"
 
 
+def test_owned_attachment_reversal_retains_legacy_sorted_fingerprint(review_vault):
+    from hashlib import sha256
+
+    from brz2obsidian.application.review_session import ReviewBudget, ReviewSession
+    from brz2obsidian.contracts import (
+        ExactContent,
+        ImmutableContentReference,
+        OpaqueContent,
+    )
+    from brz2obsidian.core import prepare_review, resolve_review, save_review
+    from tests.reconciliation.test_resolution import action, preflight
+    from tests.reconciliation.test_reversal_outputs import (
+        present_extra_facts,
+        qualified_output_candidate,
+    )
+
+    originals, _, _ = present_extra_facts()
+    (subject,) = originals.subjects
+    proof = subject.operation_reversal
+    (asset,) = proof.outputs
+    payload = asset.target
+    reference = ImmutableContentReference(
+        content_id="exact:archived-resource",
+        sha256=payload.identity.sha256,
+        size=payload.identity.size,
+    )
+    asset = asset.model_copy(
+        update={"target": ExactContent(data=payload.data, reference=reference)}
+    )
+    proof = proof.model_copy(update={"outputs": (asset,)})
+    facts = originals.model_copy(
+        update={"subjects": (subject.model_copy(update={"operation_reversal": proof}),)}
+    )
+    legacy = proof.model_dump(mode="json")
+    assert legacy["outputs"][0]["target"]["reference"] == reference.model_dump()
+    sorted_digest = sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+    compact_digest = sha256(
+        json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    def assumption_digests(plan):
+        (change,) = plan.proposal.changes
+        return (
+            change.attachment_review.assumptions[0].fingerprint,
+            next(
+                a.fingerprint for a in change.assumptions if a.key.endswith(":reversal")
+            ),
+        )
+
+    inline = prepare_review(facts, preflight=preflight())
+    assert assumption_digests(inline) == (sorted_digest, compact_digest)
+    selection, candidate = qualified_output_candidate(facts)
+    reviewed = resolve_review(
+        inline,
+        action(
+            inline,
+            domain="reversal",
+            choice="reverse",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    assert reviewed.status == "accepted" and reviewed.plan.ready
+    saved = save_review(reviewed.plan)
+    assert saved.status == "saved"
+    vault, scratch = review_vault
+    limits = ReviewBudget(
+        metadata_limit=8 << 20,
+        node_limit=262144,
+        depth_limit=256,
+        decoded_limit=64 << 20,
+        raw_work_limit=128 << 20,
+        encoded_limit=128 << 20,
+        request_limit=4096,
+        step_limit=100000,
+        timeout=120,
+        cancel=Event(),
+    )
+    with (
+        Operations().inspect_update_inputs(vault) as observed,
+        ReviewSession(observed, scratch_parent=scratch, budget=limits) as session,
+    ):
+        loaded = session.load_review(saved.record.model_dump_json().encode())
+        assert loaded.status == "loaded", loaded.code
+        replayed = loaded.loaded.saved.plan
+        retained = replayed.producer_facts.subjects[0].operation_reversal.outputs[0]
+        assert type(retained.target) is OpaqueContent
+        assert retained.target.identity == payload.identity
+        assert retained.target.reference == reference
+        assert assumption_digests(replayed) == (sorted_digest, compact_digest)
+        assert (
+            replayed.proposal.changes[0].change_id
+            == inline.proposal.changes[0].change_id
+        )
+        assert replayed.actions[0].decision_id == reviewed.plan.actions[0].decision_id
+        assert replayed.ready
+
+
 @pytest.fixture(scope="module")
 def review_vault():
     # Root's whole-phase256MiB reservation is not renewed by this fixture.
