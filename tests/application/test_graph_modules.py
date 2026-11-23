@@ -554,13 +554,13 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     reference = location + "/References/Projects — source reference.md"
     overview = location + "/Categories.md"
 
-    def proposed(approved):
+    def proposed(approved, destination=choice):
         return render(
             plan(
                 analysis,
                 output_format=9,
                 import_location=location,
-                category_choices=(choice | {"compatible_view": approved},),
+                category_choices=(destination | {"compatible_view": approved},),
                 known_nonmember_paths=("Templates/Existing category.md",),
             ),
             meta,
@@ -615,3 +615,56 @@ def test_scoped_category_render_preserves_original_and_separately_approved_view(
     retired = select_review_effects(review)
     assert retired.status == "selected", (review.blockers, review.requirements)
     assert set(retired.remove_paths) == {separate_view, separate_view[:-3] + ".base"}
+
+    alternate = "Categories/Alternate.md"
+    manual = "Categories/Manual.md"
+    remapped = proposed(
+        True,
+        choice | {"destination_path": alternate, "destination_sha256": "b" * 64},
+    )
+    generated_paths = {
+        row.relative_path: row.content for row in remapped.generated_files
+    }
+    member = location + "/Notes/Alpha.md"
+    prose = b"\r\nExact authored text.\r\n"
+    edit = (
+        original[member].replace(
+            f'  - "[[{shared}]]"\n'.encode(),
+            f'  - "[[{shared}]]"\n  - "[[{manual}]]"\n'.encode(),
+        )
+        + prose
+    )
+    replacement = prepare_review(
+        assemble_facts(
+            original,
+            generated_paths | outputs,
+            original | {member: edit, manual: external, alternate: external},
+            proposal_id="remap-missing-shared-category",
+            generation=1,
+            record_path=location + "/migration-record.json",
+            classification_remap=True,
+        ),
+        preflight=preflight(),
+    )
+    selected = select_review_effects(replacement)
+    assert selected.status == "selected", (
+        replacement.blockers,
+        replacement.requirements,
+    )
+    result = next(row.content.data for row in selected.files if row.path == member)
+    assert f'appearance_category: "[[{alternate}]]"'.encode() in result
+    assert f'  - "[[{manual}]]"'.encode() in result
+    assert shared.encode() not in result
+    assert result.endswith(prose)
+    link_context = replacement.producer_facts.link_context
+    retired = next(
+        r for r in link_context.current_targets if r.canonical_path == shared
+    )
+    assert (
+        next(
+            r
+            for r in link_context.current_target_facts
+            if r.target_id == retired.target_id
+        ).existence
+        == "missing"
+    )

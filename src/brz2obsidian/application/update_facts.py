@@ -853,6 +853,7 @@ def assemble_facts(
                 new_record,
                 current_inventory,
                 scoped_collection=explicit_collection,
+                classification_remap=classification_remap,
                 _owner=_owner,
             )
         }
@@ -1313,6 +1314,47 @@ def _interpret_link_documents(facts, paths, current_lookup, incoming_lookup):
     return current_documents, incoming_documents
 
 
+def _add_absent_remap_destinations(
+    facts,
+    baseline_record,
+    incoming_memberships,
+    physical_inventory,
+    current,
+    incoming,
+    *,
+    classification_remap,
+):
+    if not classification_remap:
+        return
+    current_targets, current_states = current
+    incoming_targets, incoming_states = incoming
+    present_paths = tuple(physical_inventory) + tuple(
+        SimpleNamespace(path=entry.current.path)
+        for entry in facts.identity_inventory
+        if entry.current.existence != "absent"
+    )
+    registered = {row.target_id for row in (*current_targets, *incoming_targets)}
+    still_mapped = {row.target_id for row in incoming_memberships}
+    for previous in _membership_targets((baseline_record,), facts.identity_inventory):
+        if (
+            previous.canonical_path is None
+            or not previous.target_id.startswith("shared-category:")
+            or previous.status != "safe"
+            or previous.target_id in registered
+            or previous.target_id in still_mapped
+            or _physical_target(previous.canonical_path, None, present_paths).status
+            != "safe"
+        ):
+            continue
+        state = interpret_link_target(
+            None, target_id=previous.target_id, existence="missing", memberships=()
+        )
+        current_targets.append(previous)
+        incoming_targets.append(previous)
+        current_states.append(state)
+        incoming_states.append(state)
+
+
 def _link_context(
     facts,
     baseline_record,
@@ -1320,6 +1362,7 @@ def _link_context(
     physical_inventory,
     *,
     scoped_collection=False,
+    classification_remap=False,
     _owner=None,
 ):
     subjects = {
@@ -1501,6 +1544,15 @@ def _link_context(
         physical_inventory,
         (current_targets, current_states),
         (incoming_targets, incoming_states),
+    )
+    _add_absent_remap_destinations(
+        facts,
+        baseline_record,
+        incoming_memberships,
+        physical_inventory,
+        (current_targets, current_states),
+        (incoming_targets, incoming_states),
+        classification_remap=classification_remap,
     )
     current_documents, incoming_documents = _interpret_link_documents(
         facts,

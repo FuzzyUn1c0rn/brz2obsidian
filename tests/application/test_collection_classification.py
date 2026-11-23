@@ -163,7 +163,9 @@ def _rename_source_category(source, target, title):
 
 
 def test_native_category_import_update_and_reviewed_remap(tmp_path):
+    from brz2obsidian.application.update_lifecycle import text_choice_action
     from tests.application.test_collection_import_transaction import _user_git
+    from tests.reconciliation.test_resolution import action
     from tests.support.type_tag_sources import PNG
 
     vault = _vault(established=True)
@@ -237,13 +239,51 @@ def test_native_category_import_update_and_reviewed_remap(tmp_path):
     updated = Operations().prepare_collection_update_from_source(
         vault, renamed, staging=tmp_path / "update", record_path=record_path
     )
-    assert updated.ready, (updated.code, updated.findings)
-    applied = Operations().apply_update(updated.preparation)
+    preparation = updated.preparation
+    assert preparation is not None, (updated.code, updated.findings)
+    pending_paths = {
+        path.relative_to(vault).as_posix()
+        for path in (reference_file, overview, view_file.with_suffix(".md"))
+    }
+    while pending_paths:
+        review = preparation.review
+        assert not review.blockers
+        assert len(review.requirements) == len(pending_paths)
+        requirement = review.requirements[0]
+        change = next(
+            row
+            for row in review.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        assert change.path in pending_paths
+        assert requirement.domain == "text"
+        assert requirement.choices == ("current", "incoming", "edited")
+        pending_paths.remove(change.path)
+        choice = text_choice_action(
+            review,
+            action(
+                review,
+                change,
+                domain="text",
+                choice="incoming",
+                decision_id="confirm-moved-category:" + change.change_id,
+            ),
+        )
+        resolved = Operations().resolve_update(preparation, choice)
+        assert resolved.code == "accepted", resolved.code
+        preparation = resolved.preparation
+        assert preparation is not None
+    assert preparation.review.ready
+    expected_author = author.read_bytes()
+    applied = Operations().apply_update(preparation)
     assert applied.status == "applied", applied.code
     assert moved_path.read_bytes() == original
     assert moved_category.encode() in view_file.read_bytes()
     assert b"A revised (shared)" in overview.read_bytes()
-    assert reference_file.exists()
+    _assert_original_category_material(vault / location, reference_file, pdf)
+    assert author.read_bytes() == expected_author
+    assert (vault / "Categories.md").read_bytes() == root_overview
+    assert _user_git(vault) == staged_git
 
     manual = b"\r\nPersonal prose after Update.\r\n"
     imported_b.write_bytes(imported_b.read_bytes() + manual)
@@ -560,3 +600,168 @@ def test_paused_classified_update_finish_reobserves_selected_shared_target(
     placement.require_collection_finish_links(
         terminal, None, record_path, review, selected, origin=origin
     )
+
+
+def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absent():
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    import pytest
+
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.publication import collection_placement as placement
+
+    record_path = "Imports/Atlas/migration-record.json"
+    member_path = "Imports/Atlas/Notes/New member.md"
+    category_path = "Categories/Shared.md"
+    authored_category = b'---\ntags: ["categories"]\n---\n# Shared\n'
+    tag_document = "Existing tag.md"
+    authored_tag = b'---\ntags: ["shared/tag"]\n---\n# Authored tag\n'
+    live = {category_path: authored_category, tag_document: authored_tag}
+    before = {
+        "schema": "brz2obsidian.migration",
+        "source_identity": {"snapshot_digest": "old"},
+        "item_targets": [
+            {"item_key": "type-key", "original_identity": "projects"},
+            {"item_key": "tag-key", "original_identity": "source-tag"},
+        ],
+        "category_mappings": [
+            {
+                "source_identity": "projects",
+                "destination": {
+                    "source_identity": "projects",
+                    "destination_path": category_path,
+                    "destination_sha256": hashlib.sha256(authored_category).hexdigest(),
+                },
+            }
+        ],
+        "vault_tag_mappings": [],
+    }
+    incoming = before | {
+        "source_identity": {"snapshot_digest": "next"},
+        "item_targets": [
+            *before["item_targets"],
+            {
+                "item_key": "new-key",
+                "original_identity": "new-item",
+                "relative_path": member_path,
+                "created": True,
+            },
+        ],
+        "classification_assignments": [
+            {
+                "definition_key": "type-key",
+                "item_key": "new-key",
+                "item_target": member_path,
+                "definition_target": category_path,
+            }
+        ],
+        "tag_memberships": [
+            {
+                "tag_key": "tag-key",
+                "tag_original_identity": "source-tag",
+                "item_key": "new-key",
+                "item_target": member_path,
+                "native": True,
+                "token": "shared/tag",
+            }
+        ],
+        "vault_tag_mappings": [
+            {
+                "source_identity": "source-tag",
+                "vault_tag": "shared/tag",
+                "mode": "reuse",
+            }
+        ],
+    }
+    old = ExactContent(data=json.dumps(before).encode())
+    new = ExactContent(data=json.dumps(incoming).encode())
+    member = ExactContent(
+        data=b'---\ncategories: ["[[Categories/Shared.md]]"]\ntags: ["shared/tag"]\n---\n# New member\n'
+    )
+
+    def row(path, content):
+        return SimpleNamespace(
+            path=path, size=content.identity.size, sha256=content.identity.sha256
+        )
+
+    selected = {record_path: new, member_path: member}
+    origin = SimpleNamespace(
+        kind="apply",
+        affected_paths=tuple(selected),
+        before=(row(record_path, old),),
+        proposed=(row(record_path, new), row(member_path, member)),
+    )
+    member_subject = SimpleNamespace(
+        path=member_path,
+        item_id="new-item",
+        facet="content",
+        output_role="note",
+        baseline=SimpleNamespace(content=None),
+        current=SimpleNamespace(path=member_path, existence="absent"),
+        structure=None,
+        incoming=member,
+    )
+    review = SimpleNamespace(
+        facts=SimpleNamespace(format_operation=SimpleNamespace(kind="source_update")),
+        producer_facts=SimpleNamespace(
+            link_context=SimpleNamespace(
+                import_classification_approval=placement.classification_approval(
+                    incoming
+                ),
+                import_classification_remap=False,
+            ),
+            subjects=(
+                SimpleNamespace(
+                    path=record_path,
+                    baseline=SimpleNamespace(content=old),
+                    structure=None,
+                ),
+                member_subject,
+            ),
+        ),
+    )
+
+    def finish(record_bytes, effects=selected):
+        observed = SimpleNamespace(inventory=(row(record_path, record_bytes),))
+        placement.require_collection_finish_links(
+            observed,
+            None,
+            record_path,
+            review,
+            effects,
+            origin=origin,
+            produced=selected,
+        )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(placement, "existing_files", lambda _: dict(live))
+        patch.setattr(
+            placement,
+            "observe_classification_inventory",
+            lambda _, _checkpoint, *, existing=None: placement.vault_classifications(
+                existing or {}
+            ),
+        )
+        for record_bytes in (old, new):
+            finish(record_bytes)
+            live[category_path] = authored_category + b"Later offline edit.\n"
+            with pytest.raises(
+                placement.ImportRecoveryLinkChange,
+                match="recovery_import_classifications_changed",
+            ):
+                finish(record_bytes)
+            live[category_path] = authored_category
+            live.pop(tag_document)
+            with pytest.raises(
+                placement.ImportRecoveryLinkChange,
+                match="recovery_import_classifications_changed",
+            ):
+                finish(record_bytes)
+            live[tag_document] = authored_tag
+        live[category_path] = authored_category + b"Later offline edit.\n"
+        finish(
+            new,
+            selected | {member_path: ExactContent(data=b"# Authored alternative\n")},
+        )

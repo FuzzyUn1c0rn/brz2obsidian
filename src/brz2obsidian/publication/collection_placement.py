@@ -269,6 +269,17 @@ def classification_policy_changed(original, incoming):
     )
 
 
+def _new_default_tags(original, incoming, sources):
+    retained = set(remembered_tag_mappings(original))
+    return {
+        _name_key(token)
+        for source, token, mode in remembered_tag_mappings(incoming)
+        if mode == "new"
+        and (source, token, mode) not in retained
+        and (sources is None or ("tag", source) in sources)
+    }
+
+
 def classification_transition_refusal(
     admission,
     checkpoint,
@@ -299,17 +310,20 @@ def classification_transition_refusal(
             row for row in choices if ("category", row.source_identity) in sources
         )
         reused = tuple(row for row in reused if ("tag", row[0]) in sources)
-    if not choices and not reused:
+    new_defaults = _new_default_tags(original, incoming, sources)
+    if not choices and not reused and not new_defaults:
         return None
     refusal, tags = classification_target_status(
         admission, checkpoint, choices, existing=existing
     )
+    if refusal is not None:
+        return refusal
+    if new_defaults.intersection(_name_key(token) for token in tags):
+        return "import_tag_namespace_changed"
     known = set(recorded_classification_choices(original)[1])
-    if refusal is None and any(
-        row not in known and row[1] not in tags for row in reused
-    ):
+    if any(row not in known and row[1] not in tags for row in reused):
         return "import_tag_reuse_unavailable"
-    return refusal
+    return None
 
 
 def scoped_update_classification_refusal(
@@ -607,8 +621,63 @@ def _classifications_for_paths(facts, before, incoming, paths):
     return selected
 
 
+def _archived_member_sources(incoming, members):
+    items = {
+        row.get("item_key"): row["original_identity"]
+        for row in incoming["item_targets"]
+    }
+    owned = {
+        row["item_key"]: row["relative_path"]
+        for row in incoming["item_targets"]
+        if row.get("created") is True
+        and members.get(row["original_identity"]) == row.get("relative_path")
+    }
+    for row in incoming.get("classification_assignments", ()):
+        source = items.get(row["definition_key"])
+        if (
+            source is not None
+            and row["item_key"] in owned
+            and owned[row["item_key"]] == row["item_target"]
+        ):
+            yield "category", source
+    for row in incoming.get("tag_memberships", ()):
+        source = items.get(row["tag_key"])
+        if (
+            source is not None
+            and source == row["tag_original_identity"]
+            and row["native"]
+            and row["item_key"] in owned
+            and owned[row["item_key"]] == row["item_target"]
+        ):
+            yield "tag", source
+
+
+def _new_member_sources(facts, incoming, remaining, before_rows, proposed_rows):
+    members = {
+        subject.item_id: subject.path
+        for subject in facts.subjects
+        if subject.path in remaining
+        and subject.path not in before_rows
+        and subject.structure is None
+        and subject.output_role == "note"
+        and subject.facet == "content"
+        and subject.current.existence == "absent"
+        and _record_matches(subject.incoming, proposed_rows.get(subject.path))
+        and _record_matches(remaining[subject.path], proposed_rows.get(subject.path))
+    }
+    return _archived_member_sources(incoming, members) if members else ()
+
+
 def _require_classified_update_finish(
-    admission, checkpoint, record_path, original, origin, produced, pending, digests
+    admission,
+    checkpoint,
+    record_path,
+    original,
+    origin,
+    produced,
+    remaining,
+    removals,
+    digests,
 ):
     facts = original.producer_facts
     context = facts.link_context
@@ -616,6 +685,7 @@ def _require_classified_update_finish(
         return
     if record_path is None or not _safe_relative(record_path):
         raise ImportRecoveryLinkChange("recovery_import_classifications_unavailable")
+    pending = set(remaining) | set(removals).intersection(digests)
     paths = pending.intersection(origin.affected_paths)
     if not paths:
         return
@@ -635,6 +705,9 @@ def _require_classified_update_finish(
         record({record_path: data}, record_path) for data in (predecessor, successor)
     )
     sources = _classifications_for_paths(facts, before, incoming, paths)
+    sources.update(
+        _new_member_sources(facts, incoming, remaining, before_rows, proposed_rows)
+    )
     if record_path in paths:
         sources.update(_classifications_for_record(before, incoming))
     if not sources:
@@ -692,7 +765,8 @@ def require_collection_finish_links(
             original,
             origin,
             selected if produced is None else produced,
-            set(remaining) | set(removals).intersection(digests),
+            remaining,
+            removals,
             digests,
         )
         return

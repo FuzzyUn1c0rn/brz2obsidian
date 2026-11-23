@@ -169,6 +169,72 @@ def test_scoped_tag_mappings_keep_source_identity_when_labels_change():
     }
 
 
+def test_new_default_tag_stays_distinct_through_scoped_update_qualification():
+    from types import SimpleNamespace
+
+    from brz2obsidian.publication import collection_placement as placement
+
+    original_token = "Atlas/Original"
+    late_token = "atlas/new-topic"
+    existing = (original_token, "Atlas/Another-note")
+    facts = snapshot((tag("a", "Renamed"), tag("b", "New topic")))
+    analysis = analyze(facts, POLICY)
+    remembered = (("a", original_token, "new"),)
+
+    def planned(tags):
+        return plan(
+            analysis,
+            output_format=9,
+            import_location="Imports/Atlas",
+            existing_vault_tags=tags,
+            remembered_tags=remembered,
+        ).tag_targets
+
+    _, proposed = planned(existing)
+    _, allocated = planned(existing + (late_token,))
+    assert proposed.token == "Atlas/New-topic"
+    assert allocated.token.startswith("Atlas/New-topic-")
+    assert allocated.token.casefold() != late_token
+    original = {
+        "item_targets": [{"original_identity": "a"}],
+        "vault_tag_mappings": [
+            {"source_identity": "a", "vault_tag": original_token, "mode": "new"}
+        ],
+    }
+    incoming = {
+        "item_targets": [{"original_identity": "a"}, {"original_identity": "b"}],
+        "vault_tag_mappings": [
+            *original["vault_tag_mappings"],
+            {"source_identity": "b", "vault_tag": proposed.token, "mode": "new"},
+        ],
+    }
+    approval = placement.classification_approval(incoming)
+
+    def qualify(tokens, *, sources=None):
+        text = (
+            "---\ntags: ["
+            + ", ".join(f'"{token}"' for token in tokens)
+            + "]\n---\n# Authored\n"
+        ).encode()
+        inventory = SimpleNamespace(
+            inventory=(SimpleNamespace(path="Author.md", excluded=False),)
+        )
+        return placement.classification_transition_refusal(
+            inventory,
+            None,
+            original,
+            incoming,
+            approval,
+            remap=False,
+            sources=sources,
+            existing={"Author.md": text},
+        )
+
+    assert qualify(existing) is None
+    assert qualify(existing + (late_token,)) == "import_tag_namespace_changed"
+    assert qualify(existing + (late_token,), sources={("tag", "a")}) is None
+
+
 def test_reviewed_remap_preserves_second_source_reason_and_manual_membership():
     from brz2obsidian.application.update_facts import assemble_facts
     from brz2obsidian.core import prepare_review, select_review_effects

@@ -91,6 +91,88 @@ def test_first_import_distinguishes_unrelated_and_retained_source_identity():
         first_import({"Moved/Opening.md": retained})
 
 
+def test_already_published_import_asset_is_current_lookup_evidence():
+    from types import SimpleNamespace
+
+    from brz2obsidian.contracts import CurrentContent, ExactContent
+    from brz2obsidian.core import select_review_effects
+    from brz2obsidian.core.review_links import current_lookup_coverage
+    from brz2obsidian.publication.vault_recovery import _completed_import_outputs
+
+    _, record_path, incoming = _incoming_brain()
+    asset = "Imports/Brain B/Assets/Icon.png"
+    raw = b"\x89PNG\x00\xff\x80"
+    record = json.loads(incoming[record_path])
+    record["asset_targets"] = [{"asset_id": "icon", "relative_path": asset}]
+    incoming[record_path] = json.dumps(record).encode()
+    incoming[asset] = raw
+    original = assemble_facts(
+        None,
+        incoming,
+        {},
+        proposal_id="import-icon",
+        generation=1,
+        record_path=record_path,
+    )
+    review = prepare_review(original, preflight=preflight())
+    selected = select_review_effects(review)
+    assert selected.status == "selected"
+    selected_files = {row.path: row.content for row in selected.files}
+    value = selected_files[asset]
+    assert value.data == raw
+    no_asset = next(
+        row for row in original.identity_inventory if row.current.path == asset
+    )
+    producer = next(row for row in original.subjects if row.path == asset)
+    assert producer.attachment is None
+    context = original.link_context
+    resource = next(
+        row for row in context.current_targets if row.canonical_path == asset
+    )
+    journal = {
+        asset: SimpleNamespace(size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+    }
+
+    def observed(data, *, item="icon", proof=None):
+        current = CurrentContent(
+            existence="present", path=asset, content=ExactContent(data=data)
+        )
+        entry = no_asset.model_copy(
+            update={
+                "identity": no_asset.identity.model_copy(update={"item_id": item}),
+                "current": current,
+            }
+        )
+        completed = _completed_import_outputs(
+            original, {asset: current}, selected_files, journal, direction="finish"
+        )
+        updated = context.model_copy(
+            update={
+                "current_target_facts": tuple(
+                    row.model_copy(
+                        update={"existence": "present", "content": current.content}
+                    )
+                    if row.target_id == resource.target_id
+                    else row
+                    for row in context.current_target_facts
+                ),
+                "import_finished_outputs": completed if proof is None else proof,
+            }
+        )
+        return original.model_copy(
+            update={
+                "identity_inventory": (entry,),
+                "subjects": (producer.model_copy(update={"current": current}),),
+                "link_context": updated,
+            }
+        )
+
+    assert current_lookup_coverage(observed(raw))
+    assert not current_lookup_coverage(observed(raw + b"edited"))
+    assert not current_lookup_coverage(observed(raw, item="other"))
+    assert not current_lookup_coverage(observed(raw, proof=((asset, "0" * 64),)))
+
+
 def test_first_import_review_inspection_and_refresh_reobserve_current_inputs():
     vault, source = fixture_case()
     git(vault, "init", "-q")

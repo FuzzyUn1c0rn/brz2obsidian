@@ -11,6 +11,7 @@ from brz2obsidian.contracts import (
     ProposalAssumption,
 )
 
+from .formats import retained_import_output
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import (
     _query_matches_target,
@@ -808,15 +809,42 @@ def current_lookup_coverage(facts):
     return True
 
 
+def _completed_import_resource(facts, subject, target):
+    if (
+        subject.facet != "asset"
+        or subject.baseline.content is not None
+        or not retained_import_output(facts, subject)
+    ):
+        return False
+    context = facts.link_context
+    incoming = tuple(
+        row for row in context.incoming_targets if row.canonical_path == subject.path
+    )
+    states = tuple(
+        row
+        for row in context.incoming_target_facts
+        if row.target_id == target.target_id
+    )
+    return (
+        incoming == (target,)
+        and len(states) == 1
+        and states[0].existence == "present"
+        and canonical_equal(states[0].content, subject.incoming)
+    )
+
+
 def bound_resource_record(facts, entry, target, state):
     from .reversals import reversal_resource_record
 
     if reversal_resource_record(facts, entry, target, state):
         return True
     associated = any(
-        sub.attachment is not None
-        and sub.attachment.current_target_id == target.target_id
-        and entry.identity_state == "valid"
+        entry.identity_state == "valid"
+        and (
+            sub.attachment is not None
+            and sub.attachment.current_target_id == target.target_id
+            or _completed_import_resource(facts, sub, target)
+        )
         and sub.facet == entry.facet
         and entry.identity is not None
         and sub.item_id == entry.identity.item_id
