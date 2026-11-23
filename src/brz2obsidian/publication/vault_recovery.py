@@ -1118,6 +1118,13 @@ def _retained_scoped_categories(git, prepared, retained, context):
     }
     if not candidates:
         return frozenset()
+    if not prepared.source:
+        applied = _retained_source_before_deactivation(prepared, retained)
+        return (
+            frozenset(candidates & _retained_category_record_identities(git, applied))
+            if applied is not None
+            else frozenset()
+        )
     confirmed = _retained_category_record_identities(git, prepared)
     previous = retained.owned.get(prepared.previous)
     saved = previous[0] if previous is not None else None
@@ -1133,6 +1140,28 @@ def _retained_scoped_categories(git, prepared, retained, context):
     ):
         confirmed.update(_retained_category_record_identities(git, saved))
     return frozenset(candidates & confirmed)
+
+
+def _retained_source_before_deactivation(prepared, retained):
+    undo_target = retained.origin_undo_target
+    if (
+        undo_target is None
+        or undo_target.receipt_commit != prepared.undo_of_receipt_commit
+    ):
+        return None
+    result = retained.owned.get(undo_target.graph.receipt.result_commit)
+    applied = result[0] if result is not None else None
+    if (
+        applied is None
+        or applied.boundary != "result"
+        or not applied.source
+        or applied.association_id != prepared.association_id
+        or applied.collection_record_path != prepared.collection_record_path
+        or (applied.identity.module_id, applied.identity.collection_id)
+        != (prepared.identity.module_id, prepared.identity.collection_id)
+    ):
+        return None
+    return applied
 
 
 def _retained_category_record_identities(git, manifest):
@@ -1568,6 +1597,75 @@ def _finish_imported_undo_notes(facts, original, intent, origin_commit, git, *, 
     )
 
 
+def _finish_scoped_undo_removals(facts, original, intent, origin_commit, retained):
+    prepared, loaded = retained.owned[intent.prepared_commit]
+    if (
+        prepared.collection_record_path is None
+        or prepared.source
+        or _retained_source_before_deactivation(prepared, retained) is None
+    ):
+        return facts
+    removed = set(loaded.historical_effects.remove_paths)
+    before = {row.path: row for row in intent.before}
+    proposed = {row.path for row in intent.proposed}
+    affected = set(intent.affected_paths)
+    fingerprint = _operation_history_fingerprint(origin_commit, intent)
+    changes = {(row.item_id, row.facet): row for row in original.proposal.changes}
+    approvals = {row.change_id: row.decision_id for row in original.approvals}
+
+    def rebind(subject):
+        proof = subject.operation_reversal
+        if proof is None or subject.path not in removed or len(proof.outputs) != 1:
+            return subject
+        row = proof.outputs[0]
+        old = row.current.content
+        journal = before.get(row.path)
+        if (
+            row.path != subject.path
+            or row.path != subject.current.path
+            or row.path not in affected
+            or row.path in proposed
+            or row.target_existence != "absent"
+            or old is None
+            or journal is None
+            or journal.size != content_size(old)
+            or journal.sha256 != content_sha(old)
+        ):
+            raise OSError("Scoped Undo removal lacks exact preimage")
+        change = changes[subject.item_id, subject.facet]
+        return subject.model_copy(
+            update={
+                "operation_reversal": OperationReversalTarget(
+                    schema_id="brz2obsidian.operation-reversal-target",
+                    schema_version=1,
+                    operation_id=intent.operation_id,
+                    operation_kind="undo",
+                    direction="finish",
+                    operation_generation=intent.generation,
+                    history_fingerprint=fingerprint,
+                    origin_change_id=change.change_id,
+                    origin_decision_id=approvals.get(change.change_id),
+                    owned_targets=proof.owned_targets,
+                    outputs=(
+                        OperationReversalOutput(
+                            path=row.path,
+                            target_id=row.target_id,
+                            produced_existence="present",
+                            produced=old,
+                            current=subject.current,
+                            target_existence="absent",
+                            target=None,
+                        ),
+                    ),
+                )
+            }
+        )
+
+    return facts.model_copy(
+        update={"subjects": tuple(rebind(subject) for subject in facts.subjects)}
+    )
+
+
 def _finish_review(root, observed, *, previous=None, authority=None, _owner=None):
     original, intent, origin_commit, git, facts, preflight, current, retained, _ = (
         _review_observation(
@@ -1582,6 +1680,10 @@ def _finish_review(root, observed, *, previous=None, authority=None, _owner=None
     facts = _finish_imported_undo_notes(
         facts, original, intent, origin_commit, git, _owner=_owner
     )
+    if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
+        facts = _finish_scoped_undo_removals(
+            facts, original, intent, origin_commit, retained
+        )
     document_keys = {
         (subject.item_id, subject.facet)
         for subject in original.facts.subjects

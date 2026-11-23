@@ -52,6 +52,46 @@ def cleanup_removal_continuation(facts, subject):
     return fact
 
 
+def undo_removal_continuation(facts, subject):
+    proof = subject.operation_reversal
+    if (
+        subject.attachment is None
+        or proof is None
+        or proof.operation_kind != "undo"
+        or len(proof.outputs) != 1
+        or facts.inventory != "complete"
+        or subject.current.existence != "absent"
+    ):
+        return None, {}
+    row = proof.outputs[0]
+    if (
+        row.path != subject.path
+        or row.path != subject.current.path
+        or row.target_id != subject.attachment.current_target_id
+        or row.current.existence != "absent"
+        or (row.target if proof.direction == "finish" else row.produced) is not None
+        or not reversal_safe(facts, subject, row.path)
+    ):
+        return None, {}
+    documents = {}
+    for peer in facts.subjects:
+        evidence = peer.operation_reversal
+        if (
+            peer.attachment is not None
+            or evidence is None
+            or evidence.operation_kind != "undo"
+            or evidence.operation_id != proof.operation_id
+            or evidence.history_fingerprint != proof.history_fingerprint
+            or evidence.direction != proof.direction
+        ):
+            continue
+        for output in evidence.outputs:
+            before = output.produced if proof.direction == "finish" else output.target
+            if before is not None and same_content(before, output.current.content):
+                documents[output.target_id, output.path] = before
+    return row, documents
+
+
 def content_bytes(content):
     return content_key(content)
 

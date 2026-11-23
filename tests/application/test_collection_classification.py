@@ -1167,6 +1167,52 @@ def test_legacy_scoped_category_uses_exact_retained_record_for_recovery(monkeypa
     )
     assert proof == {identity}
     assert restore(proof).file_roles.category
+
+    receipt_commit, result_commit = "1" * 40, "2" * 40
+    undo = CheckpointManifest.model_validate(
+        {
+            **manifest.model_dump(),
+            "source": (),
+            "previous": result_commit,
+            "undo_of_receipt_commit": receipt_commit,
+            "reviewed_source": None,
+        }
+    )
+    applied = CheckpointManifest.model_validate(
+        {
+            **saved.model_dump(),
+            "boundary": "result",
+            "collection_baseline_commit": None,
+        }
+    )
+    records[id(applied)] = deepcopy(records[id(saved)])
+    undo_target = SimpleNamespace(
+        receipt_commit=receipt_commit,
+        graph=SimpleNamespace(receipt=SimpleNamespace(result_commit=result_commit)),
+    )
+    undo_graph = SimpleNamespace(
+        owned={result_commit: (applied, None)}, origin_undo_target=undo_target
+    )
+    proof = vault_recovery._retained_scoped_categories(git, undo, undo_graph, context)
+    assert proof == {identity}
+    assert restore(proof).file_roles.category
+    assert undo.source == ()
+
+    undo_target.receipt_commit = "3" * 40
+    assert not vault_recovery._retained_scoped_categories(
+        git, undo, undo_graph, context
+    )
+    undo_target.receipt_commit = receipt_commit
+    undo_graph.owned[result_commit] = (
+        CheckpointManifest.model_validate(
+            {**applied.model_dump(), "association_id": "f" * 64}
+        ),
+        None,
+    )
+    assert not vault_recovery._retained_scoped_categories(
+        git, undo, undo_graph, context
+    )
+
     foreign = CheckpointManifest.model_validate(
         {
             **saved.model_dump(),

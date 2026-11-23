@@ -23,6 +23,7 @@ from brz2obsidian.contracts import (
 from .identity import _paths_collide
 from .link_validation import _validate_link_document
 from .reference_targets import validate_targets
+from .reversals import undo_removal_continuation
 from .review_links import consumed_context, onboarding_current_context
 from .structures import validate_structure_facts
 
@@ -53,6 +54,11 @@ def _bound_attachment_selection(facts, selection, candidate, proposal, add):
     ):
         add("attachment_stale_selection")
         return None
+    subject = next(
+        s
+        for s in facts.subjects
+        if (s.item_id, s.facet) == (selection.item_id, selection.facet)
+    )
     if (
         any(
             f.blocking and f.subject_id in (None, change.subject_id)
@@ -63,17 +69,19 @@ def _bound_attachment_selection(facts, selection, candidate, proposal, add):
         and not (
             facts.format_operation.kind in ("onboarding", "format_transition")
             and selection.choice == "current"
+            or selection.choice == "incoming"
+            and facts.format_operation.kind == "source_update"
+            and change.format_review.old_identity
+            == change.format_review.target_identity
+            and subject.operation_reversal is not None
+            and subject.operation_reversal.direction == "restore"
+            and undo_removal_continuation(facts, subject)[0] is not None
         )
         or change.target_path != change.path
         or change.disposition in ("stale", "refused", "identity_resolution")
     ):
         add("attachment_unsafe_input")
         return None
-    subject = next(
-        s
-        for s in facts.subjects
-        if (s.item_id, s.facet) == (selection.item_id, selection.facet)
-    )
     if (
         subject.structure is not None
         and validate_structure_facts(

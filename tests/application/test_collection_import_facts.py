@@ -458,7 +458,7 @@ def test_finish_rebinds_already_published_imported_undo_to_active_intent(monkeyp
     retained = SimpleNamespace(
         owned={
             "prepared": (
-                None,
+                SimpleNamespace(collection_record_path=None),
                 SimpleNamespace(historical_effects=select_review_effects(undo)),
             )
         }

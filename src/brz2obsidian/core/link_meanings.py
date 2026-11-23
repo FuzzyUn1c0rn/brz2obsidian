@@ -540,6 +540,9 @@ def _check_affected_occurrences(doc, resolved, association, continuation):
 def _check_current_documents(
     facts, subject, context, association, continuation, _links
 ):
+    from .reversals import undo_removal_continuation
+
+    undo_removal, before = undo_removal_continuation(facts, subject)
     docs = context.current_documents
     if len({d.document_id for d in docs}) != len(docs):
         return "link_context_invalid"
@@ -570,7 +573,15 @@ def _check_current_documents(
         problem = _check_affected_document(doc, facts, context)
         if problem is None:
             problem = _check_affected_occurrences(
-                doc, resolved, association, continuation
+                doc,
+                resolved,
+                association,
+                undo_removal
+                if undo_removal is not None
+                and same_content(
+                    before.get((doc.document_id, doc.source_path)), doc.content
+                )
+                else continuation,
             )
         if problem is not None:
             return problem
