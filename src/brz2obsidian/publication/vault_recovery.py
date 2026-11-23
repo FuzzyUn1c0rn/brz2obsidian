@@ -1613,6 +1613,14 @@ def _restore_target_states(
         if _owner is None
         else _owner._session._assembly_link_state
     )
+    options = {"memberships": ()}
+    original_context = original.facts.link_context
+    if (
+        original_context is not None
+        and original_context.import_classification_approval is not None
+    ):
+        target_state = link_state
+        options = {"membership_targets": context.current_targets, "_owner": _owner}
     for target in context.current_targets:
         if target.kind == "tag":
             continue
@@ -1624,13 +1632,13 @@ def _restore_target_states(
                     content,
                     target_id=target.target_id,
                     existence="missing" if content is None else "present",
-                    memberships=(),
                     source_path=path,
                     output_format=7
                     if original.facts.baseline_identity.output_format == 6
                     else original.facts.baseline_identity.output_format,
                     qualify_roles=original.facts.incoming_identity.output_format
                     in QUALIFIED_OUTPUT_FORMATS,
+                    **options,
                 )
             )
         elif target.target_id in current_states:

@@ -830,3 +830,119 @@ def test_paused_new_member_uses_its_retained_assignments_when_structure_is_absen
             match="recovery_import_classifications_changed",
         ):
             finish(new, witness=missing_tag)
+
+
+def test_classified_restore_before_rebinds_peer_memberships_to_current_lookup(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.update_facts import link_state
+    from brz2obsidian.application.update_facts import target as path_target
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core.link_validation import validate_link_document
+    from brz2obsidian.core.review_appearance import provider_chain_blockers
+    from brz2obsidian.obsidian import interpret_links
+    from brz2obsidian.publication import vault_recovery
+    from tests.reconciliation.test_memberships import target
+
+    def category(identifier, path, *extra):
+        return target(identifier, "category", f"[[{path}]]", *extra).model_copy(
+            update={"canonical_path": path, "target": path_target(path)}
+        )
+
+    peer = category("E", "Imports/Atlas/Categories/E.md")
+    former = category("old", "Moved/Shared.md", "[[Shared]]")
+    manual = category("manual", "Categories/Manual.md")
+    competing = category("competing", "Elsewhere/Shared.md", "[[Shared]]")
+    category_tag = target("category-tag", "tag", "categories")
+    source_path = "Imports/Atlas/Categories/B.md"
+    source = ExactContent(
+        data=f"Restored reference to [[{peer.canonical_path}]].\n".encode()
+    )
+    operation = SimpleNamespace(
+        facts=SimpleNamespace(
+            baseline_identity=SimpleNamespace(output_format=9),
+            incoming_identity=SimpleNamespace(output_format=9),
+            link_context=SimpleNamespace(import_classification_approval="a" * 64),
+        )
+    )
+    owned = object()
+    journal = object()
+    prior = (
+        '---\ncategories:\n  - "{provider}"\n  - "[[Categories/Manual.md]]"\n'
+        'appearance_category: "{provider}"\ntags:\n  - "categories"\n---\nExact authored tail.\r\n'
+    )
+
+    def restore(provider, *lookups):
+        raw = ExactContent(data=prior.format(provider=provider).encode())
+
+        def retained_content(git, row, *, _owner):
+            assert git is owned and row is journal and _owner is None
+            return raw
+
+        monkeypatch.setattr(vault_recovery, "_owned_content", retained_content)
+        registry = (peer, manual, *lookups, category_tag)
+        stable = {
+            row.target_id: link_state(
+                ExactContent(
+                    data=(
+                        '---\ntags:\n  - "categories"\n'
+                        f'source_collection_id: "{row.identity.collection_id}"\n'
+                        f'source_item_id: "{row.identity.item_id}"\n'
+                        "---\n# Existing category\n"
+                    ).encode()
+                ),
+                target_id=row.target_id,
+                existence="present",
+                source_path=row.canonical_path,
+                output_format=9,
+                membership_targets=registry,
+            )
+            for row in (manual, *lookups)
+        }
+        states = tuple(
+            vault_recovery._restore_target_states(
+                operation,
+                SimpleNamespace(current_targets=registry),
+                stable,
+                {peer.canonical_path: journal},
+                {peer.canonical_path},
+                owned,
+                _owner=None,
+            )
+        )
+        document = interpret_links(
+            source,
+            document_id="restored:B",
+            source_path=source_path,
+            path_mode="vault",
+            targets=registry,
+            target_facts=states,
+            inventory="complete",
+            output_format=9,
+        )
+        checked = validate_link_document(
+            document,
+            expected_content=source,
+            expected_path=source_path,
+            targets=registry,
+            target_facts=states,
+            inventory="complete",
+        )
+        blockers = provider_chain_blockers((), states, selected_targets=registry)
+        return raw, states[0], checked, blockers
+
+    raw, retained, checked, blockers = restore("[[Moved/Shared.md]]", former)
+    assert retained.content == raw
+    assert retained.memberships == ("old", "manual", "category-tag")
+    assert retained.file_roles.category
+    assert checked.valid and not blockers
+    for provider, lookups in (
+        ("[[Moved/Shared.md]]", ()),
+        ("[[Shared]]", (former, competing)),
+    ):
+        _, unsupported, _, blockers = restore(provider, *lookups)
+        assert unsupported.structure.issues == ("membership_target_unknown",)
+        assert unsupported.memberships == ()
+        assert blockers == ("selected_provider_invalid",)
