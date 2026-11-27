@@ -815,7 +815,7 @@ from GitHub Actions must pass against an up-to-date branch before merging;
 this requirement also applies to administrators. Force pushes and deletion of
 `main` are disabled.
 
-Only the maintainer may approve changes to guardrail policy or enforcement.
+Only the repository owner may approve changes to guardrail policy or enforcement.
 Record that approval and its scope in the issue and reference it in the pull
 request. This uses the existing GitHub account and issue/PR review process;
 GitHub does not distinguish human and agent actions made through that same account.
