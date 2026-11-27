@@ -810,6 +810,16 @@ and build a wheel using the same environment:
 
 ### Repository rules
 
+Changes enter `main` through pull requests. The `Lint and architecture` check
+from GitHub Actions must pass against an up-to-date branch before merging;
+this requirement also applies to administrators. Force pushes and deletion of
+`main` are disabled.
+
+Only the maintainer may approve changes to guardrail policy or enforcement.
+Record that approval and its scope in the issue and reference it in the pull
+request. This uses the existing GitHub account and issue/PR review process;
+GitHub does not distinguish human and agent actions made through that same account.
+
 Run the focused lint, formatting, and architecture checks used by GitHub Actions
 from the checkout root.
 
