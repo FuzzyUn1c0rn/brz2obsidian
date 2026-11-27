@@ -55,6 +55,23 @@ needed. See `README.md` for bootstrap commands and dependency manifests.
 
 ## Automated checks
 
+Only the user may approve changes to guardrail policy or enforcement. Agents
+must never weaken safeguards. Changes affecting rule strength, scope, execution
+or verification require explicit user approval; general implementation
+authorization and passing checks are insufficient. Fix the implementation when
+a safeguard fails. If the rule itself appears wrong or obstructs the task,
+report the issue and obtain a scoped user decision rather than raising limits,
+adding exclusions, weakening assertions or bypassing checks. Record the user's
+approval and its scope in the issue and reference it in any guardrail-changing PR.
+
+Independent review must inspect the policy impact of changes to checker
+configuration and versions, nested configuration files, CI workflows, check
+manifests, runner and receipt validation, comment enforcement, selected test
+assertions and helpers, test selection and agent/testing guidance. Include
+staged, unstaged and unignored new files when reviewing work in progress. An
+edit to these files does not by itself establish a policy change; assess its
+effect and obtain user approval when guardrails change.
+
 Use measured coverage to guide every test addition, removal and change. Measure
 production line and branch coverage, test contexts and elapsed time. Investigate
 repeated-coverage hotspots and consolidate redundant cases, setup and repeated
