@@ -625,13 +625,78 @@ def test_inward_imports_respect_unrelated_bindings(inward_import_root, source):
     assert_inward_imports(inward_import_root)
 
 
+def test_production_modules_require_a_known_area(inward_import_root):
+    unclassified = inward_import_root / "new_area.py"
+    unclassified.touch()
+
+    with pytest.raises(pytest.fail.Exception, match=r"new_area\.py.*unknown area"):
+        assert_inward_imports(inward_import_root)
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "violation"),
+    [
+        (
+            "brz2obsidian_ui/window.py",
+            "from tests import helpers\n",
+            "development import tests",
+        ),
+        (
+            "brz2obsidian/sources/reader.py",
+            '__import__("tools.check")\n',
+            "development import tools.check",
+        ),
+        (
+            "brz2obsidian/cli.py",
+            "import tmp.fixture\n",
+            "development import tmp.fixture",
+        ),
+        (
+            "brz2obsidian/application/wiring.py",
+            "import pytest\n",
+            "development import pytest",
+        ),
+        (
+            "brz2obsidian/sources/reader.py",
+            'from importlib import import_module as load\nload("PySide6.QtCore")\n',
+            "backend GUI import PySide6.QtCore",
+        ),
+        (
+            "brz2obsidian/core/planner.py",
+            "__import__(name)\n",
+            "requires static imports",
+        ),
+        (
+            "brz2obsidian/contracts.py",
+            '__import__("datetime")\n',
+            "requires static imports",
+        ),
+        (
+            "brz2obsidian/__init__.py",
+            '__import__("builtins", fromlist=names)\n',
+            "requires static imports",
+        ),
+    ],
+)
+def test_production_import_policy(inward_import_root, path, source, violation):
+    file = inward_import_root.parent / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(source, encoding="utf-8")
+
+    with pytest.raises(pytest.fail.Exception) as failure:
+        assert_inward_imports(inward_import_root)
+
+    assert f"src/{path}:" in str(failure.value)
+    assert violation in str(failure.value)
+
+
 def assert_inward_imports(root):
     allowed = {
-        "contracts": {"brz2obsidian", "brz2obsidian.contracts"},
-        "diagnostics": {"brz2obsidian", "brz2obsidian.contracts"},
+        "contracts.py": {"brz2obsidian", "brz2obsidian.contracts"},
+        "diagnostics.py": {"brz2obsidian", "brz2obsidian.contracts"},
         # These inward helpers are checked themselves, including the closed
         # pure dispatcher; they cannot acquire an outer reader or producer.
-        "content_fingerprints": {
+        "content_fingerprints.py": {
             "brz2obsidian.contracts",
             "brz2obsidian.core.attachment_validation",
             "brz2obsidian.core.reconciliation",
@@ -640,12 +705,12 @@ def assert_inward_imports(root):
             "brz2obsidian.core.review_composition",
             "brz2obsidian.core.selected_effects",
         },
-        "content_values": {"brz2obsidian.contracts"},
-        "review_codec": {
+        "content_values.py": {"brz2obsidian.contracts"},
+        "review_codec.py": {
             "brz2obsidian.contracts",
             "brz2obsidian.content_fingerprints",
         },
-        "obsidian_dialect": {"brz2obsidian.contracts"},
+        "obsidian_dialect.py": {"brz2obsidian.contracts"},
         "core": {
             "brz2obsidian",
             "brz2obsidian.contracts",
@@ -1057,72 +1122,103 @@ def assert_inward_imports(root):
             "brz2obsidian.obsidian",
         },
     }
+    outer = {
+        "__init__.py",
+        "__main__.py",
+        "cli.py",
+        "cli_review.py",
+        "worker.py",
+        "application/wiring.py",
+    }
+    core_dependencies = {
+        "__init__.py",
+        "contracts.py",
+        "content_fingerprints.py",
+        "content_values.py",
+    }
+    source = root.parent
     violations = []
-    for area, permitted in allowed.items():
-        files = (
-            [root / (area + ".py")]
-            if area
-            in {
-                "contracts",
-                "diagnostics",
-                "content_fingerprints",
-                "content_values",
-                "review_codec",
-                "obsidian_dialect",
-            }
-            else sorted((root / area).rglob("*.py"))
+    for file in sorted(source.rglob("*.py")):
+        path = file.relative_to(source)
+        if path.parts[0] == "brz2obsidian_ui":
+            violations.extend(production_import_violations(file, path))
+            continue
+        relative = file.relative_to(root) if file.is_relative_to(root) else None
+        if relative is None:
+            violations.append(f"src/{path.as_posix()}: unknown area")
+            continue
+        location = relative.as_posix()
+        area = relative.parts[0]
+        static_only = area == "core" or location in core_dependencies
+        if location in outer or area == "sources":
+            permitted = None
+        elif area in allowed and (len(relative.parts) == 1) == area.endswith(".py"):
+            permitted = allowed[area] | application_additions.get(location, set())
+        else:
+            violations.append(f"src/{path.as_posix()}: unknown area")
+            continue
+        violations.extend(
+            production_import_violations(file, path, permitted, static_only=static_only)
         )
-        for file in files:
-            relative = file.relative_to(root)
-            if relative.as_posix() == "application/wiring.py":
-                continue
-            file_permitted = permitted | application_additions.get(
-                relative.as_posix(), set()
-            )
-            module = "brz2obsidian." + ".".join(relative.with_suffix("").parts)
-            package = (
-                module.removesuffix(".__init__")
-                if file.name == "__init__.py"
-                else module.rsplit(".", 1)[0]
-            )
-            tree = ast.parse(file.read_text(encoding="utf-8"))
-            dynamic = dict(literal_imports(tree, package))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    imports = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom):
-                    base = (
-                        importlib.util.resolve_name(
-                            "." * node.level + (node.module or ""), package
-                        )
-                        if node.level
-                        else node.module
-                    )
-                    # A bare relative import names specific children. Checking
-                    # its package container as a prefix would grant all siblings;
-                    # initializers remain independently checked above.
-                    imports = ([] if node.module is None else [base]) + [
-                        base + "." + alias.name for alias in node.names
-                    ]
-                elif node in dynamic:
-                    imports = dynamic[node]
-                else:
-                    continue
-                for imported in imports:
-                    if (
-                        imported.startswith("brz2obsidian")
-                        and imported not in {"brz2obsidian", "brz2obsidian.__version__"}
-                        and not any(
-                            imported == prefix or imported.startswith(prefix + ".")
-                            for prefix in file_permitted
-                            if prefix != "brz2obsidian"
-                        )
-                    ):
-                        violations.append(
-                            f"src/brz2obsidian/{relative.as_posix()}:{node.lineno}:{node.col_offset + 1}: "
-                            f"ADR 0001 forbids {imported} here. Use an inward contract or "
-                            "keep the dependency in an outer adapter or composition module."
-                        )
-                        break
     if violations:
         pytest.fail("\n".join(violations), pytrace=False)
+
+
+def production_import_violations(file, path, permitted=None, *, static_only=False):
+    parts = path.with_suffix("").parts
+    package = ".".join(parts[:-1])
+    tree = ast.parse(file.read_text(encoding="utf-8"))
+    dynamic = dict(literal_imports(tree, package))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = (
+                importlib.util.resolve_name(
+                    "." * node.level + (node.module or ""), package
+                )
+                if node.level
+                else node.module
+            )
+            # A bare relative import names specific children. Checking
+            # its package container as a prefix would grant all siblings;
+            # initializers remain independently checked above.
+            imports = ([] if node.module is None else [base]) + [
+                base + "." + alias.name for alias in node.names
+            ]
+        elif node in dynamic:
+            imports = dynamic[node]
+        else:
+            continue
+        location = f"src/{path.as_posix()}:{node.lineno}:{node.col_offset + 1}"
+        if static_only and node in dynamic:
+            yield f"{location}: the pure core requires static imports"
+        for target in imports:
+            root_module = target.partition(".")[0]
+            if root_module in {"tests", "tools", "tmp", "pytest"}:
+                yield f"{location}: production forbids development import {target}"
+                break
+            if path.parts[0] == "brz2obsidian" and root_module in {
+                "PySide6",
+                "brz2obsidian_ui",
+            }:
+                yield f"{location}: backend GUI import {target} is forbidden"
+                break
+            if permitted is not None and disallowed_inward_import(target, permitted):
+                yield (
+                    f"{location}: ADR 0001 forbids {target} here. Use an inward contract "
+                    "or keep the dependency in an outer adapter or composition module."
+                )
+                break
+
+
+def disallowed_inward_import(target, permitted):
+    if not target.startswith("brz2obsidian") or target in {
+        "brz2obsidian",
+        "brz2obsidian.__version__",
+    }:
+        return False
+    return not any(
+        target == prefix or target.startswith(prefix + ".")
+        for prefix in permitted - {"brz2obsidian"}
+    )
