@@ -827,6 +827,15 @@ from the checkout root.
 .\.venv\Scripts\python.exe tools/check.py rules
 ```
 
+The architecture check assigns all production Python files to known areas and
+keeps the existing inward import permissions. Production cannot import `tests`,
+`tools`, `tmp` or `pytest`. Backend GUI restrictions include dynamic imports
+whose target the checker can resolve. The core, its shared dependencies and the
+code that computes expected acceptance facts require static imports, including
+when importing inside a function. The checker recognizes direct and supported
+aliased calls to `importlib.import_module` and `__import__`. Dynamic dispatch
+through arbitrary Python objects is outside that analysis.
+
 The command compares the Python comment baseline to the local `origin/main` ref.
 Fetch the target branch for an up-to-date comparison. If the target has removed
 inherited entries from your checkout, merge or rebase onto it and rerun the check.
